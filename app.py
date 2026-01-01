@@ -7,7 +7,7 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 import requests
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 app = Flask(__name__)
 CORS(app)  # Enable CORS for all routes
@@ -68,8 +68,10 @@ def scan():
         }), 400
     
     # Calculate date range
-    from_date = datetime.now() - timedelta(days=days)
-    from_date_str = from_date.strftime('%Y-%m-%d')
+now = datetime.now(timezone.utc)
+from_date = now - timedelta(days=days)
+from_date_str = from_date.isoformat(timespec="seconds")
+to_date_str = now.isoformat(timespec="seconds")
     
     # Get target configuration
     target_config = TARGETS[target]
@@ -77,14 +79,15 @@ def scan():
     
     # Build NewsAPI request
     url = 'https://newsapi.org/v2/everything'
-    params = {
-        'q': query,
-        'from': from_date_str,
-        'sortBy': 'publishedAt',
-        'language': 'en',
-        'pageSize': 20,
-        'apiKey': NEWS_API_KEY
-    }
+params = {
+    'q': query,
+    'from': from_date_str,
+    'to': to_date_str,
+    'sortBy': 'publishedAt',
+    'language': 'en',
+    'pageSize': min(days * 10, 100),  # scale with window, cap at 100 (NewsAPI max)
+    'apiKey': NEWS_API_KEY
+}
     
     try:
         # Make request to NewsAPI
