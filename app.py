@@ -1,6 +1,6 @@
 """
-Asifah Analytics - Flask Backend v1.2
-Adds 30-minute caching and rate limit tracking
+Asifah Analytics - Flask Backend v1.4
+Enhanced with GDELT quadrilingual support (English, Hebrew, Arabic, Farsi)
 """
 
 from flask import Flask, request, jsonify
@@ -18,34 +18,41 @@ CORS(app)
 # ---------------------------------------------------------------------------
 NEWS_API_KEY = os.environ.get("NEWS_API_KEY") or "32de6811aacf4fc2ab651901a08b5235"
 
-# Cache storage (in-memory, resets when server restarts)
-# Structure: {cache_key: {"data": {...}, "timestamp": datetime, "expires": datetime}}
+# Cache storage
 CACHE = {}
 CACHE_DURATION_MINUTES = 30
 
 # Rate limit tracking
-# Structure: {"date": "2026-01-01", "count": 27}
 RATE_LIMIT = {"date": None, "count": 0}
 DAILY_LIMIT = 100  # NewsAPI free tier
 
-# Target configurations
+# Target configurations with multilingual keywords
 TARGETS = {
     "hezbollah": {
-        "keywords": ["Hezbollah", "Lebanon Israel", "Southern Lebanon", "Nasrallah"],
+        "keywords_en": ["Hezbollah", "Lebanon Israel", "Southern Lebanon", "Nasrallah"],
+        "keywords_ar": ["حزب الله", "لبنان إسرائيل", "جنوب لبنان", "نصر الله", "حسن نصرالله"],
+        "keywords_he": ["חיזבאללה", "לבנון ישראל", "דרום לבנון", "נסראללה"],
+        "keywords_fa": [],  # No Farsi sources for Hezbollah
         "escalation": [
             "strike", "attack", "military action", "retaliate", "offensive",
             "troops", "border", "rocket", "missile",
         ],
     },
     "iran": {
-        "keywords": ["Iran Israel", "Iranian", "Tehran", "nuclear", "IRGC"],
+        "keywords_en": ["Iran Israel", "Iranian", "Tehran", "nuclear", "IRGC"],
+        "keywords_ar": ["إيران إسرائيل", "إيراني", "طهران", "نووي", "الحرس الثوري"],
+        "keywords_he": ["איראן ישראל", "איראני", "טהרן", "גרעיני", "משמרות המהפכה"],
+        "keywords_fa": ["ایران اسرائیل", "ایرانی", "تهران", "هسته‌ای", "سپاه پاسداران"],
         "escalation": [
             "strike", "attack", "military action", "retaliate", "sanctions",
             "nuclear facility", "enrichment", "weapons",
         ],
     },
     "houthis": {
-        "keywords": ["Houthis", "Yemen", "Ansar Allah", "Red Sea"],
+        "keywords_en": ["Houthis", "Yemen", "Ansar Allah", "Red Sea"],
+        "keywords_ar": ["الحوثيون", "اليمن", "أنصار الله", "البحر الأحمر"],
+        "keywords_he": ["חות'ים", "תימן", "אנסאר אללה", "ים סוף"],
+        "keywords_fa": [],  # No Farsi sources for Houthis
         "escalation": [
             "strike", "attack", "military action", "shipping",
             "missile", "drone", "blockade",
@@ -56,10 +63,8 @@ TARGETS = {
 
 def get_cache_key(target, days):
     """Generate unique cache key for a scan request"""
-    # Use target + days + current hour to create cache key
-    # This means cache is shared across all users for the same target/timeframe
     now_utc = datetime.now(timezone.utc)
-    hour_key = now_utc.strftime("%Y-%m-%d-%H")  # Changes every hour
+    hour_key = now_utc.strftime("%Y-%m-%d-%H")
     return hashlib.md5(f"{target}:{days}:{hour_key}".encode()).hexdigest()
 
 
@@ -70,7 +75,6 @@ def get_from_cache(cache_key):
         if datetime.now(timezone.utc) < cached["expires"]:
             return cached["data"]
         else:
-            # Expired, remove it
             del CACHE[cache_key]
     return None
 
@@ -90,12 +94,10 @@ def increment_rate_limit():
     now_utc = datetime.now(timezone.utc)
     today = now_utc.strftime("%Y-%m-%d")
     
-    # Reset counter if it's a new day
     if RATE_LIMIT["date"] != today:
         RATE_LIMIT["date"] = today
         RATE_LIMIT["count"] = 0
     
-    # Increment
     RATE_LIMIT["count"] += 1
     return RATE_LIMIT["count"]
 
@@ -105,12 +107,10 @@ def get_rate_limit_info():
     now_utc = datetime.now(timezone.utc)
     today = now_utc.strftime("%Y-%m-%d")
     
-    # Reset if new day
     if RATE_LIMIT["date"] != today:
         RATE_LIMIT["date"] = today
         RATE_LIMIT["count"] = 0
     
-    # Calculate time until reset (midnight UTC)
     tomorrow = now_utc.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
     seconds_until_reset = int((tomorrow - now_utc).total_seconds())
     
@@ -123,6 +123,92 @@ def get_rate_limit_info():
     }
 
 
+def fetch_newsapi_english(target_config, from_date_str, to_date_str, page_size):
+    """Fetch English news from NewsAPI"""
+    query = " OR ".join(target_config["keywords_en"])
+    
+    url = "https://newsapi.org/v2/everything"
+    params = {
+        "q": query,
+        "from": from_date_str,
+        "to": to_date_str,
+        "sortBy": "publishedAt",
+        "language": "en",
+        "pageSize": page_size,
+        "apiKey": NEWS_API_KEY,
+    }
+    
+    try:
+        response = requests.get(url, params=params, timeout=10)
+        response.raise_for_status()
+        data = response.json()
+        
+        if data.get("status") == "ok":
+            return data.get("articles", [])
+        return []
+    except Exception as e:
+        print(f"NewsAPI error: {e}")
+        return []
+
+
+def fetch_gdelt_articles(keywords, language, days):
+    """Fetch articles from GDELT in specified language"""
+    # GDELT DOC API endpoint
+    url = "https://api.gdeltproject.org/api/v2/doc/doc"
+    
+    # Build query
+    query = " OR ".join(keywords)
+    
+    # Calculate timespan (last N days)
+    # GDELT uses format like "3d" for 3 days
+    timespan = f"{days}d"
+    
+    params = {
+        "query": query,
+        "mode": "artlist",
+        "maxrecords": 20,
+        "timespan": timespan,
+        "format": "json",
+        "sort": "datedesc"
+    }
+    
+    # Add source language filter if specified
+    if language == "ar":
+        params["sourcelang"] = "ara"  # Arabic
+    elif language == "he":
+        params["sourcelang"] = "heb"  # Hebrew
+    elif language == "fa":
+        params["sourcelang"] = "per"  # Persian/Farsi
+    
+    try:
+        response = requests.get(url, params=params, timeout=15)
+        response.raise_for_status()
+        data = response.json()
+        
+        # GDELT returns articles in 'articles' key
+        articles = data.get("articles", [])
+        
+        # Normalize GDELT format to match NewsAPI format
+        normalized = []
+        for article in articles:
+            normalized.append({
+                "title": article.get("title", ""),
+                "description": article.get("seendate", ""),  # GDELT doesn't have description
+                "url": article.get("url", ""),
+                "publishedAt": article.get("seendate", ""),
+                "source": {
+                    "name": article.get("domain", "Unknown")
+                },
+                "content": "",
+                "language": language
+            })
+        
+        return normalized
+    except Exception as e:
+        print(f"GDELT error for {language}: {e}")
+        return []
+
+
 @app.route("/")
 def home():
     """Health check endpoint"""
@@ -130,8 +216,8 @@ def home():
     return jsonify({
         "status": "online",
         "service": "Asifah Analytics Backend",
-        "version": "1.2",
-        "features": ["caching", "rate_limiting"],
+        "version": "1.4",
+        "features": ["caching", "rate_limiting", "quadrilingual_gdelt"],
         "has_api_key": bool(NEWS_API_KEY),
         "rate_limit": rate_info,
         "cache_info": {
@@ -156,14 +242,13 @@ def rate_limit_status():
 @app.route("/scan", methods=["GET"])
 def scan():
     """
-    Scan news sources for a specific target with caching
+    Scan news sources for a specific target with trilingual support
 
     Query parameters:
     - target: hezbollah, iran, or houthis
     - days: number of days to look back (1–30)
     """
 
-    # Check API key
     if not NEWS_API_KEY:
         return jsonify({
             "error": "Configuration error",
@@ -193,7 +278,6 @@ def scan():
     cached_data = get_from_cache(cache_key)
     
     if cached_data:
-        # Return cached data with metadata
         cached_data["cached"] = True
         cached_data["rate_limit"] = get_rate_limit_info()
         return jsonify(cached_data)
@@ -207,56 +291,52 @@ def scan():
             "rate_limit": rate_info
         }), 429
 
-    # Build NewsAPI request
+    # Build time range
     now = datetime.now(timezone.utc)
     from_date = now - timedelta(days=days)
     from_date_str = from_date.isoformat(timespec="seconds")
     to_date_str = now.isoformat(timespec="seconds")
 
     target_config = TARGETS[target]
-    query = " OR ".join(target_config["keywords"])
     page_size = min(days * 10, 100)
 
-    url = "https://newsapi.org/v2/everything"
-    params = {
-        "q": query,
-        "from": from_date_str,
-        "to": to_date_str,
-        "sortBy": "publishedAt",
-        "language": "en",
-        "pageSize": page_size,
-        "apiKey": NEWS_API_KEY,
-    }
-
     try:
-        # Make API call
-        response = requests.get(url, params=params, timeout=10)
-        response.raise_for_status()
-        data = response.json()
-
-        # Increment rate limit counter
+        # Fetch from NewsAPI (English) - counts against rate limit
+        articles_en = fetch_newsapi_english(target_config, from_date_str, to_date_str, page_size)
         requests_used = increment_rate_limit()
-
-        if data.get("status") != "ok":
-            return jsonify({
-                "error": "NewsAPI error",
-                "message": data.get("message", "Unknown error"),
-                "rate_limit": get_rate_limit_info()
-            }), 500
-
-        articles = data.get("articles", [])
-        total_results = data.get("totalResults", 0)
-
-        # Prepare response
+        
+        # Fetch from GDELT (Arabic) - FREE, no rate limit
+        articles_ar = fetch_gdelt_articles(target_config["keywords_ar"], "ar", days)
+        
+        # Fetch from GDELT (Hebrew) - FREE, no rate limit
+        articles_he = fetch_gdelt_articles(target_config["keywords_he"], "he", days)
+        
+        # Fetch from GDELT (Farsi) - FREE, no rate limit (only if keywords exist)
+        articles_fa = []
+        if target_config.get("keywords_fa") and len(target_config["keywords_fa"]) > 0:
+            articles_fa = fetch_gdelt_articles(target_config["keywords_fa"], "fa", days)
+        
+        # Combine all articles
+        all_articles = articles_en + articles_ar + articles_he + articles_fa
+        
+        # Prepare response with language-separated articles
         response_data = {
             "target": target,
             "days": days,
             "from": from_date_str,
             "to": to_date_str,
-            "articles": articles,
-            "totalResults": total_results,
+            "articles": all_articles,  # Combined for backward compatibility
+            "articles_en": articles_en,
+            "articles_ar": articles_ar,
+            "articles_he": articles_he,
+            "articles_fa": articles_fa,
+            "totalResults": len(all_articles),
+            "totalResults_en": len(articles_en),
+            "totalResults_ar": len(articles_ar),
+            "totalResults_he": len(articles_he),
+            "totalResults_fa": len(articles_fa),
             "escalation_keywords": target_config["escalation"],
-            "target_keywords": target_config["keywords"],
+            "target_keywords": target_config["keywords_en"],
             "cached": False,
             "rate_limit": get_rate_limit_info()
         }
