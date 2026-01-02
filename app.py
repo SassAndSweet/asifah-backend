@@ -31,35 +31,35 @@ DAILY_LIMIT = 100  # NewsAPI free tier
 TARGETS = {
     "hezbollah": {
         "keywords_en": ["Hezbollah", "Lebanon Israel", "Southern Lebanon", "Nasrallah"],
-        "keywords_ar": ["حزب الله", "إسرائيل لبنان", "جنوب لبنان", "نصرالله"],
-        "keywords_he": ["חיזבאללה", "לבנון", "נסראללה"],
-        "keywords_fa": [],
+        "keywords_ar": ["حزب الله", "لبنان", "إسرائيل", "نصرالله", "ضربة", "عملية عسكرية"],
+        "keywords_he": ["חיזבאללה", "לבנון", "נסראללה", "תקיפה"],
+        "keywords_fa": [],  # No Farsi coverage for Hezbollah
         "domains_ar": ["aawsat.com", "alhurra.com", "alarabiya.net", "aljazeera.net"],
         "escalation": [
             "strike", "attack", "military action", "retaliate", "offensive",
-            "troops", "border", "rocket", "missile",
+            "troops", "border", "rocket", "missile", "ضربة", "هجوم", "عملية",
         ],
     },
     "iran": {
-        "keywords_en": ["Iran Israel", "Iranian", "Tehran", "nuclear", "IRGC"],
-        "keywords_ar": ["إيران", "طهران", "نووي", "الحرس الثوري"],
-        "keywords_he": ["איראן", "טהרן", "גרעיני"],
-        "keywords_fa": ["ایران", "تهران", "هسته‌ای", "سپاه"],
+        "keywords_en": ["Iran Israel", "Iranian nuclear", "Tehran", "IRGC"],
+        "keywords_ar": ["إيران", "إسرائيل", "طهران", "نووي", "الحرس الثوري"],
+        "keywords_he": ["איראן", "ישראל", "טהרן", "גרעיני", "משמרות המהפכה"],
+        "keywords_fa": ["ایران", "اسرائیل", "تهران", "هسته‌ای", "سپاه پاسداران", "حمله"],
         "domains_ar": ["aawsat.com", "alhurra.com", "alarabiya.net"],
         "escalation": [
             "strike", "attack", "military action", "retaliate", "sanctions",
-            "nuclear facility", "enrichment", "weapons",
+            "nuclear facility", "enrichment", "weapons", "ضربة", "هجوم", "حمله",
         ],
     },
     "houthis": {
-        "keywords_en": ["Houthis", "Yemen", "Red Sea"],
-        "keywords_ar": ["الحوثي", "اليمن", "البحر الأحمر"],
-        "keywords_he": ["חות'ים", "תימן"],
-        "keywords_fa": [],
+        "keywords_en": ["Houthis", "Yemen", "Red Sea", "Ansar Allah"],
+        "keywords_ar": ["الحوثي", "اليمن", "البحر الأحمر", "أنصار الله", "صاروخ"],
+        "keywords_he": ["חות'ים", "תימן", "ים סוף", "טיל"],
+        "keywords_fa": [],  # No Farsi coverage for Houthis
         "domains_ar": ["aawsat.com", "alhurra.com", "alarabiya.net"],
         "escalation": [
             "strike", "attack", "military action", "shipping",
-            "missile", "drone", "blockade",
+            "missile", "drone", "blockade", "ضربة", "هجوم", "صاروخ",
         ],
     },
 }
@@ -169,14 +169,18 @@ def fetch_gdelt_articles(keywords, language, days, domains=None):
         "articles_found": 0
     }
     
+    if not keywords or len(keywords) == 0:
+        diagnostic_info["error"] = "No keywords provided"
+        return [], diagnostic_info
+    
     # Try multiple GDELT query strategies
     strategies = [
-        # Strategy 1: Simple keyword search with language filter
+        # Strategy 1: OR query with proper parentheses (GDELT requirement)
         {
-            "name": "keyword_with_lang",
+            "name": "or_query_parentheses",
             "url": "https://api.gdeltproject.org/api/v2/doc/doc",
             "params": {
-                "query": " OR ".join(keywords),
+                "query": f"({' OR '.join(keywords)})",  # FIXED: Wrapped in parentheses
                 "mode": "artlist",
                 "maxrecords": 20,
                 "timespan": f"{days}d",
@@ -184,42 +188,41 @@ def fetch_gdelt_articles(keywords, language, days, domains=None):
                 "sort": "datedesc"
             }
         },
-        # Strategy 2: Broader search with just one keyword
+        # Strategy 2: Single most important keyword
         {
             "name": "single_keyword",
             "url": "https://api.gdeltproject.org/api/v2/doc/doc",
             "params": {
-                "query": keywords[0] if keywords else "",
+                "query": keywords[0],
                 "mode": "artlist",
                 "maxrecords": 20,
                 "timespan": f"{days}d",
                 "format": "json",
                 "sort": "datedesc"
             }
-        }
-    ]
-    
-    # Try domain filtering if available
-    if domains and len(domains) > 0:
-        strategies.insert(0, {
-            "name": "domain_specific",
+        },
+        # Strategy 3: Try with domain filter if available
+        {
+            "name": "with_domains",
             "url": "https://api.gdeltproject.org/api/v2/doc/doc",
             "params": {
-                "query": " OR ".join(keywords),
+                "query": keywords[0],
                 "mode": "artlist",
                 "maxrecords": 20,
                 "timespan": f"{days}d",
                 "format": "json",
                 "sort": "datedesc",
-                "sourcecountry": "LB" if "aawsat" in str(domains) else None  # Try Lebanon country filter
+                "domain": domains[0] if domains else None
             }
-        })
+        }
+    ]
     
     # Add source language if specified
     lang_codes = {"ar": "ara", "he": "heb", "fa": "per"}
     if language in lang_codes:
         for strategy in strategies:
-            strategy["params"]["sourcelang"] = lang_codes[language]
+            if strategy["params"]:
+                strategy["params"]["sourcelang"] = lang_codes[language]
     
     # Try each strategy
     for i, strategy in enumerate(strategies):
