@@ -1,6 +1,6 @@
 """
-Asifah Analytics - Flask Backend v1.4
-Enhanced with GDELT quadrilingual support (English, Hebrew, Arabic, Farsi)
+Asifah Analytics - Flask Backend v1.5 DIAGNOSTIC
+Enhanced GDELT debugging to see what's failing
 """
 
 from flask import Flask, request, jsonify
@@ -9,6 +9,7 @@ import requests
 import os
 from datetime import datetime, timedelta, timezone
 import hashlib
+import traceback
 
 app = Flask(__name__)
 CORS(app)
@@ -30,9 +31,10 @@ DAILY_LIMIT = 100  # NewsAPI free tier
 TARGETS = {
     "hezbollah": {
         "keywords_en": ["Hezbollah", "Lebanon Israel", "Southern Lebanon", "Nasrallah"],
-        "keywords_ar": ["حزب الله", "لبنان إسرائيل", "جنوب لبنان", "نصر الله", "حسن نصرالله"],
-        "keywords_he": ["חיזבאללה", "לבנון ישראל", "דרום לבנון", "נסראללה"],
-        "keywords_fa": [],  # No Farsi sources for Hezbollah
+        "keywords_ar": ["حزب الله", "إسرائيل لبنان", "جنوب لبنان", "نصرالله"],
+        "keywords_he": ["חיזבאללה", "לבנון", "נסראללה"],
+        "keywords_fa": [],
+        "domains_ar": ["aawsat.com", "alhurra.com", "alarabiya.net", "aljazeera.net"],
         "escalation": [
             "strike", "attack", "military action", "retaliate", "offensive",
             "troops", "border", "rocket", "missile",
@@ -40,19 +42,21 @@ TARGETS = {
     },
     "iran": {
         "keywords_en": ["Iran Israel", "Iranian", "Tehran", "nuclear", "IRGC"],
-        "keywords_ar": ["إيران إسرائيل", "إيراني", "طهران", "نووي", "الحرس الثوري"],
-        "keywords_he": ["איראן ישראל", "איראני", "טהרן", "גרעיני", "משמרות המהפכה"],
-        "keywords_fa": ["ایران اسرائیل", "ایرانی", "تهران", "هسته‌ای", "سپاه پاسداران"],
+        "keywords_ar": ["إيران", "طهران", "نووي", "الحرس الثوري"],
+        "keywords_he": ["איראן", "טהרן", "גרעיני"],
+        "keywords_fa": ["ایران", "تهران", "هسته‌ای", "سپاه"],
+        "domains_ar": ["aawsat.com", "alhurra.com", "alarabiya.net"],
         "escalation": [
             "strike", "attack", "military action", "retaliate", "sanctions",
             "nuclear facility", "enrichment", "weapons",
         ],
     },
     "houthis": {
-        "keywords_en": ["Houthis", "Yemen", "Ansar Allah", "Red Sea"],
-        "keywords_ar": ["الحوثيون", "اليمن", "أنصار الله", "البحر الأحمر"],
-        "keywords_he": ["חות'ים", "תימן", "אנסאר אללה", "ים סוף"],
-        "keywords_fa": [],  # No Farsi sources for Houthis
+        "keywords_en": ["Houthis", "Yemen", "Red Sea"],
+        "keywords_ar": ["الحوثي", "اليمن", "البحر الأحمر"],
+        "keywords_he": ["חות'ים", "תימן"],
+        "keywords_fa": [],
+        "domains_ar": ["aawsat.com", "alhurra.com", "alarabiya.net"],
         "escalation": [
             "strike", "attack", "military action", "shipping",
             "missile", "drone", "blockade",
@@ -144,69 +148,140 @@ def fetch_newsapi_english(target_config, from_date_str, to_date_str, page_size):
         data = response.json()
         
         if data.get("status") == "ok":
-            return data.get("articles", [])
-        return []
+            return data.get("articles", []), None
+        return [], f"NewsAPI returned status: {data.get('status')}"
     except Exception as e:
-        print(f"NewsAPI error: {e}")
-        return []
+        return [], f"NewsAPI error: {str(e)}"
 
 
-def fetch_gdelt_articles(keywords, language, days):
-    """Fetch articles from GDELT in specified language"""
-    # GDELT DOC API endpoint
-    url = "https://api.gdeltproject.org/api/v2/doc/doc"
-    
-    # Build query
-    query = " OR ".join(keywords)
-    
-    # Calculate timespan (last N days)
-    # GDELT uses format like "3d" for 3 days
-    timespan = f"{days}d"
-    
-    params = {
-        "query": query,
-        "mode": "artlist",
-        "maxrecords": 20,
-        "timespan": timespan,
-        "format": "json",
-        "sort": "datedesc"
+def fetch_gdelt_articles(keywords, language, days, domains=None):
+    """
+    Fetch articles from GDELT in specified language
+    DIAGNOSTIC VERSION - returns (articles, error_info)
+    """
+    diagnostic_info = {
+        "attempted": True,
+        "url": None,
+        "params": None,
+        "response_status": None,
+        "response_text": None,
+        "error": None,
+        "articles_found": 0
     }
     
-    # Add source language filter if specified
-    if language == "ar":
-        params["sourcelang"] = "ara"  # Arabic
-    elif language == "he":
-        params["sourcelang"] = "heb"  # Hebrew
-    elif language == "fa":
-        params["sourcelang"] = "per"  # Persian/Farsi
+    # Try multiple GDELT query strategies
+    strategies = [
+        # Strategy 1: Simple keyword search with language filter
+        {
+            "name": "keyword_with_lang",
+            "url": "https://api.gdeltproject.org/api/v2/doc/doc",
+            "params": {
+                "query": " OR ".join(keywords),
+                "mode": "artlist",
+                "maxrecords": 20,
+                "timespan": f"{days}d",
+                "format": "json",
+                "sort": "datedesc"
+            }
+        },
+        # Strategy 2: Broader search with just one keyword
+        {
+            "name": "single_keyword",
+            "url": "https://api.gdeltproject.org/api/v2/doc/doc",
+            "params": {
+                "query": keywords[0] if keywords else "",
+                "mode": "artlist",
+                "maxrecords": 20,
+                "timespan": f"{days}d",
+                "format": "json",
+                "sort": "datedesc"
+            }
+        }
+    ]
     
-    try:
-        response = requests.get(url, params=params, timeout=15)
-        response.raise_for_status()
-        data = response.json()
-        
-        # GDELT returns articles in 'articles' key
-        articles = data.get("articles", [])
-        
-        # Normalize GDELT format to match NewsAPI format
-        normalized = []
-        for article in articles:
-            normalized.append({
-                "title": article.get("title", ""),
-                "description": article.get("seendate", ""),  # GDELT doesn't have description
-                "url": article.get("url", ""),
-                "publishedAt": article.get("seendate", ""),
-                "source": {
-                    "name": article.get("domain", "Unknown")
-                },
-                "content": "",
-                "language": language
-            })
-        
-        return normalized
-    except Exception as e:
-        print(f"GDELT error for {language}: {e}")
-        return []
+    # Try domain filtering if available
+    if domains and len(domains) > 0:
+        strategies.insert(0, {
+            "name": "domain_specific",
+            "url": "https://api.gdeltproject.org/api/v2/doc/doc",
+            "params": {
+                "query": " OR ".join(keywords),
+                "mode": "artlist",
+                "maxrecords": 20,
+                "timespan": f"{days}d",
+                "format": "json",
+                "sort": "datedesc",
+                "sourcecountry": "LB" if "aawsat" in str(domains) else None  # Try Lebanon country filter
+            }
+        })
+    
+    # Add source language if specified
+    lang_codes = {"ar": "ara", "he": "heb", "fa": "per"}
+    if language in lang_codes:
+        for strategy in strategies:
+            strategy["params"]["sourcelang"] = lang_codes[language]
+    
+    # Try each strategy
+    for i, strategy in enumerate(strategies):
+        try:
+            diagnostic_info["strategy"] = strategy["name"]
+            diagnostic_info["url"] = strategy["url"]
+            
+            # Clean None values from params
+            params = {k: v for k, v in strategy["params"].items() if v is not None}
+            diagnostic_info["params"] = params
+            
+            response = requests.get(strategy["url"], params=params, timeout=20)
+            diagnostic_info["response_status"] = response.status_code
+            
+            response.raise_for_status()
+            
+            # Try to parse JSON
+            try:
+                data = response.json()
+                diagnostic_info["response_structure"] = list(data.keys()) if isinstance(data, dict) else "not_dict"
+            except:
+                diagnostic_info["response_text"] = response.text[:500]  # First 500 chars
+                continue
+            
+            # GDELT can return articles in different keys
+            articles = []
+            if isinstance(data, dict):
+                articles = data.get("articles", data.get("timeline", []))
+            elif isinstance(data, list):
+                articles = data
+            
+            diagnostic_info["articles_found"] = len(articles)
+            
+            if len(articles) > 0:
+                # Normalize GDELT format
+                normalized = []
+                for article in articles[:20]:  # Limit to 20
+                    if isinstance(article, dict):
+                        normalized.append({
+                            "title": article.get("title", article.get("url", ""))[:200],
+                            "description": article.get("seendate", ""),
+                            "url": article.get("url", article.get("title", "")),
+                            "publishedAt": article.get("seendate", ""),
+                            "source": {"name": article.get("domain", article.get("source", "GDELT"))},
+                            "content": "",
+                            "language": language
+                        })
+                
+                diagnostic_info["success"] = True
+                return normalized, diagnostic_info
+                
+        except requests.Timeout:
+            diagnostic_info["error"] = f"Strategy {i+1} timeout after 20s"
+            continue
+        except Exception as e:
+            diagnostic_info["error"] = f"Strategy {i+1} error: {str(e)}"
+            diagnostic_info["traceback"] = traceback.format_exc()[:500]
+            continue
+    
+    # All strategies failed
+    diagnostic_info["success"] = False
+    return [], diagnostic_info
 
 
 @app.route("/")
@@ -215,9 +290,9 @@ def home():
     rate_info = get_rate_limit_info()
     return jsonify({
         "status": "online",
-        "service": "Asifah Analytics Backend",
-        "version": "1.4",
-        "features": ["caching", "rate_limiting", "quadrilingual_gdelt"],
+        "service": "Asifah Analytics Backend - DIAGNOSTIC v1.5",
+        "version": "1.5-diagnostic",
+        "features": ["caching", "rate_limiting", "quadrilingual_gdelt", "enhanced_diagnostics"],
         "has_api_key": bool(NEWS_API_KEY),
         "rate_limit": rate_info,
         "cache_info": {
@@ -243,6 +318,7 @@ def rate_limit_status():
 def scan():
     """
     Scan news sources for a specific target with trilingual support
+    DIAGNOSTIC VERSION - includes detailed error information
 
     Query parameters:
     - target: hezbollah, iran, or houthis
@@ -300,32 +376,65 @@ def scan():
     target_config = TARGETS[target]
     page_size = min(days * 10, 100)
 
+    # Initialize diagnostic tracking
+    diagnostics = {
+        "newsapi": {},
+        "gdelt_ar": {},
+        "gdelt_he": {},
+        "gdelt_fa": {}
+    }
+
     try:
-        # Fetch from NewsAPI (English) - counts against rate limit
-        articles_en = fetch_newsapi_english(target_config, from_date_str, to_date_str, page_size)
-        requests_used = increment_rate_limit()
+        # Fetch from NewsAPI (English)
+        articles_en, newsapi_error = fetch_newsapi_english(target_config, from_date_str, to_date_str, page_size)
+        diagnostics["newsapi"] = {
+            "success": len(articles_en) > 0,
+            "count": len(articles_en),
+            "error": newsapi_error
+        }
         
-        # Fetch from GDELT (Arabic) - FREE, no rate limit
-        articles_ar = fetch_gdelt_articles(target_config["keywords_ar"], "ar", days)
+        if len(articles_en) > 0:
+            increment_rate_limit()
         
-        # Fetch from GDELT (Hebrew) - FREE, no rate limit
-        articles_he = fetch_gdelt_articles(target_config["keywords_he"], "he", days)
+        # Fetch from GDELT (Arabic)
+        articles_ar, gdelt_ar_diag = fetch_gdelt_articles(
+            target_config["keywords_ar"], 
+            "ar", 
+            days,
+            target_config.get("domains_ar")
+        )
+        diagnostics["gdelt_ar"] = gdelt_ar_diag
         
-        # Fetch from GDELT (Farsi) - FREE, no rate limit (only if keywords exist)
+        # Fetch from GDELT (Hebrew)
+        articles_he, gdelt_he_diag = fetch_gdelt_articles(
+            target_config["keywords_he"], 
+            "he", 
+            days
+        )
+        diagnostics["gdelt_he"] = gdelt_he_diag
+        
+        # Fetch from GDELT (Farsi)
         articles_fa = []
         if target_config.get("keywords_fa") and len(target_config["keywords_fa"]) > 0:
-            articles_fa = fetch_gdelt_articles(target_config["keywords_fa"], "fa", days)
+            articles_fa, gdelt_fa_diag = fetch_gdelt_articles(
+                target_config["keywords_fa"], 
+                "fa", 
+                days
+            )
+            diagnostics["gdelt_fa"] = gdelt_fa_diag
+        else:
+            diagnostics["gdelt_fa"] = {"skipped": True, "reason": "No Farsi keywords configured"}
         
         # Combine all articles
         all_articles = articles_en + articles_ar + articles_he + articles_fa
         
-        # Prepare response with language-separated articles
+        # Prepare response with diagnostics
         response_data = {
             "target": target,
             "days": days,
             "from": from_date_str,
             "to": to_date_str,
-            "articles": all_articles,  # Combined for backward compatibility
+            "articles": all_articles,
             "articles_en": articles_en,
             "articles_ar": articles_ar,
             "articles_he": articles_he,
@@ -338,7 +447,8 @@ def scan():
             "escalation_keywords": target_config["escalation"],
             "target_keywords": target_config["keywords_en"],
             "cached": False,
-            "rate_limit": get_rate_limit_info()
+            "rate_limit": get_rate_limit_info(),
+            "diagnostics": diagnostics  # DIAGNOSTIC INFO
         }
 
         # Save to cache
@@ -346,17 +456,13 @@ def scan():
 
         return jsonify(response_data)
 
-    except requests.exceptions.RequestException as e:
-        return jsonify({
-            "error": "Request failed",
-            "message": str(e),
-            "rate_limit": get_rate_limit_info()
-        }), 500
     except Exception as e:
         return jsonify({
             "error": "Server error",
             "message": str(e),
-            "rate_limit": get_rate_limit_info()
+            "traceback": traceback.format_exc(),
+            "rate_limit": get_rate_limit_info(),
+            "diagnostics": diagnostics
         }), 500
 
 
