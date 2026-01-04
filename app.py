@@ -1,6 +1,6 @@
 """
-Asifah Analytics - Flask Backend v1.5 DIAGNOSTIC
-Enhanced GDELT debugging to see what's failing
+Asifah Analytics - Flask Backend v1.6 REDDIT INTEGRATION
+Added Reddit scraping for enhanced OSINT coverage
 """
 
 from flask import Flask, request, jsonify
@@ -10,6 +10,7 @@ import os
 from datetime import datetime, timedelta, timezone
 import hashlib
 import traceback
+import time
 
 app = Flask(__name__)
 CORS(app)
@@ -27,6 +28,14 @@ CACHE_DURATION_MINUTES = 30
 RATE_LIMIT = {"date": None, "count": 0}
 DAILY_LIMIT = 100  # NewsAPI free tier
 
+# Reddit configuration
+REDDIT_USER_AGENT = "AsifahAnalytics/1.6 (OSINT monitoring tool)"
+REDDIT_SUBREDDITS = {
+    "hezbollah": ["ForbiddenBromance", "Israel", "Lebanon", "geopolitics", "MiddleEastNews", "OSINT"],
+    "iran": ["Iran", "Israel", "geopolitics", "MiddleEastNews", "OSINT"],
+    "houthis": ["Yemen", "geopolitics", "MiddleEastNews", "OSINT"]
+}
+
 # Target configurations with multilingual keywords
 TARGETS = {
     "hezbollah": {
@@ -35,6 +44,7 @@ TARGETS = {
         "keywords_he": ["חיזבאללה", "לבנון", "נסראללה", "תקיפה"],
         "keywords_fa": [],  # No Farsi coverage for Hezbollah
         "domains_ar": ["aawsat.com", "alhurra.com", "alarabiya.net", "aljazeera.net"],
+        "reddit_keywords": ["Hezbollah", "Lebanon", "Israel", "IDF", "Lebanese", "border", "missile", "strike"],
         "escalation": [
             "strike", "attack", "military action", "retaliate", "offensive",
             "troops", "border", "rocket", "missile", "ضربة", "هجوم", "عملية",
@@ -46,6 +56,7 @@ TARGETS = {
         "keywords_he": ["איראן", "ישראל", "טהרן", "גרעיני", "משמרות המהפכה"],
         "keywords_fa": ["ایران", "اسرائیل", "تهران", "هسته‌ای", "سپاه پاسداران", "حمله"],
         "domains_ar": ["aawsat.com", "alhurra.com", "alarabiya.net"],
+        "reddit_keywords": ["Iran", "Israel", "IRGC", "nuclear", "Tehran", "strike", "sanctions"],
         "escalation": [
             "strike", "attack", "military action", "retaliate", "sanctions",
             "nuclear facility", "enrichment", "weapons", "ضربة", "هجوم", "حمله",
@@ -57,6 +68,7 @@ TARGETS = {
         "keywords_he": ["חות'ים", "תימן", "ים סוף", "טיל"],
         "keywords_fa": [],  # No Farsi coverage for Houthis
         "domains_ar": ["aawsat.com", "alhurra.com", "alarabiya.net"],
+        "reddit_keywords": ["Houthi", "Yemen", "Red Sea", "shipping", "missile", "drone", "Ansar Allah"],
         "escalation": [
             "strike", "attack", "military action", "shipping",
             "missile", "drone", "blockade", "ضربة", "هجوم", "صاروخ",
@@ -287,21 +299,121 @@ def fetch_gdelt_articles(keywords, language, days, domains=None):
     return [], diagnostic_info
 
 
+def fetch_reddit_posts(target, keywords, days):
+    """
+    Fetch Reddit posts from relevant subreddits
+    Returns (posts, diagnostic_info)
+    """
+    diagnostic_info = {
+        "attempted": True,
+        "subreddits_searched": [],
+        "posts_found": 0,
+        "errors": []
+    }
+    
+    # Get subreddit list for this target
+    subreddits = REDDIT_SUBREDDITS.get(target, [])
+    if not subreddits:
+        diagnostic_info["error"] = "No subreddits configured for target"
+        return [], diagnostic_info
+    
+    all_posts = []
+    
+    # Time filter for Reddit (day, week, month, year, all)
+    if days <= 1:
+        time_filter = "day"
+    elif days <= 7:
+        time_filter = "week"
+    elif days <= 30:
+        time_filter = "month"
+    else:
+        time_filter = "year"
+    
+    # Search each subreddit
+    for subreddit in subreddits:
+        try:
+            diagnostic_info["subreddits_searched"].append(subreddit)
+            
+            # Build search query - use OR for keywords
+            query = " OR ".join(keywords[:3])  # Limit to top 3 keywords for Reddit
+            
+            url = f"https://www.reddit.com/r/{subreddit}/search.json"
+            params = {
+                "q": query,
+                "restrict_sr": "true",  # Search only this subreddit
+                "sort": "new",
+                "t": time_filter,
+                "limit": 25  # Get up to 25 posts per subreddit
+            }
+            
+            headers = {
+                "User-Agent": REDDIT_USER_AGENT
+            }
+            
+            # Rate limiting - Reddit allows ~60 requests/min
+            time.sleep(1)  # Be polite to Reddit
+            
+            response = requests.get(url, params=params, headers=headers, timeout=10)
+            
+            if response.status_code == 429:  # Rate limited
+                diagnostic_info["errors"].append(f"r/{subreddit}: Rate limited")
+                continue
+            
+            response.raise_for_status()
+            data = response.json()
+            
+            # Parse Reddit JSON structure
+            if "data" in data and "children" in data["data"]:
+                posts = data["data"]["children"]
+                
+                for post in posts:
+                    post_data = post.get("data", {})
+                    
+                    # Normalize to article format
+                    normalized_post = {
+                        "title": post_data.get("title", "")[:200],
+                        "description": post_data.get("selftext", "")[:300],
+                        "url": f"https://www.reddit.com{post_data.get('permalink', '')}",
+                        "publishedAt": datetime.fromtimestamp(
+                            post_data.get("created_utc", 0), 
+                            tz=timezone.utc
+                        ).isoformat(),
+                        "source": {"name": f"r/{subreddit}"},
+                        "content": post_data.get("selftext", ""),
+                        "language": "en",
+                        "reddit_score": post_data.get("score", 0),
+                        "reddit_comments": post_data.get("num_comments", 0),
+                        "reddit_upvote_ratio": post_data.get("upvote_ratio", 0)
+                    }
+                    
+                    all_posts.append(normalized_post)
+                
+        except Exception as e:
+            diagnostic_info["errors"].append(f"r/{subreddit}: {str(e)}")
+            continue
+    
+    diagnostic_info["posts_found"] = len(all_posts)
+    diagnostic_info["success"] = len(all_posts) > 0
+    
+    return all_posts, diagnostic_info
+
+
 @app.route("/")
 def home():
     """Health check endpoint"""
     rate_info = get_rate_limit_info()
     return jsonify({
         "status": "online",
-        "service": "Asifah Analytics Backend - DIAGNOSTIC v1.5",
-        "version": "1.5-diagnostic",
-        "features": ["caching", "rate_limiting", "quadrilingual_gdelt", "enhanced_diagnostics"],
+        "service": "Asifah Analytics Backend - REDDIT v1.6",
+        "version": "1.6-reddit",
+        "features": ["caching", "rate_limiting", "quadrilingual_gdelt", "enhanced_diagnostics", "reddit_osint"],
         "has_api_key": bool(NEWS_API_KEY),
         "rate_limit": rate_info,
         "cache_info": {
             "duration_minutes": CACHE_DURATION_MINUTES,
             "cached_items": len(CACHE)
         },
+        "reddit_subreddits": REDDIT_SUBREDDITS,
         "endpoints": {
             "/": "Health check with rate limit info",
             "/scan": "Scan news sources (GET with ?target=hezbollah&days=7)",
@@ -320,8 +432,8 @@ def rate_limit_status():
 @app.route("/scan", methods=["GET"])
 def scan():
     """
-    Scan news sources for a specific target with trilingual support
-    DIAGNOSTIC VERSION - includes detailed error information
+    Scan news sources for a specific target with multilingual + Reddit support
+    REDDIT VERSION v1.6
 
     Query parameters:
     - target: hezbollah, iran, or houthis
@@ -384,7 +496,8 @@ def scan():
         "newsapi": {},
         "gdelt_ar": {},
         "gdelt_he": {},
-        "gdelt_fa": {}
+        "gdelt_fa": {},
+        "reddit": {}
     }
 
     try:
@@ -428,8 +541,16 @@ def scan():
         else:
             diagnostics["gdelt_fa"] = {"skipped": True, "reason": "No Farsi keywords configured"}
         
+        # Fetch from Reddit
+        articles_reddit, reddit_diag = fetch_reddit_posts(
+            target,
+            target_config.get("reddit_keywords", target_config["keywords_en"]),
+            days
+        )
+        diagnostics["reddit"] = reddit_diag
+        
         # Combine all articles
-        all_articles = articles_en + articles_ar + articles_he + articles_fa
+        all_articles = articles_en + articles_ar + articles_he + articles_fa + articles_reddit
         
         # Prepare response with diagnostics
         response_data = {
@@ -442,13 +563,16 @@ def scan():
             "articles_ar": articles_ar,
             "articles_he": articles_he,
             "articles_fa": articles_fa,
+            "articles_reddit": articles_reddit,
             "totalResults": len(all_articles),
             "totalResults_en": len(articles_en),
             "totalResults_ar": len(articles_ar),
             "totalResults_he": len(articles_he),
             "totalResults_fa": len(articles_fa),
+            "totalResults_reddit": len(articles_reddit),
             "escalation_keywords": target_config["escalation"],
             "target_keywords": target_config["keywords_en"],
+            "reddit_subreddits": REDDIT_SUBREDDITS[target],
             "cached": False,
             "rate_limit": get_rate_limit_info(),
             "diagnostics": diagnostics  # DIAGNOSTIC INFO
