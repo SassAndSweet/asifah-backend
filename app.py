@@ -1,6 +1,6 @@
 """
-Asifah Analytics - Flask Backend v1.6 REDDIT INTEGRATION
-Added Reddit scraping for enhanced OSINT coverage
+Asifah Analytics - Flask Backend v1.7 POLYMARKET INTEGRATION
+Added Polymarket prediction market data for crowd-sourced probabilities
 """
 
 from flask import Flask, request, jsonify
@@ -29,12 +29,25 @@ RATE_LIMIT = {"date": None, "count": 0}
 DAILY_LIMIT = 100  # NewsAPI free tier
 
 # Reddit configuration
-REDDIT_USER_AGENT = "AsifahAnalytics/1.6 (OSINT monitoring tool)"
+REDDIT_USER_AGENT = "AsifahAnalytics/1.7 (OSINT monitoring tool)"
 REDDIT_SUBREDDITS = {
     "hezbollah": ["ForbiddenBromance", "Israel", "Lebanon", "geopolitics", "MiddleEastNews", "OSINT"],
     "iran": ["Iran", "Israel", "geopolitics", "MiddleEastNews", "OSINT"],
     "houthis": ["Yemen", "geopolitics", "MiddleEastNews", "OSINT"]
 }
+
+# Polymarket configuration
+POLYMARKET_KEYWORDS = [
+    "Israel strike",
+    "Lebanon attack",
+    "Iran strike",
+    "Houthis Yemen",
+    "Hezbollah",
+    "Israel Iran",
+    "Israel Lebanon",
+    "Gaza",
+    "Middle East conflict"
+]
 
 # Target configurations with multilingual keywords
 TARGETS = {
@@ -398,15 +411,113 @@ def fetch_reddit_posts(target, keywords, days):
     return all_posts, diagnostic_info
 
 
+def fetch_polymarket_markets(keywords, limit=10):
+    """
+    Fetch prediction markets from Polymarket API
+    Returns (markets, diagnostic_info)
+    """
+    diagnostic_info = {
+        "attempted": True,
+        "keywords_searched": [],
+        "markets_found": 0,
+        "errors": []
+    }
+    
+    all_markets = {}  # Use dict to deduplicate by market ID
+    
+    for keyword in keywords:
+        try:
+            diagnostic_info["keywords_searched"].append(keyword)
+            
+            url = "https://gamma-api.polymarket.com/public-search"
+            params = {
+                "q": keyword,
+                "events_status": "active",  # Only active markets
+                "limit_per_type": 5  # 5 results per keyword
+            }
+            
+            # Be polite to Polymarket API
+            time.sleep(0.5)
+            
+            response = requests.get(url, params=params, timeout=10)
+            
+            if response.status_code == 429:  # Rate limited
+                diagnostic_info["errors"].append(f"'{keyword}': Rate limited")
+                continue
+            
+            response.raise_for_status()
+            data = response.json()
+            
+            # Extract events (which contain markets)
+            events = data.get("events", [])
+            
+            for event in events:
+                # Skip if inactive or closed
+                if not event.get("active") or event.get("closed"):
+                    continue
+                
+                markets = event.get("markets", [])
+                
+                for market in markets:
+                    # Skip if inactive or closed
+                    if not market.get("active") or market.get("closed"):
+                        continue
+                    
+                    market_id = market.get("id")
+                    if not market_id or market_id in all_markets:
+                        continue  # Skip duplicates
+                    
+                    # Parse outcome prices (usually JSON string)
+                    outcome_prices_str = market.get("outcomePrices", "[]")
+                    try:
+                        outcome_prices = eval(outcome_prices_str) if isinstance(outcome_prices_str, str) else outcome_prices_str
+                        probability = float(outcome_prices[0]) if len(outcome_prices) > 0 else 0
+                    except:
+                        probability = 0
+                    
+                    # Extract market info
+                    market_info = {
+                        "id": market_id,
+                        "question": market.get("question", "")[:200],
+                        "probability": round(probability, 3),
+                        "volume": market.get("volumeNum", 0),
+                        "slug": market.get("slug", ""),
+                        "url": f"https://polymarket.com/event/{event.get('slug', '')}" if event.get('slug') else "",
+                        "end_date": market.get("endDate", ""),
+                        "category": event.get("category", "")
+                    }
+                    
+                    all_markets[market_id] = market_info
+            
+        except requests.Timeout:
+            diagnostic_info["errors"].append(f"'{keyword}': Timeout")
+            continue
+        except Exception as e:
+            diagnostic_info["errors"].append(f"'{keyword}': {str(e)}")
+            continue
+    
+    # Sort by volume (most traded = most credible)
+    sorted_markets = sorted(
+        all_markets.values(), 
+        key=lambda x: x["volume"], 
+        reverse=True
+    )[:limit]
+    
+    diagnostic_info["markets_found"] = len(sorted_markets)
+    diagnostic_info["success"] = len(sorted_markets) > 0
+    
+    return sorted_markets, diagnostic_info
+
+
 @app.route("/")
 def home():
     """Health check endpoint"""
     rate_info = get_rate_limit_info()
     return jsonify({
         "status": "online",
-        "service": "Asifah Analytics Backend - REDDIT v1.6",
-        "version": "1.6-reddit",
-        "features": ["caching", "rate_limiting", "quadrilingual_gdelt", "enhanced_diagnostics", "reddit_osint"],
+        "service": "Asifah Analytics Backend - POLYMARKET v1.7",
+        "version": "1.7-polymarket",
+        "features": ["caching", "rate_limiting", "quadrilingual_gdelt", "enhanced_diagnostics", "reddit_osint", "polymarket_markets"],
         "has_api_key": bool(NEWS_API_KEY),
         "rate_limit": rate_info,
         "cache_info": {
@@ -414,11 +525,13 @@ def home():
             "cached_items": len(CACHE)
         },
         "reddit_subreddits": REDDIT_SUBREDDITS,
+        "polymarket_keywords": POLYMARKET_KEYWORDS,
         "endpoints": {
             "/": "Health check with rate limit info",
             "/scan": "Scan news sources (GET with ?target=hezbollah&days=7)",
             "/health": "Basic health check",
-            "/rate-limit": "Current rate limit status"
+            "/rate-limit": "Current rate limit status",
+            "/polymarket-data": "Fetch Polymarket prediction markets"
         },
     })
 
@@ -433,7 +546,7 @@ def rate_limit_status():
 def scan():
     """
     Scan news sources for a specific target with multilingual + Reddit support
-    REDDIT VERSION v1.6
+    REDDIT VERSION v1.7
 
     Query parameters:
     - target: hezbollah, iran, or houthis
@@ -590,6 +703,55 @@ def scan():
             "traceback": traceback.format_exc(),
             "rate_limit": get_rate_limit_info(),
             "diagnostics": diagnostics
+        }), 500
+
+
+@app.route("/polymarket-data", methods=["GET"])
+def polymarket_data():
+    """
+    Fetch prediction market data from Polymarket
+    Returns top 10 most-traded active markets related to Israel/Middle East conflicts
+    """
+    
+    # Check cache first
+    cache_key = "polymarket_markets"
+    cached_data = get_from_cache(cache_key)
+    
+    if cached_data:
+        cached_data["cached"] = True
+        return jsonify(cached_data)
+    
+    try:
+        # Fetch markets from Polymarket
+        markets, diagnostics = fetch_polymarket_markets(
+            POLYMARKET_KEYWORDS, 
+            limit=10
+        )
+        
+        response_data = {
+            "markets": markets,
+            "total_markets": len(markets),
+            "keywords_used": POLYMARKET_KEYWORDS,
+            "last_updated": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "cached": False,
+            "diagnostics": diagnostics,
+            "disclaimer": "Polymarket data represents betting market probabilities (crowd-sourced predictions). This is supplementary data only and does not constitute intelligence assessment or analytical tradecraft."
+        }
+        
+        # Cache for 2 hours (longer than news cache since markets change slower)
+        CACHE[cache_key] = {
+            "data": response_data,
+            "timestamp": datetime.now(timezone.utc),
+            "expires": datetime.now(timezone.utc) + timedelta(hours=2)
+        }
+        
+        return jsonify(response_data)
+        
+    except Exception as e:
+        return jsonify({
+            "error": "Server error",
+            "message": str(e),
+            "traceback": traceback.format_exc()
         }), 500
 
 
