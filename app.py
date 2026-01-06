@@ -248,8 +248,8 @@ def calculate_threat_score(gdelt_data, news_data, reddit_data, telegram_data):
 def home():
     return jsonify({
         'status': 'Asifah Analytics API is running',
-        'version': '2.0',
-        'endpoints': ['/api/hezbollah', '/api/iran', '/api/houthis']
+        'version': '2.0-telegram',
+        'endpoints': ['/api/hezbollah', '/api/iran', '/api/houthis', '/api/telegram/<target>']
     })
 
 @app.route('/api/<target>')
