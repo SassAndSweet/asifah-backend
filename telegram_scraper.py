@@ -3,13 +3,25 @@ from telethon.tl.functions.messages import GetHistoryRequest
 from datetime import datetime, timedelta
 import asyncio
 import os
+import base64
 
 class TelegramScraper:
     def __init__(self):
         self.api_id = os.getenv('TELEGRAM_API_ID')
         self.api_hash = os.getenv('TELEGRAM_API_HASH')
-        self.phone = os.getenv('TELEGRAM_PHONE')  # Your phone number
+        self.phone = os.getenv('TELEGRAM_PHONE')
         self.session_name = 'asifah_session'
+        
+        # Decode session file from base64 if it exists in environment
+        session_b64 = os.getenv('TELEGRAM_SESSION_BASE64')
+        if session_b64:
+            try:
+                session_data = base64.b64decode(session_b64)
+                with open(f'{self.session_name}.session', 'wb') as f:
+                    f.write(session_data)
+                print("Session file decoded successfully")
+            except Exception as e:
+                print(f"Error decoding session file: {e}")
         
     async def scrape_channels(self, channels, hours_back=24):
         """
