@@ -92,26 +92,80 @@ TARGETS = {
 # Iran Protests configuration with multilingual keywords
 IRAN_PROTESTS = {
     "keywords_en": [
+        # Core protest terms
         "Iran protest", "Iran protests", "Tehran protest", "Iranian protesters",
-        "Iran demonstration", "Iran unrest", "Iran uprising", "Women Life Freedom",
-        "Mahsa Amini", "Iran riot", "Iran crackdown"
+        "Iran demonstration", "Iran unrest", "Iran uprising",
+        # Economic crisis (KEY DRIVER)
+        "Iran economic crisis", "Iran rial", "Iran inflation", "Iran currency",
+        # Leadership/Regime
+        "Khamenei", "Iran regime", "IRGC", "Iran crackdown",
+        # Political change
+        "Iran regime change", "Iran revolution",
+        # Specific references
+        "Women Life Freedom", "Mahsa Amini"
     ],
     "keywords_fa": [
+        # Core protest terms
         "اعتراضات", "تظاهرات", "ناآرامی", "معترضان", "خیابان",
-        "کشته", "دستگیری", "بازداشت", "سرکوب", "زن زندگی آزادی",
-        "مهسا امینی", "شورش", "تجمع"
+        "کشته", "دستگیری", "بازداشت", "سرکوب",
+        # Regime/Leadership
+        "خامنه‌ای",           # Khamenei (Supreme Leader)
+        "رژیم",              # Regime
+        "حکومت",             # Government
+        "رهبر",              # Leader
+        # Security Forces
+        "سپاه",              # IRGC/Sepah
+        "بسیج",              # Basij (paramilitary)
+        "نیروهای امنیتی",    # Security forces
+        # Economic/Political Crisis
+        "اقتصاد",            # Economy
+        "ریال",              # Rial (currency)
+        "تورم",              # Inflation
+        "تغییر رژیم",        # Regime change
+        "انقلاب",            # Revolution
+        "سقوط",              # Fall/collapse
+        # Specific references
+        "مهسا امینی", "زن زندگی آزادی"
     ],
     "keywords_ar": [
-        "احتجاجات إيران", "متظاهرون إيرانيون", "طهران", "اضطرابات إيران",
-        "قمع إيران", "اعتقالات إيران"
+        # Broader protest terms
+        "إيران احتجاجات",     # Iran protests
+        "إيران اضطرابات",     # Iran unrest
+        "طهران مظاهرات",      # Tehran demonstrations
+        # Leadership/Regime
+        "خامنئي",             # Khamenei
+        "النظام الإيراني",    # Iranian regime
+        "الحرس الثوري",       # IRGC
+        # Economic crisis
+        "الأزمة الاقتصادية",  # Economic crisis
+        "الريال الإيراني",    # Iranian rial
+        # Political change
+        "تغيير النظام",       # Regime change
+        "قمع المتظاهرين"      # Suppression of protesters
     ],
     "keywords_he": [
+        # Core protest terms
         "הפגנות באיראן", "מחאות איראן", "טהרן", "מפגינים איראנים",
-        "אי שקט באיראן", "דיכוי באיראן"
+        "אי שקט באיראן", "דיכוי באיראן",
+        # Leadership/Regime
+        "חמינאי",                    # Khamenei
+        "המשטר האיראני",             # Iranian regime
+        "משמרות המהפכה",             # IRGC
+        # Economic/Political
+        "משבר כלכלי איראן",          # Iran economic crisis
+        "ריאל איראני",               # Iranian rial
+        "שינוי משטר",                # Regime change
+        "מהפכה באיראן"               # Revolution in Iran
     ],
     "reddit_keywords": [
-        "Iran protest", "Iranian unrest", "Tehran", "Mahsa Amini",
-        "Women Life Freedom", "Iran revolution", "Iran regime"
+        # Core protest terms
+        "Iran protest", "Iranian unrest", "Tehran",
+        # Economic crisis
+        "Iran economy", "Iran rial", "Iran inflation",
+        # Leadership/Regime
+        "Khamenei", "IRGC", "Iran regime", "regime change",
+        # Political change
+        "Iran revolution", "Women Life Freedom", "Mahsa Amini"
     ],
     "subreddits": ["iran", "Iranian", "NewIran", "worldnews", "geopolitics", "OSINT"],
     "domains_fa": ["bbc.com/persian", "radiofarda.com", "iranintl.com"],
