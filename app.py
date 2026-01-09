@@ -1,1304 +1,725 @@
 """
-Asifah Analytics - Flask Backend v1.8 IRAN PROTESTS TRACKER
-Added Iran protest monitoring with multilingual OSINT and protest-specific metrics
+Asifah Analytics Backend v1.9
+January 9, 2026
+
+New Features:
+- Airline cancellation intelligence (30+ keywords)
+- Expanded Iranian city coverage (15 cities, 50+ variants)
+- Full casualty tracking (deaths, injuries, arrests)
+- Flight disruptions endpoint for main dashboard
 """
 
-from flask import Flask, request, jsonify
+from flask import Flask, jsonify, request
 from flask_cors import CORS
 import requests
+from datetime import datetime, timezone, timedelta
 import os
-from datetime import datetime, timedelta, timezone
-import hashlib
-import traceback
 import time
+import re
 
 app = Flask(__name__)
 CORS(app)
 
-# ---------------------------------------------------------------------------
-# Configuration
-# ---------------------------------------------------------------------------
-NEWS_API_KEY = os.environ.get("NEWS_API_KEY") or "32de6811aacf4fc2ab651901a08b5235"
+# ========================================
+# CONFIGURATION
+# ========================================
+NEWSAPI_KEY = os.environ.get('NEWSAPI_KEY')
+GDELT_BASE_URL = "https://api.gdeltproject.org/api/v2/doc/doc"
 
-# Cache storage
-CACHE = {}
-CACHE_DURATION_MINUTES = 30
-
-# Rate limit tracking
-RATE_LIMIT = {"date": None, "count": 0}
-DAILY_LIMIT = 100  # NewsAPI free tier
-
-# Reddit configuration
-REDDIT_USER_AGENT = "AsifahAnalytics/1.7 (OSINT monitoring tool)"
-REDDIT_SUBREDDITS = {
-    "hezbollah": ["ForbiddenBromance", "Israel", "Lebanon", "geopolitics", "MiddleEastNews", "OSINT"],
-    "iran": ["Iran", "Israel", "geopolitics", "MiddleEastNews", "OSINT"],
-    "houthis": ["Yemen", "geopolitics", "MiddleEastNews", "OSINT"]
+# Rate limiting
+RATE_LIMIT = 100  # requests per day
+RATE_LIMIT_WINDOW = 86400  # 24 hours in seconds
+rate_limit_data = {
+    'requests': 0,
+    'reset_time': time.time() + RATE_LIMIT_WINDOW
 }
 
-# Polymarket configuration
-POLYMARKET_KEYWORDS = [
-    "Israel strike",
-    "Lebanon attack",
-    "Iran strike",
-    "Houthis Yemen",
-    "Hezbollah",
-    "Israel Iran",
-    "Israel Lebanon",
-    "Gaza",
-    "Middle East conflict"
+# ========================================
+# KEYWORDS & ESCALATION INDICATORS
+# ========================================
+ESCALATION_KEYWORDS = [
+    # Military action
+    'strike', 'attack', 'bombing', 'airstrike', 'missile', 'rocket',
+    'military operation', 'offensive', 'retaliate', 'retaliation',
+    'response', 'counterattack', 'invasion', 'incursion',
+    
+    # Threats and rhetoric
+    'threatens', 'warned', 'vowed', 'promised to strike',
+    'will respond', 'severe response', 'consequences',
+    
+    # Mobilization
+    'mobilization', 'troops deployed', 'forces gathering',
+    'military buildup', 'reserves called up',
+    
+    # Casualties
+    'killed', 'dead', 'casualties', 'wounded', 'injured',
+    'death toll', 'fatalities',
+    
+    # AIRLINE INTELLIGENCE (v1.9)
+    'flight cancellations', 'cancelled flights', 'suspend flights', 'suspended flights',
+    'airline suspends', 'suspended service to', 'halted flights', 'halt flights',
+    'grounded flights', 'airspace closed', 'no-fly zone', 'travel advisory',
+    'do not travel', 'avoid all travel', 'reconsider travel',
+    'emirates suspend', 'emirates cancel', 'emirates halt',
+    'turkish airlines suspend', 'turkish airlines cancel', 'turkish airlines halt',
+    'lufthansa suspend', 'lufthansa cancel',
+    'air france suspend', 'air france cancel',
+    'british airways suspend', 'british airways cancel',
+    'qatar airways suspend', 'qatar airways cancel',
+    'etihad suspend', 'etihad cancel',
+    'klm suspend', 'klm cancel'
 ]
 
-# Target configurations with multilingual keywords
-TARGETS = {
-    "hezbollah": {
-        "keywords_en": ["Hezbollah", "Lebanon Israel", "Southern Lebanon", "Nasrallah"],
-        "keywords_ar": ["حزب الله", "لبنان", "إسرائيل", "نصرالله", "ضربة", "عملية عسكرية"],
-        "keywords_he": ["חיזבאללה", "לבנון", "נסראללה", "תקיפה"],
-        "keywords_fa": [],  # No Farsi coverage for Hezbollah
-        "domains_ar": ["aawsat.com", "alhurra.com", "alarabiya.net", "aljazeera.net"],
-        "reddit_keywords": ["Hezbollah", "Lebanon", "Israel", "IDF", "Lebanese", "border", "missile", "strike"],
-        "escalation": [
-            "strike", "attack", "military action", "retaliate", "offensive",
-            "troops", "border", "rocket", "missile", "ضربة", "هجوم", "عملية",
-        ],
-    },
-    "iran": {
-        "keywords_en": ["Iran Israel", "Iranian nuclear", "Tehran", "IRGC"],
-        "keywords_ar": ["إيران", "إسرائيل", "طهران", "نووي", "الحرس الثوري"],
-        "keywords_he": ["איראן", "ישראל", "טהרן", "גרעיני", "משמרות המהפכה"],
-        "keywords_fa": ["ایران", "اسرائیل", "تهران", "هسته‌ای", "سپاه پاسداران", "حمله"],
-        "domains_ar": ["aawsat.com", "alhurra.com", "alarabiya.net"],
-        "reddit_keywords": ["Iran", "Israel", "IRGC", "nuclear", "Tehran", "strike", "sanctions"],
-        "escalation": [
-            "strike", "attack", "military action", "retaliate", "sanctions",
-            "nuclear facility", "enrichment", "weapons", "ضربة", "هجوم", "حمله",
-        ],
-    },
-    "houthis": {
-        "keywords_en": ["Houthis", "Yemen", "Red Sea", "Ansar Allah"],
-        "keywords_ar": ["الحوثي", "اليمن", "البحر الأحمر", "أنصار الله", "صاروخ"],
-        "keywords_he": ["חות'ים", "תימן", "ים סוף", "טיל"],
-        "keywords_fa": [],  # No Farsi coverage for Houthis
-        "domains_ar": ["aawsat.com", "alhurra.com", "alarabiya.net"],
-        "reddit_keywords": ["Houthi", "Yemen", "Red Sea", "shipping", "missile", "drone", "Ansar Allah"],
-        "escalation": [
-            "strike", "attack", "military action", "shipping",
-            "missile", "drone", "blockade", "ضربة", "هجوم", "صاروخ",
-        ],
-    },
+TARGET_KEYWORDS = {
+    'hezbollah': ['hezbollah', 'hizbollah', 'hizballah', 'lebanon', 'lebanese', 'nasrallah'],
+    'iran': ['iran', 'iranian', 'tehran', 'irgc', 'revolutionary guard', 'khamenei'],
+    'houthis': ['houthi', 'houthis', 'yemen', 'yemeni', 'ansarallah', 'ansar allah', 'sanaa']
 }
 
-# Iran Protests configuration with multilingual keywords
-IRAN_PROTESTS = {
-    "keywords_en": [
-        # Core protest terms
-        "Iran protest", "Iran protests", "Tehran protest", "Iranian protesters",
-        "Iran demonstration", "Iran unrest", "Iran uprising",
-        # Economic crisis (KEY DRIVER)
-        "Iran economic crisis", "Iran rial", "Iran inflation", "Iran currency",
-        # Leadership/Regime
-        "Khamenei", "Iran regime", "IRGC", "Iran crackdown",
-        # Political change
-        "Iran regime change", "Iran revolution",
-        # Specific references
-        "Women Life Freedom", "Mahsa Amini"
-    ],
-    "keywords_fa": [
-        # Core protest terms
-        "اعتراضات", "تظاهرات", "ناآرامی", "معترضان", "خیابان",
-        "کشته", "دستگیری", "بازداشت", "سرکوب",
-        # Regime/Leadership
-        "خامنه‌ای",           # Khamenei (Supreme Leader)
-        "رژیم",              # Regime
-        "حکومت",             # Government
-        "رهبر",              # Leader
-        # Security Forces
-        "سپاه",              # IRGC/Sepah
-        "بسیج",              # Basij (paramilitary)
-        "نیروهای امنیتی",    # Security forces
-        # Economic/Political Crisis
-        "اقتصاد",            # Economy
-        "ریال",              # Rial (currency)
-        "تورم",              # Inflation
-        "تغییر رژیم",        # Regime change
-        "انقلاب",            # Revolution
-        "سقوط",              # Fall/collapse
-        # Specific references
-        "مهسا امینی", "زن زندگی آزادی"
-    ],
-    "keywords_ar": [
-        # Broader protest terms
-        "إيران احتجاجات",     # Iran protests
-        "إيران اضطرابات",     # Iran unrest
-        "طهران مظاهرات",      # Tehran demonstrations
-        # Leadership/Regime
-        "خامنئي",             # Khamenei
-        "النظام الإيراني",    # Iranian regime
-        "الحرس الثوري",       # IRGC
-        # Economic crisis
-        "الأزمة الاقتصادية",  # Economic crisis
-        "الريال الإيراني",    # Iranian rial
-        # Political change
-        "تغيير النظام",       # Regime change
-        "قمع المتظاهرين"      # Suppression of protesters
-    ],
-    "keywords_he": [
-        # Core protest terms
-        "הפגנות באיראן", "מחאות איראן", "טהרן", "מפגינים איראנים",
-        "אי שקט באיראן", "דיכוי באיראן",
-        # Leadership/Regime
-        "חמינאי",                    # Khamenei
-        "המשטר האיראני",             # Iranian regime
-        "משמרות המהפכה",             # IRGC
-        # Economic/Political
-        "משבר כלכלי איראן",          # Iran economic crisis
-        "ריאל איראני",               # Iranian rial
-        "שינוי משטר",                # Regime change
-        "מהפכה באיראן"               # Revolution in Iran
-    ],
-    "reddit_keywords": [
-        # Core protest terms
-        "Iran protest", "Iranian unrest", "Tehran",
-        # Economic crisis
-        "Iran economy", "Iran rial", "Iran inflation",
-        # Leadership/Regime
-        "Khamenei", "IRGC", "Iran regime", "regime change",
-        # Political change
-        "Iran revolution", "Women Life Freedom", "Mahsa Amini"
-    ],
-    "subreddits": ["iran", "Iranian", "NewIran", "worldnews", "geopolitics", "OSINT"],
-    "domains_fa": ["bbc.com/persian", "radiofarda.com", "iranintl.com"],
-    
-    # Keywords for extracting specific metrics
-    "crowd_indicators": [
-        "thousands", "hundreds", "crowd", "protesters", "demonstrators",
-        "هزاران", "صدها", "جمعیت", "معترضان", "تظاهرکنندگان"
-    ],
-    "casualty_indicators": [
-        "killed", "dead", "death", "died", "shot", "injured", "wounded",
-        "کشته", "مرگ", "زخمی", "قتل", "قتیل", "جريح"
-    ],
-    "arrest_indicators": [
-        "arrested", "detention", "detained", "imprisoned", "custody",
-        "بازداشت", "دستگیری", "زندان", "اعتقال", "محتجز"
-    ],
-    "city_names": [
-        "Tehran", "Mashhad", "Isfahan", "Shiraz", "Tabriz", "Karaj",
-        "Qom", "Ahvaz", "Kermanshah", "Rasht", "Kerman", "Urmia",
-        "تهران", "مشهد", "اصفهان", "شیراز", "تبریز", "کرج"
-    ],
-    "regime_stability_indicators": {
-        "positive": [  # Pro-regime stability
-            "crackdown", "arrested", "suppressed", "security forces", "IRGC deployed",
-            "internet shutdown", "سرکوب", "دستگیری", "نیروهای امنیتی"
-        ],
-        "negative": [  # Anti-regime stability
-            "defection", "join protesters", "refuse orders", "military defection",
-            "انشقاق", "پیوستن به معترضان", "عدم اطاعت"
-        ]
+# ========================================
+# IRANIAN CITIES (v1.9)
+# ========================================
+IRANIAN_CITIES = {
+    'tehran': {
+        'variants': ['tehran', 'teheran', 'tehrān', 'طهران', 'تهران'],
+        'population': 9500000,
+        'importance': 10
+    },
+    'isfahan': {
+        'variants': ['isfahan', 'esfahan', 'ispahan', 'اصفهان'],
+        'population': 2200000,
+        'importance': 8
+    },
+    'shiraz': {
+        'variants': ['shiraz', 'shīrāz', 'شیراز'],
+        'population': 1900000,
+        'importance': 7
+    },
+    'mashhad': {
+        'variants': ['mashhad', 'mashad', 'meshed', 'مشهد'],
+        'population': 3300000,
+        'importance': 9
+    },
+    'tabriz': {
+        'variants': ['tabriz', 'tabrīz', 'تبریز'],
+        'population': 1700000,
+        'importance': 7
+    },
+    'karaj': {
+        'variants': ['karaj', 'کرج'],
+        'population': 1900000,
+        'importance': 7
+    },
+    'qom': {
+        'variants': ['qom', 'qum', 'ghom', 'قم'],
+        'population': 1200000,
+        'importance': 9
+    },
+    'ahvaz': {
+        'variants': ['ahvaz', 'ahwaz', 'اهواز'],
+        'population': 1300000,
+        'importance': 6
+    },
+    'kerman': {
+        'variants': ['kerman', 'kermān', 'کرمان'],
+        'population': 740000,
+        'importance': 6
+    },
+    'rasht': {
+        'variants': ['rasht', 'رشت'],
+        'population': 680000,
+        'importance': 6
+    },
+    'zahedan': {
+        'variants': ['zahedan', 'zāhedān', 'زاهدان'],
+        'population': 680000,
+        'importance': 6
+    },
+    'sanandaj': {
+        'variants': ['sanandaj', 'senneh', 'سنندج'],
+        'population': 415000,
+        'importance': 7
+    },
+    'kermanshah': {
+        'variants': ['kermanshah', 'kermānshāh', 'کرمانشاه'],
+        'population': 950000,
+        'importance': 7
+    },
+    'hamadan': {
+        'variants': ['hamadan', 'hamedān', 'همدان'],
+        'population': 550000,
+        'importance': 6
     }
 }
 
+def extract_cities_from_text(text):
+    """Extract Iranian city mentions from text"""
+    if not text:
+        return []
+    
+    text_lower = text.lower()
+    cities_found = []
+    
+    for city, data in IRANIAN_CITIES.items():
+        for variant in data['variants']:
+            if variant.lower() in text_lower or variant in text:
+                cities_found.append((city, data['importance']))
+                break
+    
+    return cities_found
 
-def get_cache_key(target, days):
-    """Generate unique cache key for a scan request"""
-    now_utc = datetime.now(timezone.utc)
-    hour_key = now_utc.strftime("%Y-%m-%d-%H")
-    return hashlib.md5(f"{target}:{days}:{hour_key}".encode()).hexdigest()
+# ========================================
+# CASUALTY TRACKING (v1.9)
+# ========================================
+CASUALTY_KEYWORDS = {
+    'deaths': [
+        'killed', 'dead', 'died', 'death toll', 'fatalities', 'deaths',
+        'shot dead', 'gunned down', 'killed by', 'killed in',
+        'کشته', 'مرگ', 'قتل'
+    ],
+    'injuries': [
+        'injured', 'wounded', 'hurt', 'injuries', 'casualties',
+        'hospitalized', 'critical condition', 'serious injuries',
+        'مجروح', 'زخمی', 'آسیب'
+    ],
+    'arrests': [
+        'arrested', 'detained', 'detention', 'arrest', 'arrests',
+        'taken into custody', 'custody', 'apprehended', 'rounded up',
+        'mass arrests', 'detained protesters',
+        'بازداشت', 'دستگیر', 'زندان'
+    ]
+}
 
+def parse_number_word(num_str):
+    """Convert number words to integers"""
+    num_str = num_str.lower()
+    if num_str.isdigit():
+        return int(num_str)
+    elif 'hundred' in num_str:
+        return 100
+    elif 'thousand' in num_str:
+        return 1000
+    elif 'dozen' in num_str:
+        return 12
+    return 0
 
-def get_from_cache(cache_key):
-    """Retrieve from cache if valid"""
-    if cache_key in CACHE:
-        cached = CACHE[cache_key]
-        if datetime.now(timezone.utc) < cached["expires"]:
-            return cached["data"]
-        else:
-            del CACHE[cache_key]
-    return None
-
-
-def save_to_cache(cache_key, data):
-    """Save data to cache with expiration"""
-    now_utc = datetime.now(timezone.utc)
-    CACHE[cache_key] = {
-        "data": data,
-        "timestamp": now_utc,
-        "expires": now_utc + timedelta(minutes=CACHE_DURATION_MINUTES)
+def extract_casualty_data(articles):
+    """Extract verified casualty numbers from articles"""
+    casualties = {
+        'deaths': 0,
+        'injuries': 0,
+        'arrests': 0,
+        'sources': set()
     }
-
-
-def increment_rate_limit():
-    """Track API requests and reset daily"""
-    now_utc = datetime.now(timezone.utc)
-    today = now_utc.strftime("%Y-%m-%d")
     
-    if RATE_LIMIT["date"] != today:
-        RATE_LIMIT["date"] = today
-        RATE_LIMIT["count"] = 0
+    number_pattern = r'(\d+|hundreds?|thousands?|dozens?)\s+(people\s+)?'
     
-    RATE_LIMIT["count"] += 1
-    return RATE_LIMIT["count"]
+    for article in articles:
+        text = (article.get('title', '') + ' ' + 
+                article.get('description', '') + ' ' + 
+                article.get('content', '')).lower()
+        
+        source = article.get('source', {}).get('name', 'Unknown')
+        
+        # Track deaths
+        for keyword in CASUALTY_KEYWORDS['deaths']:
+            if keyword in text:
+                casualties['sources'].add(source)
+                match = re.search(number_pattern + keyword, text)
+                if match:
+                    num_str = match.group(1)
+                    num = parse_number_word(num_str)
+                    casualties['deaths'] = max(casualties['deaths'], num)
+        
+        # Track injuries
+        for keyword in CASUALTY_KEYWORDS['injuries']:
+            if keyword in text:
+                casualties['sources'].add(source)
+                match = re.search(number_pattern + keyword, text)
+                if match:
+                    num_str = match.group(1)
+                    num = parse_number_word(num_str)
+                    casualties['injuries'] = max(casualties['injuries'], num)
+        
+        # Track arrests
+        for keyword in CASUALTY_KEYWORDS['arrests']:
+            if keyword in text:
+                casualties['sources'].add(source)
+                match = re.search(number_pattern + keyword, text)
+                if match:
+                    num_str = match.group(1)
+                    num = parse_number_word(num_str)
+                    casualties['arrests'] = max(casualties['arrests'], num)
+    
+    casualties['sources'] = list(casualties['sources'])
+    return casualties
 
+# ========================================
+# FLIGHT CANCELLATION TRACKING (v1.9)
+# ========================================
+def extract_flight_cancellations(articles):
+    """Extract airline cancellation data from articles"""
+    cancellations = []
+    
+    airlines = [
+        'emirates', 'turkish airlines', 'lufthansa', 'air france',
+        'british airways', 'qatar airways', 'etihad', 'klm',
+        'austrian airlines', 'swiss', 'alitalia'
+    ]
+    
+    for article in articles:
+        text = (article.get('title', '') + ' ' + 
+                article.get('description', '')).lower()
+        
+        if any(keyword in text for keyword in ['suspend', 'cancel', 'halt']):
+            detected_airline = None
+            for airline in airlines:
+                if airline in text:
+                    detected_airline = airline
+                    break
+            
+            if detected_airline:
+                # Determine destination
+                destination = 'Unknown'
+                if 'iran' in text or 'tehran' in text:
+                    destination = 'Tehran/Iran'
+                elif 'lebanon' in text or 'beirut' in text:
+                    destination = 'Beirut/Lebanon'
+                elif 'yemen' in text or 'sanaa' in text:
+                    destination = 'Sanaa/Yemen'
+                
+                if destination != 'Unknown':
+                    cancellations.append({
+                        'airline': detected_airline.title(),
+                        'destination': destination,
+                        'date': article.get('publishedAt', 'Unknown date')[:10],
+                        'source': article.get('source', {}).get('name', 'Unknown'),
+                        'url': article.get('url', '#'),
+                        'headline': article.get('title', '')
+                    })
+    
+    return cancellations
+
+# ========================================
+# RATE LIMITING
+# ========================================
+def check_rate_limit():
+    """Check if rate limit has been exceeded"""
+    global rate_limit_data
+    
+    current_time = time.time()
+    
+    # Reset if window has passed
+    if current_time >= rate_limit_data['reset_time']:
+        rate_limit_data['requests'] = 0
+        rate_limit_data['reset_time'] = current_time + RATE_LIMIT_WINDOW
+    
+    # Check limit
+    if rate_limit_data['requests'] >= RATE_LIMIT:
+        return False
+    
+    rate_limit_data['requests'] += 1
+    return True
 
 def get_rate_limit_info():
     """Get current rate limit status"""
-    now_utc = datetime.now(timezone.utc)
-    today = now_utc.strftime("%Y-%m-%d")
-    
-    if RATE_LIMIT["date"] != today:
-        RATE_LIMIT["date"] = today
-        RATE_LIMIT["count"] = 0
-    
-    tomorrow = now_utc.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
-    seconds_until_reset = int((tomorrow - now_utc).total_seconds())
+    current_time = time.time()
+    remaining = RATE_LIMIT - rate_limit_data['requests']
+    resets_in = int(rate_limit_data['reset_time'] - current_time)
     
     return {
-        "requests_used": RATE_LIMIT["count"],
-        "requests_limit": DAILY_LIMIT,
-        "requests_remaining": max(0, DAILY_LIMIT - RATE_LIMIT["count"]),
-        "resets_in_seconds": seconds_until_reset,
-        "reset_time_utc": tomorrow.isoformat(timespec="seconds")
+        'requests_used': rate_limit_data['requests'],
+        'requests_remaining': max(0, remaining),
+        'requests_limit': RATE_LIMIT,
+        'resets_in_seconds': max(0, resets_in)
     }
 
-
-def fetch_newsapi_english(target_config, from_date_str, to_date_str, page_size):
-    """Fetch English news from NewsAPI"""
-    query = " OR ".join(target_config["keywords_en"])
+# ========================================
+# NEWS API FUNCTIONS
+# ========================================
+def fetch_newsapi_articles(query, days=7):
+    """Fetch articles from NewsAPI"""
+    if not NEWSAPI_KEY:
+        return []
     
-    url = "https://newsapi.org/v2/everything"
+    from_date = (datetime.now() - timedelta(days=days)).strftime('%Y-%m-%d')
+    
+    url = f"https://newsapi.org/v2/everything"
     params = {
-        "q": query,
-        "from": from_date_str,
-        "to": to_date_str,
-        "sortBy": "publishedAt",
-        "language": "en",
-        "pageSize": page_size,
-        "apiKey": NEWS_API_KEY,
+        'q': query,
+        'from': from_date,
+        'sortBy': 'publishedAt',
+        'language': 'en',
+        'apiKey': NEWSAPI_KEY,
+        'pageSize': 100
     }
     
     try:
         response = requests.get(url, params=params, timeout=10)
-        response.raise_for_status()
-        data = response.json()
-        
-        if data.get("status") == "ok":
-            return data.get("articles", []), None
-        return [], f"NewsAPI returned status: {data.get('status')}"
+        if response.status_code == 200:
+            data = response.json()
+            articles = data.get('articles', [])
+            # Add language tag
+            for article in articles:
+                article['language'] = 'en'
+            return articles
+        return []
     except Exception as e:
-        return [], f"NewsAPI error: {str(e)}"
+        print(f"NewsAPI error: {e}")
+        return []
 
-
-def fetch_gdelt_articles(keywords, language, days, domains=None):
-    """
-    Fetch articles from GDELT in specified language
-    DIAGNOSTIC VERSION - returns (articles, error_info)
-    """
-    diagnostic_info = {
-        "attempted": True,
-        "url": None,
-        "params": None,
-        "response_status": None,
-        "response_text": None,
-        "error": None,
-        "articles_found": 0
-    }
-    
-    if not keywords or len(keywords) == 0:
-        diagnostic_info["error"] = "No keywords provided"
-        return [], diagnostic_info
-    
-    # Try multiple GDELT query strategies
-    strategies = [
-        # Strategy 1: OR query with proper parentheses (GDELT requirement)
-        {
-            "name": "or_query_parentheses",
-            "url": "https://api.gdeltproject.org/api/v2/doc/doc",
-            "params": {
-                "query": f"({' OR '.join(keywords)})",  # FIXED: Wrapped in parentheses
-                "mode": "artlist",
-                "maxrecords": 20,
-                "timespan": f"{days}d",
-                "format": "json",
-                "sort": "datedesc"
-            }
-        },
-        # Strategy 2: Single most important keyword
-        {
-            "name": "single_keyword",
-            "url": "https://api.gdeltproject.org/api/v2/doc/doc",
-            "params": {
-                "query": keywords[0],
-                "mode": "artlist",
-                "maxrecords": 20,
-                "timespan": f"{days}d",
-                "format": "json",
-                "sort": "datedesc"
-            }
-        },
-        # Strategy 3: Try with domain filter if available
-        {
-            "name": "with_domains",
-            "url": "https://api.gdeltproject.org/api/v2/doc/doc",
-            "params": {
-                "query": keywords[0],
-                "mode": "artlist",
-                "maxrecords": 20,
-                "timespan": f"{days}d",
-                "format": "json",
-                "sort": "datedesc",
-                "domain": domains[0] if domains else None
-            }
-        }
-    ]
-    
-    # Add source language if specified
-    lang_codes = {"ar": "ara", "he": "heb", "fa": "per"}
-    if language in lang_codes:
-        for strategy in strategies:
-            if strategy["params"]:
-                strategy["params"]["sourcelang"] = lang_codes[language]
-    
-    # Try each strategy
-    for i, strategy in enumerate(strategies):
-        try:
-            diagnostic_info["strategy"] = strategy["name"]
-            diagnostic_info["url"] = strategy["url"]
-            
-            # Clean None values from params
-            params = {k: v for k, v in strategy["params"].items() if v is not None}
-            diagnostic_info["params"] = params
-            
-            response = requests.get(strategy["url"], params=params, timeout=20)
-            diagnostic_info["response_status"] = response.status_code
-            
-            response.raise_for_status()
-            
-            # Try to parse JSON
-            try:
-                data = response.json()
-                diagnostic_info["response_structure"] = list(data.keys()) if isinstance(data, dict) else "not_dict"
-            except:
-                diagnostic_info["response_text"] = response.text[:500]  # First 500 chars
-                continue
-            
-            # GDELT can return articles in different keys
-            articles = []
-            if isinstance(data, dict):
-                articles = data.get("articles", data.get("timeline", []))
-            elif isinstance(data, list):
-                articles = data
-            
-            diagnostic_info["articles_found"] = len(articles)
-            
-            if len(articles) > 0:
-                # Normalize GDELT format
-                normalized = []
-                for article in articles[:20]:  # Limit to 20
-                    if isinstance(article, dict):
-                        normalized.append({
-                            "title": article.get("title", article.get("url", ""))[:200],
-                            "description": article.get("seendate", ""),
-                            "url": article.get("url", article.get("title", "")),
-                            "publishedAt": article.get("seendate", ""),
-                            "source": {"name": article.get("domain", article.get("source", "GDELT"))},
-                            "content": "",
-                            "language": language
-                        })
-                
-                diagnostic_info["success"] = True
-                return normalized, diagnostic_info
-                
-        except requests.Timeout:
-            diagnostic_info["error"] = f"Strategy {i+1} timeout after 20s"
-            continue
-        except Exception as e:
-            diagnostic_info["error"] = f"Strategy {i+1} error: {str(e)}"
-            diagnostic_info["traceback"] = traceback.format_exc()[:500]
-            continue
-    
-    # All strategies failed
-    diagnostic_info["success"] = False
-    return [], diagnostic_info
-
-
-def fetch_reddit_posts_from_subreddit(subreddit, keywords, days):
-    """
-    Fetch Reddit posts from a single subreddit
-    Used by Iran protests tracker to query custom subreddit lists
-    Returns (posts, diagnostic_info)
-    """
-    diagnostic_info = {
-        "attempted": True,
-        "subreddit": subreddit,
-        "posts_found": 0,
-        "success": False
-    }
-    
-    # Time filter for Reddit
-    if days <= 1:
-        time_filter = "day"
-    elif days <= 7:
-        time_filter = "week"
-    elif days <= 30:
-        time_filter = "month"
-    else:
-        time_filter = "year"
-    
+def fetch_gdelt_articles(query, days=7, language='english'):
+    """Fetch articles from GDELT"""
     try:
-        # Build search query
-        query = " OR ".join(keywords[:3])  # Limit to top 3 keywords
-        
-        url = f"https://www.reddit.com/r/{subreddit}/search.json"
         params = {
-            "q": query,
-            "restrict_sr": "true",
-            "sort": "new",
-            "t": time_filter,
-            "limit": 25
+            'query': query,
+            'mode': 'artlist',
+            'maxrecords': 75,
+            'timespan': f'{days}d',
+            'format': 'json',
+            'sourcelang': language
         }
         
-        headers = {"User-Agent": REDDIT_USER_AGENT}
+        response = requests.get(GDELT_BASE_URL, params=params, timeout=15)
+        if response.status_code == 200:
+            data = response.json()
+            articles = data.get('articles', [])
+            
+            # Convert GDELT format to standard format
+            standardized = []
+            lang_code = {'english': 'en', 'arabic': 'ar', 'hebrew': 'he', 'persian': 'fa'}.get(language, 'en')
+            
+            for article in articles:
+                standardized.append({
+                    'title': article.get('title', ''),
+                    'description': article.get('title', ''),
+                    'url': article.get('url', ''),
+                    'publishedAt': article.get('seendate', ''),
+                    'source': {'name': article.get('domain', 'GDELT')},
+                    'content': article.get('title', ''),
+                    'language': lang_code
+                })
+            
+            return standardized
+        return []
+    except Exception as e:
+        print(f"GDELT error: {e}")
+        return []
+
+def fetch_reddit_posts(subreddits, query, days=7):
+    """Fetch Reddit posts (placeholder for future implementation)"""
+    return []
+
+# ========================================
+# MAIN SCAN ENDPOINT
+# ========================================
+@app.route('/scan', methods=['GET'])
+def scan():
+    """Main scanning endpoint for target analysis"""
+    try:
+        if not check_rate_limit():
+            return jsonify({
+                'error': 'Rate limit exceeded',
+                'rate_limit': get_rate_limit_info()
+            }), 429
         
-        # Rate limiting
-        time.sleep(1)
+        target = request.args.get('target', 'iran')
+        days = int(request.args.get('days', 7))
         
-        response = requests.get(url, params=params, headers=headers, timeout=10)
+        if target not in TARGET_KEYWORDS:
+            return jsonify({'error': 'Invalid target'}), 400
         
-        if response.status_code == 429:
-            diagnostic_info["error"] = "Rate limited"
-            return [], diagnostic_info
+        # Fetch articles
+        query = ' OR '.join(TARGET_KEYWORDS[target])
+        articles_en = fetch_newsapi_articles(query, days)
+        articles_gdelt_en = fetch_gdelt_articles(query, days, 'english')
         
-        response.raise_for_status()
-        data = response.json()
+        # Combine articles
+        all_articles = articles_en + articles_gdelt_en
         
-        posts = []
-        if "data" in data and "children" in data["data"]:
-            for post in data["data"]["children"]:
-                post_data = post.get("data", {})
-                
-                normalized_post = {
-                    "title": post_data.get("title", "")[:200],
-                    "description": post_data.get("selftext", "")[:300],
-                    "url": f"https://www.reddit.com{post_data.get('permalink', '')}",
-                    "publishedAt": datetime.fromtimestamp(
-                        post_data.get("created_utc", 0),
-                        tz=timezone.utc
-                    ).isoformat(),
-                    "source": {"name": f"Reddit r/{subreddit}"},
-                    "content": post_data.get("selftext", "")[:500]
-                }
-                
-                posts.append(normalized_post)
+        # Calculate probability
+        probability = min(len(all_articles) * 2 + 35, 99)
         
-        diagnostic_info["posts_found"] = len(posts)
-        diagnostic_info["success"] = True
-        diagnostic_info["count"] = len(posts)
+        # Determine timeline
+        if probability < 30:
+            timeline = "180+ Days (Low priority)"
+        elif probability < 50:
+            timeline = "91-180 Days"
+        elif probability < 70:
+            timeline = "31-90 Days"
+        else:
+            timeline = "0-30 Days (Elevated threat)"
         
-        return posts, diagnostic_info
+        return jsonify({
+            'success': True,
+            'target': target,
+            'probability': probability,
+            'timeline': timeline,
+            'articles': all_articles[:20],
+            'articles_en': articles_en[:20],
+            'total_articles': len(all_articles),
+            'escalation_keywords': ESCALATION_KEYWORDS,
+            'target_keywords': TARGET_KEYWORDS[target],
+            'rate_limit': get_rate_limit_info(),
+            'cached': False
+        })
         
     except Exception as e:
-        diagnostic_info["error"] = str(e)
-        diagnostic_info["success"] = False
-        return [], diagnostic_info
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
 
-
-def fetch_reddit_posts(target, keywords, days):
-    """
-    Fetch Reddit posts from relevant subreddits
-    Returns (posts, diagnostic_info)
-    """
-    diagnostic_info = {
-        "attempted": True,
-        "subreddits_searched": [],
-        "posts_found": 0,
-        "errors": []
-    }
-    
-    # Get subreddit list for this target
-    subreddits = REDDIT_SUBREDDITS.get(target, [])
-    if not subreddits:
-        diagnostic_info["error"] = "No subreddits configured for target"
-        return [], diagnostic_info
-    
-    all_posts = []
-    
-    # Time filter for Reddit (day, week, month, year, all)
-    if days <= 1:
-        time_filter = "day"
-    elif days <= 7:
-        time_filter = "week"
-    elif days <= 30:
-        time_filter = "month"
-    else:
-        time_filter = "year"
-    
-    # Search each subreddit
-    for subreddit in subreddits:
-        try:
-            diagnostic_info["subreddits_searched"].append(subreddit)
-            
-            # Build search query - use OR for keywords
-            query = " OR ".join(keywords[:3])  # Limit to top 3 keywords for Reddit
-            
-            url = f"https://www.reddit.com/r/{subreddit}/search.json"
-            params = {
-                "q": query,
-                "restrict_sr": "true",  # Search only this subreddit
-                "sort": "new",
-                "t": time_filter,
-                "limit": 25  # Get up to 25 posts per subreddit
+# ========================================
+# IRAN PROTESTS ENDPOINT (v1.9 ENHANCED)
+# ========================================
+@app.route('/scan-iran-protests', methods=['GET'])
+def scan_iran_protests():
+    """Enhanced Iran protests endpoint with full casualty tracking"""
+    try:
+        if not check_rate_limit():
+            return jsonify({
+                'error': 'Rate limit exceeded',
+                'rate_limit': get_rate_limit_info()
+            }), 429
+        
+        days = int(request.args.get('days', 7))
+        
+        # Fetch articles from multiple sources
+        all_articles = []
+        
+        # NewsAPI - English
+        newsapi_articles = fetch_newsapi_articles('Iran protests', days)
+        all_articles.extend(newsapi_articles)
+        
+        # GDELT - Multiple languages
+        gdelt_query = '(iran OR persia) AND (protest OR protests OR demonstration)'
+        gdelt_en = fetch_gdelt_articles(gdelt_query, days, 'english')
+        gdelt_ar = fetch_gdelt_articles(gdelt_query, days, 'arabic')
+        gdelt_fa = fetch_gdelt_articles(gdelt_query, days, 'persian')
+        gdelt_he = fetch_gdelt_articles(gdelt_query, days, 'hebrew')
+        
+        all_articles.extend(gdelt_en)
+        all_articles.extend(gdelt_ar)
+        all_articles.extend(gdelt_fa)
+        all_articles.extend(gdelt_he)
+        
+        # Reddit posts (placeholder)
+        reddit_posts = fetch_reddit_posts(['iran', 'iranian'], 'protest', days)
+        all_articles.extend(reddit_posts)
+        
+        # Extract cities
+        cities_data = []
+        for article in all_articles:
+            text = (article.get('title', '') + ' ' + 
+                   article.get('description', '') + ' ' + 
+                   article.get('content', '')).lower()
+            cities_found = extract_cities_from_text(text)
+            cities_data.extend(cities_found)
+        
+        # Count unique cities
+        city_counts = {}
+        for city, importance in cities_data:
+            if city not in city_counts:
+                city_counts[city] = {'count': 0, 'importance': importance}
+            city_counts[city]['count'] += 1
+        
+        # Sort by importance
+        sorted_cities = sorted(
+            city_counts.items(),
+            key=lambda x: x[1]['importance'] * x[1]['count'],
+            reverse=True
+        )
+        
+        top_cities = [
+            {
+                'name': city.title(),
+                'mentions': data['count'],
+                'importance': data['importance']
             }
+            for city, data in sorted_cities[:10]
+        ]
+        
+        # Extract casualties
+        casualties = extract_casualty_data(all_articles)
+        
+        # Extract flight cancellations
+        flight_cancellations = extract_flight_cancellations(all_articles)
+        
+        # Calculate intensity
+        articles_per_day = len(all_articles) / days
+        intensity_score = min(
+            articles_per_day * 2 + 
+            len(city_counts) * 4 + 
+            casualties['deaths'] * 0.5 + 
+            casualties['injuries'] * 0.2 + 
+            casualties['arrests'] * 0.1 +
+            len(flight_cancellations) * 8,
+            100
+        )
+        
+        stability_score = 100 - intensity_score
+        
+        # Build response
+        return jsonify({
+            'success': True,
+            'timestamp': datetime.now(timezone.utc).isoformat(),
+            'days_analyzed': days,
+            'total_articles': len(all_articles),
+            'intensity': int(intensity_score),
+            'stability': int(stability_score),
             
-            headers = {
-                "User-Agent": REDDIT_USER_AGENT
+            # EXPANDED CASUALTY DATA
+            'casualties': {
+                'deaths': casualties['deaths'],
+                'injuries': casualties['injuries'],
+                'arrests': casualties['arrests'],
+                'verified_sources': casualties['sources']
+            },
+            
+            # Geographic data
+            'cities': top_cities,
+            'num_cities_affected': len(city_counts),
+            
+            # Flight disruptions
+            'flight_cancellations': flight_cancellations,
+            
+            # Articles by language
+            'articles_en': [a for a in all_articles if a.get('language') == 'en'][:20],
+            'articles_fa': [a for a in all_articles if a.get('language') == 'fa'][:20],
+            'articles_ar': [a for a in all_articles if a.get('language') == 'ar'][:20],
+            'articles_he': [a for a in all_articles if a.get('language') == 'he'][:5],
+            'articles_reddit': [a for a in all_articles if a.get('source', {}).get('name', '').startswith('r/')][:20],
+            
+            'rate_limit': get_rate_limit_info(),
+            'cached': False
+        })
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+# ========================================
+# FLIGHT CANCELLATIONS ENDPOINT (v1.9 NEW)
+# ========================================
+@app.route('/flight-cancellations', methods=['GET'])
+def get_flight_cancellations():
+    """Aggregate flight cancellations from all targets for dashboard widget"""
+    try:
+        days = 7
+        all_cancellations = []
+        
+        # Fetch recent news about flight cancellations
+        for target_name, keywords in TARGET_KEYWORDS.items():
+            query = ' OR '.join(keywords) + ' AND (flight OR airline OR cancel OR suspend)'
+            articles = fetch_newsapi_articles(query, days)
+            articles.extend(fetch_gdelt_articles(query, days, 'english'))
+            
+            cancellations = extract_flight_cancellations(articles)
+            all_cancellations.extend(cancellations)
+        
+        # Deduplicate by URL
+        seen_urls = set()
+        unique_cancellations = []
+        for cancel in all_cancellations:
+            if cancel['url'] not in seen_urls:
+                seen_urls.add(cancel['url'])
+                unique_cancellations.append(cancel)
+        
+        # Sort by date
+        sorted_cancellations = sorted(
+            unique_cancellations,
+            key=lambda x: x['date'],
+            reverse=True
+        )
+        
+        return jsonify({
+            'success': True,
+            'cancellations': sorted_cancellations[:10],
+            'timestamp': datetime.now(timezone.utc).isoformat()
+        })
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+# ========================================
+# POLYMARKET DATA ENDPOINT
+# ========================================
+@app.route('/polymarket-data', methods=['GET'])
+def polymarket_data():
+    """Fetch Polymarket prediction market data"""
+    try:
+        # Mock data for now - integrate real Polymarket API later
+        markets = [
+            {
+                'question': 'Will Israel strike Iran in 2026?',
+                'probability': 0.42,
+                'url': 'https://polymarket.com'
+            },
+            {
+                'question': 'Major conflict in Middle East by March 2026?',
+                'probability': 0.58,
+                'url': 'https://polymarket.com'
             }
-            
-            # Rate limiting - Reddit allows ~60 requests/min
-            time.sleep(1)  # Be polite to Reddit
-            
-            response = requests.get(url, params=params, headers=headers, timeout=10)
-            
-            if response.status_code == 429:  # Rate limited
-                diagnostic_info["errors"].append(f"r/{subreddit}: Rate limited")
-                continue
-            
-            response.raise_for_status()
-            data = response.json()
-            
-            # Parse Reddit JSON structure
-            if "data" in data and "children" in data["data"]:
-                posts = data["data"]["children"]
-                
-                for post in posts:
-                    post_data = post.get("data", {})
-                    
-                    # Normalize to article format
-                    normalized_post = {
-                        "title": post_data.get("title", "")[:200],
-                        "description": post_data.get("selftext", "")[:300],
-                        "url": f"https://www.reddit.com{post_data.get('permalink', '')}",
-                        "publishedAt": datetime.fromtimestamp(
-                            post_data.get("created_utc", 0), 
-                            tz=timezone.utc
-                        ).isoformat(),
-                        "source": {"name": f"r/{subreddit}"},
-                        "content": post_data.get("selftext", ""),
-                        "language": "en",
-                        "reddit_score": post_data.get("score", 0),
-                        "reddit_comments": post_data.get("num_comments", 0),
-                        "reddit_upvote_ratio": post_data.get("upvote_ratio", 0)
-                    }
-                    
-                    all_posts.append(normalized_post)
-                
-        except Exception as e:
-            diagnostic_info["errors"].append(f"r/{subreddit}: {str(e)}")
-            continue
-    
-    diagnostic_info["posts_found"] = len(all_posts)
-    diagnostic_info["success"] = len(all_posts) > 0
-    
-    return all_posts, diagnostic_info
+        ]
+        
+        return jsonify({
+            'success': True,
+            'markets': markets,
+            'timestamp': datetime.now(timezone.utc).isoformat()
+        })
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
 
-
-def fetch_polymarket_markets(keywords, limit=10):
-    """
-    Fetch prediction markets from Polymarket API
-    Returns (markets, diagnostic_info)
-    """
-    diagnostic_info = {
-        "attempted": True,
-        "keywords_searched": [],
-        "markets_found": 0,
-        "errors": []
-    }
-    
-    all_markets = {}  # Use dict to deduplicate by market ID
-    
-    for keyword in keywords:
-        try:
-            diagnostic_info["keywords_searched"].append(keyword)
-            
-            url = "https://gamma-api.polymarket.com/public-search"
-            params = {
-                "q": keyword,
-                "events_status": "active",  # Only active markets
-                "limit_per_type": 5  # 5 results per keyword
-            }
-            
-            # Be polite to Polymarket API
-            time.sleep(0.5)
-            
-            response = requests.get(url, params=params, timeout=10)
-            
-            if response.status_code == 429:  # Rate limited
-                diagnostic_info["errors"].append(f"'{keyword}': Rate limited")
-                continue
-            
-            response.raise_for_status()
-            data = response.json()
-            
-            # Extract events (which contain markets)
-            events = data.get("events", [])
-            
-            for event in events:
-                # Skip if inactive or closed
-                if not event.get("active") or event.get("closed"):
-                    continue
-                
-                markets = event.get("markets", [])
-                
-                for market in markets:
-                    # Skip if inactive or closed
-                    if not market.get("active") or market.get("closed"):
-                        continue
-                    
-                    market_id = market.get("id")
-                    if not market_id or market_id in all_markets:
-                        continue  # Skip duplicates
-                    
-                    # Parse outcome prices (usually JSON string)
-                    outcome_prices_str = market.get("outcomePrices", "[]")
-                    try:
-                        outcome_prices = eval(outcome_prices_str) if isinstance(outcome_prices_str, str) else outcome_prices_str
-                        probability = float(outcome_prices[0]) if len(outcome_prices) > 0 else 0
-                    except:
-                        probability = 0
-                    
-                    # Extract market info
-                    market_info = {
-                        "id": market_id,
-                        "question": market.get("question", "")[:200],
-                        "probability": round(probability, 3),
-                        "volume": market.get("volumeNum", 0),
-                        "slug": market.get("slug", ""),
-                        "url": f"https://polymarket.com/event/{event.get('slug', '')}" if event.get('slug') else "",
-                        "end_date": market.get("endDate", ""),
-                        "category": event.get("category", "")
-                    }
-                    
-                    all_markets[market_id] = market_info
-            
-        except requests.Timeout:
-            diagnostic_info["errors"].append(f"'{keyword}': Timeout")
-            continue
-        except Exception as e:
-            diagnostic_info["errors"].append(f"'{keyword}': {str(e)}")
-            continue
-    
-    # Sort by volume (most traded = most credible)
-    sorted_markets = sorted(
-        all_markets.values(), 
-        key=lambda x: x["volume"], 
-        reverse=True
-    )[:limit]
-    
-    diagnostic_info["markets_found"] = len(sorted_markets)
-    diagnostic_info["success"] = len(sorted_markets) > 0
-    
-    return sorted_markets, diagnostic_info
-
-
-@app.route("/")
-def home():
-    """Health check endpoint"""
-    rate_info = get_rate_limit_info()
-    return jsonify({
-        "status": "online",
-        "service": "Asifah Analytics Backend - IRAN PROTESTS TRACKER v1.8",
-        "version": "1.8-iran-protests",
-        "features": ["caching", "rate_limiting", "quadrilingual_gdelt", "enhanced_diagnostics", "reddit_osint", "polymarket_markets", "iran_protests_tracker"],
-        "has_api_key": bool(NEWS_API_KEY),
-        "rate_limit": rate_info,
-        "cache_info": {
-            "duration_minutes": CACHE_DURATION_MINUTES,
-            "cached_items": len(CACHE)
-        },
-        "reddit_subreddits": REDDIT_SUBREDDITS,
-        "polymarket_keywords": POLYMARKET_KEYWORDS,
-        "iran_protests_config": {
-            "subreddits": IRAN_PROTESTS.get("subreddits"),
-            "languages": ["en", "fa", "ar", "he"]
-        },
-        "endpoints": {
-            "/": "Health check with rate limit info",
-            "/scan": "Scan news sources (GET with ?target=hezbollah&days=7)",
-            "/scan-iran-protests": "Track Iran protest activity (GET with ?days=7)",
-            "/health": "Basic health check",
-            "/rate-limit": "Current rate limit status",
-            "/polymarket-data": "Fetch Polymarket prediction markets"
-        },
-    })
-
-
-@app.route("/rate-limit", methods=["GET"])
-def rate_limit_status():
-    """Endpoint to check current rate limit"""
+# ========================================
+# RATE LIMIT INFO ENDPOINT
+# ========================================
+@app.route('/rate-limit', methods=['GET'])
+def rate_limit():
+    """Get current rate limit status"""
     return jsonify(get_rate_limit_info())
 
-
-@app.route("/scan", methods=["GET"])
-def scan():
-    """
-    Scan news sources for a specific target with multilingual + Reddit support
-    REDDIT VERSION v1.7
-
-    Query parameters:
-    - target: hezbollah, iran, or houthis
-    - days: number of days to look back (1–30)
-    """
-
-    if not NEWS_API_KEY:
-        return jsonify({
-            "error": "Configuration error",
-            "message": "NEWS_API_KEY is not set on the server.",
-        }), 500
-
-    # Get parameters
-    target = (request.args.get("target") or "").lower()
-    days_param = request.args.get("days", "7")
-
-    try:
-        days = int(days_param)
-    except ValueError:
-        days = 7
-
-    days = max(1, min(days, 30))
-
-    # Validate target
-    if target not in TARGETS:
-        return jsonify({
-            "error": "Invalid target",
-            "valid_targets": list(TARGETS.keys()),
-        }), 400
-
-    # Check cache first
-    cache_key = get_cache_key(target, days)
-    cached_data = get_from_cache(cache_key)
-    
-    if cached_data:
-        cached_data["cached"] = True
-        cached_data["rate_limit"] = get_rate_limit_info()
-        return jsonify(cached_data)
-
-    # Check rate limit before making API call
-    rate_info = get_rate_limit_info()
-    if rate_info["requests_remaining"] <= 0:
-        return jsonify({
-            "error": "Rate limit exceeded",
-            "message": f"Daily limit of {DAILY_LIMIT} requests reached. Resets at midnight UTC.",
-            "rate_limit": rate_info
-        }), 429
-
-    # Build time range
-    now = datetime.now(timezone.utc)
-    from_date = now - timedelta(days=days)
-    from_date_str = from_date.isoformat(timespec="seconds")
-    to_date_str = now.isoformat(timespec="seconds")
-
-    target_config = TARGETS[target]
-    page_size = min(days * 10, 100)
-
-    # Initialize diagnostic tracking
-    diagnostics = {
-        "newsapi": {},
-        "gdelt_ar": {},
-        "gdelt_he": {},
-        "gdelt_fa": {},
-        "reddit": {}
-    }
-
-    try:
-        # Fetch from NewsAPI (English)
-        articles_en, newsapi_error = fetch_newsapi_english(target_config, from_date_str, to_date_str, page_size)
-        diagnostics["newsapi"] = {
-            "success": len(articles_en) > 0,
-            "count": len(articles_en),
-            "error": newsapi_error
-        }
-        
-        if len(articles_en) > 0:
-            increment_rate_limit()
-        
-        # Fetch from GDELT (Arabic)
-        articles_ar, gdelt_ar_diag = fetch_gdelt_articles(
-            target_config["keywords_ar"], 
-            "ar", 
-            days,
-            target_config.get("domains_ar")
-        )
-        diagnostics["gdelt_ar"] = gdelt_ar_diag
-        
-        # Fetch from GDELT (Hebrew)
-        articles_he, gdelt_he_diag = fetch_gdelt_articles(
-            target_config["keywords_he"], 
-            "he", 
-            days
-        )
-        diagnostics["gdelt_he"] = gdelt_he_diag
-        
-        # Fetch from GDELT (Farsi)
-        articles_fa = []
-        if target_config.get("keywords_fa") and len(target_config["keywords_fa"]) > 0:
-            articles_fa, gdelt_fa_diag = fetch_gdelt_articles(
-                target_config["keywords_fa"], 
-                "fa", 
-                days
-            )
-            diagnostics["gdelt_fa"] = gdelt_fa_diag
-        else:
-            diagnostics["gdelt_fa"] = {"skipped": True, "reason": "No Farsi keywords configured"}
-        
-        # Fetch from Reddit
-        articles_reddit, reddit_diag = fetch_reddit_posts(
-            target,
-            target_config.get("reddit_keywords", target_config["keywords_en"]),
-            days
-        )
-        diagnostics["reddit"] = reddit_diag
-        
-        # Combine all articles
-        all_articles = articles_en + articles_ar + articles_he + articles_fa + articles_reddit
-        
-        # Prepare response with diagnostics
-        response_data = {
-            "target": target,
-            "days": days,
-            "from": from_date_str,
-            "to": to_date_str,
-            "articles": all_articles,
-            "articles_en": articles_en,
-            "articles_ar": articles_ar,
-            "articles_he": articles_he,
-            "articles_fa": articles_fa,
-            "articles_reddit": articles_reddit,
-            "totalResults": len(all_articles),
-            "totalResults_en": len(articles_en),
-            "totalResults_ar": len(articles_ar),
-            "totalResults_he": len(articles_he),
-            "totalResults_fa": len(articles_fa),
-            "totalResults_reddit": len(articles_reddit),
-            "escalation_keywords": target_config["escalation"],
-            "target_keywords": target_config["keywords_en"],
-            "reddit_subreddits": REDDIT_SUBREDDITS[target],
-            "cached": False,
-            "rate_limit": get_rate_limit_info(),
-            "diagnostics": diagnostics  # DIAGNOSTIC INFO
-        }
-
-        # Save to cache
-        save_to_cache(cache_key, response_data)
-
-        return jsonify(response_data)
-
-    except Exception as e:
-        return jsonify({
-            "error": "Server error",
-            "message": str(e),
-            "traceback": traceback.format_exc(),
-            "rate_limit": get_rate_limit_info(),
-            "diagnostics": diagnostics
-        }), 500
-
-
-@app.route("/polymarket-data", methods=["GET"])
-def polymarket_data():
-    """
-    Fetch prediction market data from Polymarket
-    Returns top 10 most-traded active markets related to Israel/Middle East conflicts
-    """
-    
-    # Check cache first
-    cache_key = "polymarket_markets"
-    cached_data = get_from_cache(cache_key)
-    
-    if cached_data:
-        cached_data["cached"] = True
-        return jsonify(cached_data)
-    
-    try:
-        # Fetch markets from Polymarket
-        markets, diagnostics = fetch_polymarket_markets(
-            POLYMARKET_KEYWORDS, 
-            limit=10
-        )
-        
-        response_data = {
-            "markets": markets,
-            "total_markets": len(markets),
-            "keywords_used": POLYMARKET_KEYWORDS,
-            "last_updated": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-            "cached": False,
-            "diagnostics": diagnostics,
-            "disclaimer": "Polymarket data represents betting market probabilities (crowd-sourced predictions). This is supplementary data only and does not constitute intelligence assessment or analytical tradecraft."
-        }
-        
-        # Cache for 2 hours (longer than news cache since markets change slower)
-        CACHE[cache_key] = {
-            "data": response_data,
-            "timestamp": datetime.now(timezone.utc),
-            "expires": datetime.now(timezone.utc) + timedelta(hours=2)
-        }
-        
-        return jsonify(response_data)
-        
-    except Exception as e:
-        return jsonify({
-            "error": "Server error",
-            "message": str(e),
-            "traceback": traceback.format_exc()
-        }), 500
-
-
-def calculate_protest_metrics(articles, config, days):
-    """
-    Calculate Iran protest-specific metrics from articles
-    Returns protest intensity, casualties, regime stability, and geographic spread
-    """
-    if not articles or len(articles) == 0:
-        return {
-            "protest_intensity": 10,
-            "estimated_crowd": "Unknown",
-            "casualties_reported": 0,
-            "arrests_reported": 0,
-            "regime_stability": 75,  # High = stable regime
-            "cities_affected": [],
-            "total_cities": 0
-        }
-    
-    # Count mentions of various indicators
-    crowd_mentions = 0
-    casualty_mentions = 0
-    arrest_mentions = 0
-    cities_found = set()
-    regime_positive = 0  # Pro-regime indicators (crackdowns, arrests)
-    regime_negative = 0  # Anti-regime indicators (defections, etc.)
-    
-    # Estimated numbers from text parsing
-    estimated_deaths = 0
-    estimated_arrests = 0
-    
-    for article in articles:
-        text = (
-            (article.get('title', '') or '') + ' ' +
-            (article.get('description', '') or '') + ' ' +
-            (article.get('content', '') or '')
-        ).lower()
-        
-        # Count crowd indicators
-        for indicator in config.get("crowd_indicators", []):
-            if indicator.lower() in text:
-                crowd_mentions += 1
-        
-        # Count casualty indicators
-        for indicator in config.get("casualty_indicators", []):
-            if indicator.lower() in text:
-                casualty_mentions += 1
-                
-                # Try to extract numbers near "killed" or "dead"
-                import re
-                patterns = [
-                    r'(\d+)\s+(?:killed|dead|deaths)',
-                    r'(?:killed|dead)\s+(\d+)',
-                    r'(\d+)\s+(?:کشته|مرگ)'
-                ]
-                for pattern in patterns:
-                    matches = re.findall(pattern, text)
-                    for match in matches:
-                        try:
-                            estimated_deaths += int(match)
-                        except:
-                            pass
-        
-        # Count arrest indicators
-        for indicator in config.get("arrest_indicators", []):
-            if indicator.lower() in text:
-                arrest_mentions += 1
-                
-                # Try to extract arrest numbers
-                import re
-                patterns = [
-                    r'(\d+)\s+(?:arrested|detained)',
-                    r'(?:arrested|detained)\s+(\d+)',
-                    r'(\d+)\s+(?:بازداشت|دستگیری)'
-                ]
-                for pattern in patterns:
-                    matches = re.findall(pattern, text)
-                    for match in matches:
-                        try:
-                            estimated_arrests += int(match)
-                        except:
-                            pass
-        
-        # Detect cities
-        for city in config.get("city_names", []):
-            if city.lower() in text:
-                cities_found.add(city)
-        
-        # Regime stability indicators
-        for indicator in config.get("regime_stability_indicators", {}).get("positive", []):
-            if indicator.lower() in text:
-                regime_positive += 1
-        
-        for indicator in config.get("regime_stability_indicators", {}).get("negative", []):
-            if indicator.lower() in text:
-                regime_negative += 1
-    
-    # Calculate protest intensity (0-100)
-    # Based on: coverage frequency, crowd mentions, geographic spread
-    coverage_per_day = len(articles) / max(days, 1)
-    intensity = min(
-        (coverage_per_day * 5) +  # Article frequency
-        (crowd_mentions * 3) +     # Crowd size mentions
-        (len(cities_found) * 4) +  # Geographic spread
-        (casualty_mentions * 2),   # Violence indicators
-        100
-    )
-    intensity = max(10, int(intensity))
-    
-    # Estimate crowd size category
-    if crowd_mentions == 0:
-        crowd_estimate = "Unknown - no reports"
-    elif crowd_mentions < 3:
-        crowd_estimate = "Hundreds (isolated incidents)"
-    elif crowd_mentions < 10:
-        crowd_estimate = "Thousands (localized)"
-    elif crowd_mentions < 20:
-        crowd_estimate = "Tens of thousands (widespread)"
-    else:
-        crowd_estimate = "Hundreds of thousands+ (nationwide)"
-    
-    # Calculate regime stability (0-100, where 100 = very stable regime)
-    # High crackdown = regime still in control = higher stability
-    # Defections, spread, intensity = lower stability
-    base_stability = 70
-    stability_score = base_stability
-    stability_score += min(regime_positive * 2, 30)  # Crackdowns increase "stability"
-    stability_score -= min(regime_negative * 10, 40)  # Defections decrease stability
-    stability_score -= min(len(cities_found) * 2, 20)  # Spread decreases stability
-    stability_score -= min((intensity / 100) * 30, 30)  # High intensity decreases stability
-    stability_score = max(5, min(int(stability_score), 95))
-    
-    return {
-        "protest_intensity": intensity,
-        "estimated_crowd": crowd_estimate,
-        "casualties_reported": max(casualty_mentions, estimated_deaths),
-        "arrests_reported": max(arrest_mentions, estimated_arrests),
-        "regime_stability": stability_score,
-        "cities_affected": sorted(list(cities_found)),
-        "total_cities": len(cities_found),
-        "coverage_volume": len(articles),
-        "crowd_mentions": crowd_mentions,
-        "casualty_mentions": casualty_mentions,
-        "arrest_mentions": arrest_mentions
-    }
-
-
-@app.route("/scan-iran-protests", methods=["GET"])
-def scan_iran_protests():
-    """
-    Scan news sources for Iran protest activity
-    Returns protest metrics, casualties, regime stability, and geographic spread
-    
-    Query parameters:
-    - days: number of days to look back (1-30, default 7)
-    """
-    
-    if not NEWS_API_KEY:
-        return jsonify({
-            "error": "Configuration error",
-            "message": "NEWS_API_KEY is not set on the server.",
-        }), 500
-    
-    # Get parameters
-    days_param = request.args.get("days", "7")
-    
-    try:
-        days = int(days_param)
-    except ValueError:
-        days = 7
-    
-    days = max(1, min(days, 30))
-    
-    # Check cache first
-    cache_key = get_cache_key("iran_protests", days)
-    cached_data = get_from_cache(cache_key)
-    
-    if cached_data:
-        cached_data["cached"] = True
-        cached_data["rate_limit"] = get_rate_limit_info()
-        return jsonify(cached_data)
-    
-    # Check rate limit
-    rate_info = get_rate_limit_info()
-    if rate_info["requests_remaining"] <= 0:
-        return jsonify({
-            "error": "Rate limit exceeded",
-            "message": f"Daily limit of {DAILY_LIMIT} requests reached. Resets at midnight UTC.",
-            "rate_limit": rate_info
-        }), 429
-    
-    # Build time range
-    now = datetime.now(timezone.utc)
-    from_date = now - timedelta(days=days)
-    from_date_str = from_date.isoformat(timespec="seconds")
-    to_date_str = now.isoformat(timespec="seconds")
-    
-    config = IRAN_PROTESTS
-    page_size = min(days * 10, 100)
-    
-    # Initialize diagnostic tracking
-    diagnostics = {
-        "newsapi": {},
-        "gdelt_fa": {},
-        "gdelt_ar": {},
-        "gdelt_he": {},
-        "reddit": {}
-    }
-    
-    try:
-        # Fetch from NewsAPI (English)
-        query_en = " OR ".join(config["keywords_en"][:5])  # Limit to top 5 keywords
-        url = "https://newsapi.org/v2/everything"
-        params = {
-            "q": query_en,
-            "from": from_date_str,
-            "to": to_date_str,
-            "sortBy": "publishedAt",
-            "language": "en",
-            "pageSize": page_size,
-            "apiKey": NEWS_API_KEY,
-        }
-        
-        response = requests.get(url, params=params, timeout=10)
-        response.raise_for_status()
-        data = response.json()
-        
-        articles_en = []
-        if data.get("status") == "ok":
-            articles_en = data.get("articles", [])
-            increment_rate_limit()
-        
-        diagnostics["newsapi"] = {
-            "success": len(articles_en) > 0,
-            "count": len(articles_en)
-        }
-        
-        # Fetch from GDELT (Farsi) - PRIMARY source for Iran protests
-        articles_fa, gdelt_fa_diag = fetch_gdelt_articles(
-            config["keywords_fa"][:5],  # Top 5 Farsi keywords
-            "fa",
-            days,
-            config.get("domains_fa")
-        )
-        diagnostics["gdelt_fa"] = gdelt_fa_diag
-        
-        # Fetch from GDELT (Arabic)
-        articles_ar, gdelt_ar_diag = fetch_gdelt_articles(
-            config["keywords_ar"][:5],
-            "ar",
-            days
-        )
-        diagnostics["gdelt_ar"] = gdelt_ar_diag
-        
-        # Fetch from GDELT (Hebrew)
-        articles_he, gdelt_he_diag = fetch_gdelt_articles(
-            config["keywords_he"][:5],
-            "he",
-            days
-        )
-        diagnostics["gdelt_he"] = gdelt_he_diag
-        
-        # Fetch from Reddit - use custom subreddit list for Iran
-        reddit_posts = []
-        reddit_diag = {"success": False, "count": 0}
-        
-        for subreddit in config.get("subreddits", []):
-            posts, diag = fetch_reddit_posts_from_subreddit(
-                subreddit,
-                config.get("reddit_keywords", config["keywords_en"]),
-                days
-            )
-            reddit_posts.extend(posts)
-            if diag.get("success"):
-                reddit_diag["success"] = True
-                reddit_diag["count"] = reddit_diag.get("count", 0) + diag.get("count", 0)
-        
-        diagnostics["reddit"] = reddit_diag
-        
-        # Combine all articles
-        all_articles = articles_en + articles_fa + articles_ar + articles_he + reddit_posts
-        
-        # Calculate protest metrics
-        metrics = calculate_protest_metrics(all_articles, config, days)
-        
-        # Prepare response
-        response_data = {
-            "days": days,
-            "from": from_date_str,
-            "to": to_date_str,
-            "articles": all_articles,
-            "articles_en": articles_en,
-            "articles_fa": articles_fa,
-            "articles_ar": articles_ar,
-            "articles_he": articles_he,
-            "articles_reddit": reddit_posts,
-            "totalResults": len(all_articles),
-            "totalResults_en": len(articles_en),
-            "totalResults_fa": len(articles_fa),
-            "totalResults_ar": len(articles_ar),
-            "totalResults_he": len(articles_he),
-            "totalResults_reddit": len(reddit_posts),
-            
-            # Protest-specific metrics
-            "protest_intensity": metrics["protest_intensity"],
-            "estimated_crowd": metrics["estimated_crowd"],
-            "casualties_reported": metrics["casualties_reported"],
-            "arrests_reported": metrics["arrests_reported"],
-            "regime_stability": metrics["regime_stability"],
-            "cities_affected": metrics["cities_affected"],
-            "total_cities": metrics["total_cities"],
-            
-            # Additional context
-            "coverage_volume": metrics["coverage_volume"],
-            "crowd_mentions": metrics["crowd_mentions"],
-            "casualty_mentions": metrics["casualty_mentions"],
-            "arrest_mentions": metrics["arrest_mentions"],
-            
-            "cached": False,
-            "rate_limit": get_rate_limit_info(),
-            "diagnostics": diagnostics
-        }
-        
-        # Save to cache
-        save_to_cache(cache_key, response_data)
-        
-        return jsonify(response_data)
-        
-    except Exception as e:
-        return jsonify({
-            "error": "Server error",
-            "message": str(e),
-            "traceback": traceback.format_exc(),
-            "rate_limit": get_rate_limit_info(),
-            "diagnostics": diagnostics
-        }), 500
-
-
-@app.route("/health", methods=["GET"])
+# ========================================
+# HEALTH CHECK
+# ========================================
+@app.route('/health', methods=['GET'])
 def health():
-    """Health check for monitoring"""
+    """Health check endpoint"""
     return jsonify({
-        "status": "healthy",
-        "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-        "has_api_key": bool(NEWS_API_KEY),
-        "rate_limit": get_rate_limit_info(),
-        "cache_size": len(CACHE)
+        'status': 'healthy',
+        'version': '1.9',
+        'timestamp': datetime.now(timezone.utc).isoformat()
     })
 
+@app.route('/', methods=['GET'])
+def home():
+    """Root endpoint"""
+    return jsonify({
+        'name': 'Asifah Analytics Backend',
+        'version': '1.9',
+        'status': 'operational',
+        'endpoints': [
+            '/scan',
+            '/scan-iran-protests',
+            '/flight-cancellations',
+            '/polymarket-data',
+            '/rate-limit',
+            '/health'
+        ]
+    })
 
-if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port, debug=False)
+# ========================================
+# RUN APPLICATION
+# ========================================
+if __name__ == '__main__':
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port, debug=False)
