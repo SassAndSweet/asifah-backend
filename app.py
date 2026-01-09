@@ -1,8 +1,12 @@
 """
-Asifah Analytics Backend v1.9
+Asifah Analytics Backend v1.9.1
 January 9, 2026
 
-New Features:
+New in v1.9.1:
+- Iran Wire RSS feed integration (English + Persian)
+- Direct source for flight cancellations and protest intel
+
+Previous v1.9 features:
 - Airline cancellation intelligence (30+ keywords)
 - Expanded Iranian city coverage (15 cities, 50+ variants)
 - Full casualty tracking (deaths, injuries, arrests)
@@ -12,6 +16,7 @@ New Features:
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 import requests
+import feedparser
 from datetime import datetime, timezone, timedelta
 import os
 import time
@@ -67,7 +72,8 @@ ESCALATION_KEYWORDS = [
     'british airways suspend', 'british airways cancel',
     'qatar airways suspend', 'qatar airways cancel',
     'etihad suspend', 'etihad cancel',
-    'klm suspend', 'klm cancel'
+    'klm suspend', 'klm cancel',
+    'pegasus airlines suspend', 'pegasus airlines cancel'
 ]
 
 TARGET_KEYWORDS = {
@@ -264,14 +270,14 @@ def extract_flight_cancellations(articles):
     airlines = [
         'emirates', 'turkish airlines', 'lufthansa', 'air france',
         'british airways', 'qatar airways', 'etihad', 'klm',
-        'austrian airlines', 'swiss', 'alitalia'
+        'austrian airlines', 'swiss', 'alitalia', 'pegasus airlines'
     ]
     
     for article in articles:
         text = (article.get('title', '') + ' ' + 
                 article.get('description', '')).lower()
         
-        if any(keyword in text for keyword in ['suspend', 'cancel', 'halt']):
+        if any(keyword in text for keyword in ['suspend', 'cancel', 'halt', 'turned back']):
             detected_airline = None
             for airline in airlines:
                 if airline in text:
@@ -283,6 +289,10 @@ def extract_flight_cancellations(articles):
                 destination = 'Unknown'
                 if 'iran' in text or 'tehran' in text:
                     destination = 'Tehran/Iran'
+                elif 'shiraz' in text:
+                    destination = 'Shiraz'
+                elif 'mashhad' in text:
+                    destination = 'Mashhad'
                 elif 'lebanon' in text or 'beirut' in text:
                     destination = 'Beirut/Lebanon'
                 elif 'yemen' in text or 'sanaa' in text:
@@ -299,6 +309,62 @@ def extract_flight_cancellations(articles):
                     })
     
     return cancellations
+
+# ========================================
+# IRAN WIRE RSS FEED (v1.9.1)
+# ========================================
+def fetch_iranwire_articles(days=7):
+    """
+    Fetch articles from Iran Wire RSS feeds
+    Iran Wire is an independent news organization covering Iran
+    with excellent protest and regional coverage
+    """
+    articles = []
+    feeds = [
+        ('https://iranwire.com/en/feed/', 'en'),
+        ('https://iranwire.com/fa/feed/', 'fa')
+    ]
+    
+    cutoff_date = datetime.now(timezone.utc) - timedelta(days=days)
+    
+    for feed_url, language in feeds:
+        try:
+            feed = feedparser.parse(feed_url)
+            
+            for entry in feed.entries:
+                # Parse publish date
+                try:
+                    if hasattr(entry, 'published_parsed') and entry.published_parsed:
+                        pub_date = datetime(*entry.published_parsed[:6], tzinfo=timezone.utc)
+                    elif hasattr(entry, 'updated_parsed') and entry.updated_parsed:
+                        pub_date = datetime(*entry.updated_parsed[:6], tzinfo=timezone.utc)
+                    else:
+                        # If no date, assume recent
+                        pub_date = datetime.now(timezone.utc)
+                except Exception:
+                    pub_date = datetime.now(timezone.utc)
+                
+                if pub_date >= cutoff_date:
+                    # Get summary/description
+                    description = ''
+                    if hasattr(entry, 'summary'):
+                        description = entry.summary
+                    elif hasattr(entry, 'description'):
+                        description = entry.description
+                    
+                    articles.append({
+                        'title': entry.title,
+                        'description': description or entry.title,
+                        'url': entry.link,
+                        'publishedAt': pub_date.isoformat(),
+                        'source': {'name': 'Iran Wire'},
+                        'content': description or entry.title,
+                        'language': language
+                    })
+        except Exception as e:
+            print(f"Iran Wire RSS error ({feed_url}): {e}")
+    
+    return articles
 
 # ========================================
 # RATE LIMITING
@@ -471,11 +537,11 @@ def scan():
         }), 500
 
 # ========================================
-# IRAN PROTESTS ENDPOINT (v1.9 ENHANCED)
+# IRAN PROTESTS ENDPOINT (v1.9.1 ENHANCED)
 # ========================================
 @app.route('/scan-iran-protests', methods=['GET'])
 def scan_iran_protests():
-    """Enhanced Iran protests endpoint with full casualty tracking"""
+    """Enhanced Iran protests endpoint with Iran Wire integration"""
     try:
         if not check_rate_limit():
             return jsonify({
@@ -503,6 +569,10 @@ def scan_iran_protests():
         all_articles.extend(gdelt_ar)
         all_articles.extend(gdelt_fa)
         all_articles.extend(gdelt_he)
+        
+        # IRAN WIRE - Direct RSS feed (v1.9.1)
+        iranwire_articles = fetch_iranwire_articles(days)
+        all_articles.extend(iranwire_articles)
         
         # Reddit posts (placeholder)
         reddit_posts = fetch_reddit_posts(['iran', 'iranian'], 'protest', days)
@@ -589,6 +659,7 @@ def scan_iran_protests():
             'articles_fa': [a for a in all_articles if a.get('language') == 'fa'][:20],
             'articles_ar': [a for a in all_articles if a.get('language') == 'ar'][:20],
             'articles_he': [a for a in all_articles if a.get('language') == 'he'][:5],
+            'articles_iranwire': [a for a in all_articles if a.get('source', {}).get('name') == 'Iran Wire'][:20],
             'articles_reddit': [a for a in all_articles if a.get('source', {}).get('name', '').startswith('r/')][:20],
             
             'rate_limit': get_rate_limit_info(),
@@ -619,6 +690,11 @@ def get_flight_cancellations():
             
             cancellations = extract_flight_cancellations(articles)
             all_cancellations.extend(cancellations)
+        
+        # Also check Iran Wire for flight news
+        iranwire_articles = fetch_iranwire_articles(days)
+        iranwire_cancellations = extract_flight_cancellations(iranwire_articles)
+        all_cancellations.extend(iranwire_cancellations)
         
         # Deduplicate by URL
         seen_urls = set()
@@ -696,8 +772,14 @@ def health():
     """Health check endpoint"""
     return jsonify({
         'status': 'healthy',
-        'version': '1.9',
-        'timestamp': datetime.now(timezone.utc).isoformat()
+        'version': '1.9.1',
+        'timestamp': datetime.now(timezone.utc).isoformat(),
+        'features': [
+            'Iran Wire RSS integration',
+            'Airline cancellation tracking',
+            'Expanded city coverage',
+            'Full casualty tracking'
+        ]
     })
 
 @app.route('/', methods=['GET'])
@@ -705,8 +787,9 @@ def home():
     """Root endpoint"""
     return jsonify({
         'name': 'Asifah Analytics Backend',
-        'version': '1.9',
+        'version': '1.9.1',
         'status': 'operational',
+        'new_in_v191': 'Iran Wire RSS feed integration',
         'endpoints': [
             '/scan',
             '/scan-iran-protests',
