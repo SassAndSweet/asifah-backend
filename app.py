@@ -1,11 +1,11 @@
 """
-Asifah Analytics Backend v1.9.3
+Asifah Analytics Backend v1.9.4
 January 11, 2026
 
-Changes from v1.9.2:
-- FIXED: GDELT query syntax (wrapped OR queries in parentheses)
-- RESTORED: Full Reddit scraping functionality
-- Reddit subreddits: ForbiddenBromance, Israel, Lebanon, Iran, Yemen, geopolitics, MiddleEastNews, OSINT
+Changes from v1.9.3:
+- OPTIMIZED: Reduced Reddit subreddits to 3 per target (avoid rate limiting)
+- OPTIMIZED: Increased Reddit delay to 2 seconds between requests
+- Subreddits: Hezbollah (ForbiddenBromance, Israel, Lebanon), Iran (Iran, Israel, geopolitics), Houthis (Yemen, Israel, geopolitics)
 """
 
 from flask import Flask, jsonify, request
@@ -36,11 +36,11 @@ rate_limit_data = {
 # ========================================
 # REDDIT CONFIGURATION
 # ========================================
-REDDIT_USER_AGENT = "AsifahAnalytics/1.9.3 (OSINT monitoring tool)"
+REDDIT_USER_AGENT = "AsifahAnalytics/1.9.4 (OSINT monitoring tool)"
 REDDIT_SUBREDDITS = {
-    "hezbollah": ["ForbiddenBromance", "Israel", "Lebanon", "geopolitics", "MiddleEastNews", "OSINT"],
-    "iran": ["Iran", "Israel", "geopolitics", "MiddleEastNews", "OSINT"],
-    "houthis": ["Yemen", "geopolitics", "MiddleEastNews", "OSINT"]
+    "hezbollah": ["ForbiddenBromance", "Israel", "Lebanon"],  # Optimized to 3
+    "iran": ["Iran", "Israel", "geopolitics"],  # Optimized to 3
+    "houthis": ["Yemen", "Israel", "geopolitics"]  # Optimized to 3
 }
 
 # ========================================
@@ -358,7 +358,7 @@ def get_rate_limit_info():
 def fetch_newsapi_articles(query, days=7):
     """Fetch articles from NewsAPI"""
     if not NEWSAPI_KEY:
-        print("[v1.9.3] NewsAPI: No API key configured")
+        print("[v1.9.4] NewsAPI: No API key configured")
         return []
     
     from_date = (datetime.now() - timedelta(days=days)).strftime('%Y-%m-%d')
@@ -381,12 +381,12 @@ def fetch_newsapi_articles(query, days=7):
             # Add language tag
             for article in articles:
                 article['language'] = 'en'
-            print(f"[v1.9.3] NewsAPI: Fetched {len(articles)} articles")
+            print(f"[v1.9.4] NewsAPI: Fetched {len(articles)} articles")
             return articles
-        print(f"[v1.9.3] NewsAPI: HTTP {response.status_code}")
+        print(f"[v1.9.4] NewsAPI: HTTP {response.status_code}")
         return []
     except Exception as e:
-        print(f"[v1.9.3] NewsAPI error: {e}")
+        print(f"[v1.9.4] NewsAPI error: {e}")
         return []
 
 def fetch_gdelt_articles(query, days=7, language='eng'):
@@ -404,15 +404,15 @@ def fetch_gdelt_articles(query, days=7, language='eng'):
             'sourcelang': language
         }
         
-        print(f"[v1.9.3] GDELT {language}: Query = {wrapped_query}")
+        print(f"[v1.9.4] GDELT {language}: Query = {wrapped_query}")
         
         response = requests.get(GDELT_BASE_URL, params=params, timeout=15)
         
         # Check content type
         content_type = response.headers.get('Content-Type', '')
         if 'application/json' not in content_type:
-            print(f"[v1.9.3] GDELT warning: Response is not JSON (Content-Type: {content_type})")
-            print(f"[v1.9.3] GDELT response preview: {response.text[:200]}")
+            print(f"[v1.9.4] GDELT warning: Response is not JSON (Content-Type: {content_type})")
+            print(f"[v1.9.4] GDELT response preview: {response.text[:200]}")
             return []
         
         if response.status_code == 200:
@@ -434,13 +434,13 @@ def fetch_gdelt_articles(query, days=7, language='eng'):
                     'language': lang_code
                 })
             
-            print(f"[v1.9.3] GDELT {language}: Fetched {len(standardized)} articles")
+            print(f"[v1.9.4] GDELT {language}: Fetched {len(standardized)} articles")
             return standardized
         
-        print(f"[v1.9.3] GDELT {language}: HTTP {response.status_code}")
+        print(f"[v1.9.4] GDELT {language}: HTTP {response.status_code}")
         return []
     except Exception as e:
-        print(f"[v1.9.3] GDELT {language} error: {e}")
+        print(f"[v1.9.4] GDELT {language} error: {e}")
         return []
 
 def fetch_reddit_posts(target, keywords, days=7):
@@ -448,12 +448,12 @@ def fetch_reddit_posts(target, keywords, days=7):
     Fetch Reddit posts from relevant subreddits
     RESTORED FULL FUNCTIONALITY
     """
-    print(f"[v1.9.3] Reddit: Starting fetch for {target}")
+    print(f"[v1.9.4] Reddit: Starting fetch for {target}")
     
     # Get subreddit list for this target
     subreddits = REDDIT_SUBREDDITS.get(target, [])
     if not subreddits:
-        print(f"[v1.9.3] Reddit: No subreddits configured for {target}")
+        print(f"[v1.9.4] Reddit: No subreddits configured for {target}")
         return []
     
     all_posts = []
@@ -488,12 +488,12 @@ def fetch_reddit_posts(target, keywords, days=7):
             }
             
             # Rate limiting - Reddit allows ~60 requests/min
-            time.sleep(1)  # Be polite to Reddit
+            time.sleep(2)  # Increased to 2 seconds to avoid rate limiting
             
             response = requests.get(url, params=params, headers=headers, timeout=10)
             
             if response.status_code == 429:  # Rate limited
-                print(f"[v1.9.3] Reddit r/{subreddit}: Rate limited")
+                print(f"[v1.9.4] Reddit r/{subreddit}: Rate limited")
                 continue
             
             response.raise_for_status()
@@ -525,13 +525,13 @@ def fetch_reddit_posts(target, keywords, days=7):
                     
                     all_posts.append(normalized_post)
                 
-                print(f"[v1.9.3] Reddit r/{subreddit}: Found {len(posts)} posts")
+                print(f"[v1.9.4] Reddit r/{subreddit}: Found {len(posts)} posts")
             
         except Exception as e:
-            print(f"[v1.9.3] Reddit r/{subreddit} error: {str(e)}")
+            print(f"[v1.9.4] Reddit r/{subreddit} error: {str(e)}")
             continue
     
-    print(f"[v1.9.3] Reddit: Total {len(all_posts)} posts from {len(subreddits)} subreddits")
+    print(f"[v1.9.4] Reddit: Total {len(all_posts)} posts from {len(subreddits)} subreddits")
     return all_posts
 
 def fetch_iranwire_rss():
@@ -568,9 +568,9 @@ def fetch_iranwire_rss():
                             'language': lang
                         })
                 
-                print(f"[v1.9.3] Iran Wire {lang}: Fetched {len([a for a in articles if a['language']==lang])} articles")
+                print(f"[v1.9.4] Iran Wire {lang}: Fetched {len([a for a in articles if a['language']==lang])} articles")
         except Exception as e:
-            print(f"[v1.9.3] Iran Wire {lang} error: {e}")
+            print(f"[v1.9.4] Iran Wire {lang} error: {e}")
     
     return articles
 
@@ -642,7 +642,7 @@ def scan():
             'target_keywords': TARGET_KEYWORDS[target]['keywords'],
             'rate_limit': get_rate_limit_info(),
             'cached': False,
-            'version': '1.9.3'
+            'version': '1.9.4'
         })
         
     except Exception as e:
@@ -782,7 +782,7 @@ def scan_iran_protests():
             
             'rate_limit': get_rate_limit_info(),
             'cached': False,
-            'version': '1.9.3'
+            'version': '1.9.4'
         })
         
     except Exception as e:
@@ -829,7 +829,7 @@ def get_flight_cancellations():
             'success': True,
             'cancellations': sorted_cancellations[:10],
             'timestamp': datetime.now(timezone.utc).isoformat(),
-            'version': '1.9.3'
+            'version': '1.9.4'
         })
         
     except Exception as e:
@@ -863,7 +863,7 @@ def polymarket_data():
             'success': True,
             'markets': markets,
             'timestamp': datetime.now(timezone.utc).isoformat(),
-            'version': '1.9.3'
+            'version': '1.9.4'
         })
         
     except Exception as e:
@@ -888,12 +888,12 @@ def health():
     """Health check endpoint"""
     return jsonify({
         'status': 'healthy',
-        'version': '1.9.3',
+        'version': '1.9.4',
         'timestamp': datetime.now(timezone.utc).isoformat(),
         'features': [
             'NewsAPI (English)',
             'GDELT (4 languages with FIXED syntax)',
-            'Reddit OSINT (RESTORED)',
+            'Reddit OSINT (OPTIMIZED: 3 subreddits, 2s delay)',
             'Iran Wire RSS',
             'Flight monitoring',
             'Casualty tracking'
@@ -906,12 +906,12 @@ def home():
     """Root endpoint"""
     return jsonify({
         'name': 'Asifah Analytics Backend',
-        'version': '1.9.3',
+        'version': '1.9.4',
         'status': 'operational',
         'changes': [
-            'FIXED: GDELT query syntax (parentheses)',
-            'RESTORED: Full Reddit scraping',
-            'Subreddits: ForbiddenBromance, Israel, Lebanon, Iran, Yemen, geopolitics, MiddleEastNews, OSINT'
+            'OPTIMIZED: Reddit reduced to 3 subreddits per target',
+            'OPTIMIZED: 2-second delay between Reddit requests',
+            'Subreddits: Hezbollah (ForbiddenBromance, Israel, Lebanon), Iran (Iran, Israel, geopolitics), Houthis (Yemen, Israel, geopolitics)'
         ],
         'endpoints': [
             '/scan',
