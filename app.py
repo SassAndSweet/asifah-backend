@@ -245,9 +245,11 @@ def extract_casualty_data(articles):
     number_pattern = r'(\d+|hundreds?|thousands?|dozens?|several\s+(?:hundred|thousand|dozen))\s+(?:people\s+)?'
     
     for article in articles:
-        text = (article.get('title', '') + ' ' + 
-                article.get('description', '') + ' ' + 
-                article.get('content', '')).lower()
+        # Safe concatenation - handle None values
+        title = article.get('title') or ''
+        description = article.get('description') or ''
+        content = article.get('content') or ''
+        text = (title + ' ' + description + ' ' + content).lower()
         
         source = article.get('source', {}).get('name', 'Unknown')
         url = article.get('url', '')
@@ -325,8 +327,10 @@ def extract_flight_cancellations(articles):
     ]
     
     for article in articles:
-        text = (article.get('title', '') + ' ' + 
-                article.get('description', '')).lower()
+        # Safe concatenation - handle None values
+        title = article.get('title') or ''
+        description = article.get('description') or ''
+        text = (title + ' ' + description).lower()
         
         if any(keyword in text for keyword in ['suspend', 'cancel', 'halt']):
             detected_airline = None
@@ -779,9 +783,11 @@ def scan_iran_protests():
         # Extract cities
         cities_data = []
         for article in all_articles:
-            text = (article.get('title', '') + ' ' + 
-                   article.get('description', '') + ' ' + 
-                   article.get('content', '')).lower()
+            # Safe concatenation - handle None values
+            title = article.get('title') or ''
+            description = article.get('description') or ''
+            content = article.get('content') or ''
+            text = (title + ' ' + description + ' ' + content).lower()
             cities_found = extract_cities_from_text(text)
             cities_data.extend(cities_found)
         
