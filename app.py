@@ -423,43 +423,54 @@ def extract_casualty_data(articles):
     return casualties
 
 # ========================================
-# FLIGHT CANCELLATION TRACKING
+# FLIGHT CANCELLATION TRACKING - ENHANCED v1.9.9
 # ========================================
 def extract_flight_cancellations(articles):
-    """Extract airline cancellation data from articles"""
+    """Extract airline cancellation data from articles - ENHANCED to detect multiple airlines"""
     cancellations = []
     
+    # ENHANCED: More airlines including budget carriers
     airlines = [
         'emirates', 'turkish airlines', 'lufthansa', 'air france',
-        'british airways', 'qatar airways', 'etihad', 'klm',
-        'austrian airlines', 'swiss', 'alitalia'
+        'british airways', 'qatar airways', 'etihad', 'etihad airways', 'klm',
+        'austrian airlines', 'swiss', 'alitalia', 'flydubai', 'fly dubai',
+        'pegasus', 'pegasus airlines', 'wizz air', 'ryanair',
+        'air canada', 'united airlines', 'delta', 'american airlines'
     ]
     
     for article in articles:
         # Safe concatenation - handle None values
         title = article.get('title') or ''
         description = article.get('description') or ''
-        text = (title + ' ' + description).lower()
+        content = article.get('content') or ''
+        text = (title + ' ' + description + ' ' + content).lower()
         
-        if any(keyword in text for keyword in ['suspend', 'cancel', 'halt']):
-            detected_airline = None
+        # Check if article mentions cancellations
+        if any(keyword in text for keyword in ['suspend', 'cancel', 'halt', 'cancelled', 'suspended']):
+            
+            # CRITICAL FIX: Find ALL airlines mentioned, not just first one
+            detected_airlines = []
             for airline in airlines:
                 if airline in text:
-                    detected_airline = airline
-                    break
+                    # Normalize airline name
+                    normalized = airline.title()
+                    if normalized not in detected_airlines:
+                        detected_airlines.append(normalized)
             
-            if detected_airline:
-                destination = 'Unknown'
-                if 'iran' in text or 'tehran' in text:
-                    destination = 'Tehran/Iran'
-                elif 'lebanon' in text or 'beirut' in text:
-                    destination = 'Beirut/Lebanon'
-                elif 'yemen' in text or 'sanaa' in text:
-                    destination = 'Sanaa/Yemen'
-                
-                if destination != 'Unknown':
+            # Determine destination
+            destination = 'Unknown'
+            if 'iran' in text or 'tehran' in text:
+                destination = 'Tehran/Iran'
+            elif 'lebanon' in text or 'beirut' in text:
+                destination = 'Beirut/Lebanon'
+            elif 'yemen' in text or 'sanaa' in text:
+                destination = 'Sanaa/Yemen'
+            
+            # Add entry for EACH airline found
+            if destination != 'Unknown' and detected_airlines:
+                for airline in detected_airlines:
                     cancellations.append({
-                        'airline': detected_airline.title(),
+                        'airline': airline,
                         'destination': destination,
                         'date': article.get('publishedAt', 'Unknown date')[:10],
                         'source': article.get('source', {}).get('name', 'Unknown'),
