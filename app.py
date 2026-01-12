@@ -1,12 +1,11 @@
 """
-Asifah Analytics Backend v1.9.6
-January 11, 2026
+Asifah Analytics Backend v1.9.7
+January 12, 2026
 
-Changes from v1.9.5:
-- ENHANCED: Better error handling for all data sources
-- ENHANCED: Detailed logging showing source counts (NYT, BBC, WaPo, etc.)
-- ENHANCED: Improved casualty extraction and reporting
-- VERIFIED: Iran Wire working correctly on Render
+Changes from v1.9.6:
+- FIXED: Iran Wire articles now tracked separately for frontend
+- FIXED: articles_iranwire array now properly populated
+- All Iran Wire articles now include 'iranwire' source tag
 """
 
 from flask import Flask, jsonify, request
@@ -37,11 +36,11 @@ rate_limit_data = {
 # ========================================
 # REDDIT CONFIGURATION
 # ========================================
-REDDIT_USER_AGENT = "AsifahAnalytics/1.9.6 (OSINT monitoring tool)"
+REDDIT_USER_AGENT = "AsifahAnalytics/1.9.7 (OSINT monitoring tool)"
 REDDIT_SUBREDDITS = {
-    "hezbollah": ["ForbiddenBromance", "Israel", "Lebanon"],  # Optimized to 3
-    "iran": ["Iran", "Israel", "geopolitics"],  # Optimized to 3
-    "houthis": ["Yemen", "Israel", "geopolitics"]  # Optimized to 3
+    "hezbollah": ["ForbiddenBromance", "Israel", "Lebanon"],
+    "iran": ["Iran", "Israel", "geopolitics"],
+    "houthis": ["Yemen", "Israel", "geopolitics"]
 }
 
 # ========================================
@@ -213,15 +212,12 @@ def parse_number_word(num_str):
     """Convert number words to integers"""
     num_str = num_str.lower().strip()
     
-    # Try direct integer conversion first
     try:
         return int(num_str)
     except:
         pass
     
-    # Word conversions
     if 'hundred' in num_str or 'hundreds' in num_str:
-        # Check for "several hundred" etc
         if any(word in num_str for word in ['several', 'few', 'many']):
             return 200
         return 100
@@ -237,16 +233,15 @@ def parse_number_word(num_str):
     return 0
 
 def extract_casualty_data(articles):
-    """Extract verified casualty numbers from articles - ENHANCED v1.9.6"""
+    """Extract verified casualty numbers from articles"""
     casualties = {
         'deaths': 0,
         'injuries': 0,
         'arrests': 0,
         'sources': set(),
-        'details': []  # Track specific mentions with sources
+        'details': []
     }
     
-    # Enhanced number patterns
     number_pattern = r'(\d+|hundreds?|thousands?|dozens?|several\s+(?:hundred|thousand|dozen))\s+(?:people\s+)?'
     
     for article in articles:
@@ -257,7 +252,6 @@ def extract_casualty_data(articles):
         source = article.get('source', {}).get('name', 'Unknown')
         url = article.get('url', '')
         
-        # Track deaths
         for keyword in CASUALTY_KEYWORDS['deaths']:
             if keyword in text:
                 casualties['sources'].add(source)
@@ -274,7 +268,6 @@ def extract_casualty_data(articles):
                             'url': url
                         })
         
-        # Track injuries
         for keyword in CASUALTY_KEYWORDS['injuries']:
             if keyword in text:
                 casualties['sources'].add(source)
@@ -291,7 +284,6 @@ def extract_casualty_data(articles):
                             'url': url
                         })
         
-        # Track arrests
         for keyword in CASUALTY_KEYWORDS['arrests']:
             if keyword in text:
                 casualties['sources'].add(source)
@@ -310,13 +302,12 @@ def extract_casualty_data(articles):
     
     casualties['sources'] = list(casualties['sources'])
     
-    # Log casualty findings
     if casualties['deaths'] > 0:
-        print(f"[v1.9.6] Casualties: {casualties['deaths']} deaths detected")
+        print(f"[v1.9.7] Casualties: {casualties['deaths']} deaths detected")
     if casualties['injuries'] > 0:
-        print(f"[v1.9.6] Casualties: {casualties['injuries']} injuries detected")
+        print(f"[v1.9.7] Casualties: {casualties['injuries']} injuries detected")
     if casualties['arrests'] > 0:
-        print(f"[v1.9.6] Casualties: {casualties['arrests']} arrests detected")
+        print(f"[v1.9.7] Casualties: {casualties['arrests']} arrests detected")
     
     return casualties
 
@@ -345,7 +336,6 @@ def extract_flight_cancellations(articles):
                     break
             
             if detected_airline:
-                # Determine destination
                 destination = 'Unknown'
                 if 'iran' in text or 'tehran' in text:
                     destination = 'Tehran/Iran'
@@ -375,12 +365,10 @@ def check_rate_limit():
     
     current_time = time.time()
     
-    # Reset if window has passed
     if current_time >= rate_limit_data['reset_time']:
         rate_limit_data['requests'] = 0
         rate_limit_data['reset_time'] = current_time + RATE_LIMIT_WINDOW
     
-    # Check limit
     if rate_limit_data['requests'] >= RATE_LIMIT:
         return False
     
@@ -406,7 +394,7 @@ def get_rate_limit_info():
 def fetch_newsapi_articles(query, days=7):
     """Fetch articles from NewsAPI"""
     if not NEWSAPI_KEY:
-        print("[v1.9.6] NewsAPI: No API key configured")
+        print("[v1.9.7] NewsAPI: No API key configured")
         return []
     
     from_date = (datetime.now() - timedelta(days=days)).strftime('%Y-%m-%d')
@@ -426,44 +414,40 @@ def fetch_newsapi_articles(query, days=7):
         if response.status_code == 200:
             data = response.json()
             articles = data.get('articles', [])
-            # Add language tag
             for article in articles:
                 article['language'] = 'en'
             
-            # Enhanced logging - show premium sources
             sources = {}
             for article in articles:
                 source_name = article.get('source', {}).get('name', 'Unknown')
                 sources[source_name] = sources.get(source_name, 0) + 1
             
-            # Check for premium sources
             nyt = sources.get('The New York Times', 0)
             wapo = sources.get('The Washington Post', 0)
             bbc = sources.get('BBC News', 0)
             
-            print(f"[v1.9.6] NewsAPI: Fetched {len(articles)} articles")
+            print(f"[v1.9.7] NewsAPI: Fetched {len(articles)} articles")
             if nyt > 0:
-                print(f"[v1.9.6] NewsAPI: ✓ NYT articles: {nyt}")
+                print(f"[v1.9.7] NewsAPI: ✓ NYT articles: {nyt}")
             if wapo > 0:
-                print(f"[v1.9.6] NewsAPI: ✓ WaPo articles: {wapo}")
+                print(f"[v1.9.7] NewsAPI: ✓ WaPo articles: {wapo}")
             if bbc > 0:
-                print(f"[v1.9.6] NewsAPI: ✓ BBC articles: {bbc}")
+                print(f"[v1.9.7] NewsAPI: ✓ BBC articles: {bbc}")
             
             return articles
-        print(f"[v1.9.6] NewsAPI: HTTP {response.status_code}")
+        print(f"[v1.9.7] NewsAPI: HTTP {response.status_code}")
         return []
     except Exception as e:
-        print(f"[v1.9.6] NewsAPI error: {e}")
+        print(f"[v1.9.7] NewsAPI error: {e}")
         return []
 
 def fetch_gdelt_articles(query, days=7, language='eng'):
-    """Fetch articles from GDELT with FIXED query syntax"""
+    """Fetch articles from GDELT"""
     try:
-        # CRITICAL FIX: Wrap OR queries in parentheses
         wrapped_query = f"({query})" if ' OR ' in query else query
         
         params = {
-            'query': wrapped_query,  # FIXED: Now properly wrapped
+            'query': wrapped_query,
             'mode': 'artlist',
             'maxrecords': 75,
             'timespan': f'{days}d',
@@ -471,26 +455,22 @@ def fetch_gdelt_articles(query, days=7, language='eng'):
             'sourcelang': language
         }
         
-        print(f"[v1.9.5] GDELT {language}: Query = {wrapped_query}")
+        print(f"[v1.9.7] GDELT {language}: Query = {wrapped_query}")
         
         response = requests.get(GDELT_BASE_URL, params=params, timeout=15)
         
-        # Check content type
         content_type = response.headers.get('Content-Type', '')
         if 'application/json' not in content_type:
-            print(f"[v1.9.5] GDELT warning: Response is not JSON (Content-Type: {content_type})")
-            print(f"[v1.9.5] GDELT response preview: {response.text[:200]}")
+            print(f"[v1.9.7] GDELT warning: Response is not JSON")
             return []
         
         if response.status_code == 200:
             data = response.json()
             articles = data.get('articles', [])
             
-            # Convert GDELT format to standard format
             standardized = []
             lang_code = {'eng': 'en', 'ara': 'ar', 'heb': 'he', 'fas': 'fa'}.get(language, 'en')
             
-            # Track domains
             domains = {}
             
             for article in articles:
@@ -499,7 +479,7 @@ def fetch_gdelt_articles(query, days=7, language='eng'):
                 
                 standardized.append({
                     'title': article.get('title', ''),
-                    'description': article.get('title', ''),  # GDELT doesn't have description
+                    'description': article.get('title', ''),
                     'url': article.get('url', ''),
                     'publishedAt': article.get('seendate', ''),
                     'source': {'name': article.get('domain', 'GDELT')},
@@ -507,9 +487,8 @@ def fetch_gdelt_articles(query, days=7, language='eng'):
                     'language': lang_code
                 })
             
-            print(f"[v1.9.6] GDELT {language}: Fetched {len(standardized)} articles")
+            print(f"[v1.9.7] GDELT {language}: Fetched {len(standardized)} articles")
             
-            # Show premium sources in GDELT
             premium_domains = {
                 'nytimes.com': 'NYT',
                 'washingtonpost.com': 'WaPo',
@@ -522,33 +501,28 @@ def fetch_gdelt_articles(query, days=7, language='eng'):
             for domain, count in domains.items():
                 for premium_domain, name in premium_domains.items():
                     if premium_domain in domain.lower():
-                        print(f"[v1.9.6] GDELT {language}: ✓ {name} articles: {count}")
+                        print(f"[v1.9.7] GDELT {language}: ✓ {name} articles: {count}")
                         break
             
             return standardized
         
-        print(f"[v1.9.5] GDELT {language}: HTTP {response.status_code}")
+        print(f"[v1.9.7] GDELT {language}: HTTP {response.status_code}")
         return []
     except Exception as e:
-        print(f"[v1.9.5] GDELT {language} error: {e}")
+        print(f"[v1.9.7] GDELT {language} error: {e}")
         return []
 
 def fetch_reddit_posts(target, keywords, days=7):
-    """
-    Fetch Reddit posts from relevant subreddits
-    RESTORED FULL FUNCTIONALITY
-    """
-    print(f"[v1.9.5] Reddit: Starting fetch for {target}")
+    """Fetch Reddit posts from relevant subreddits"""
+    print(f"[v1.9.7] Reddit: Starting fetch for {target}")
     
-    # Get subreddit list for this target
     subreddits = REDDIT_SUBREDDITS.get(target, [])
     if not subreddits:
-        print(f"[v1.9.5] Reddit: No subreddits configured for {target}")
+        print(f"[v1.9.7] Reddit: No subreddits configured for {target}")
         return []
     
     all_posts = []
     
-    # Time filter for Reddit (day, week, month, year, all)
     if days <= 1:
         time_filter = "day"
     elif days <= 7:
@@ -558,45 +532,40 @@ def fetch_reddit_posts(target, keywords, days=7):
     else:
         time_filter = "year"
     
-    # Search each subreddit
     for subreddit in subreddits:
         try:
-            # Build search query - use OR for keywords
-            query = " OR ".join(keywords[:3])  # Limit to top 3 keywords for Reddit
+            query = " OR ".join(keywords[:3])
             
             url = f"https://www.reddit.com/r/{subreddit}/search.json"
             params = {
                 "q": query,
-                "restrict_sr": "true",  # Search only this subreddit
+                "restrict_sr": "true",
                 "sort": "new",
                 "t": time_filter,
-                "limit": 25  # Get up to 25 posts per subreddit
+                "limit": 25
             }
             
             headers = {
                 "User-Agent": REDDIT_USER_AGENT
             }
             
-            # Rate limiting - Reddit allows ~60 requests/min
-            time.sleep(2)  # Increased to 2 seconds to avoid rate limiting
+            time.sleep(2)
             
             response = requests.get(url, params=params, headers=headers, timeout=10)
             
-            if response.status_code == 429:  # Rate limited
-                print(f"[v1.9.5] Reddit r/{subreddit}: Rate limited")
+            if response.status_code == 429:
+                print(f"[v1.9.7] Reddit r/{subreddit}: Rate limited")
                 continue
             
             response.raise_for_status()
             data = response.json()
             
-            # Parse Reddit JSON structure
             if "data" in data and "children" in data["data"]:
                 posts = data["data"]["children"]
                 
                 for post in posts:
                     post_data = post.get("data", {})
                     
-                    # Normalize to article format
                     normalized_post = {
                         "title": post_data.get("title", "")[:200],
                         "description": post_data.get("selftext", "")[:300],
@@ -615,17 +584,17 @@ def fetch_reddit_posts(target, keywords, days=7):
                     
                     all_posts.append(normalized_post)
                 
-                print(f"[v1.9.5] Reddit r/{subreddit}: Found {len(posts)} posts")
+                print(f"[v1.9.7] Reddit r/{subreddit}: Found {len(posts)} posts")
             
         except Exception as e:
-            print(f"[v1.9.5] Reddit r/{subreddit} error: {str(e)}")
+            print(f"[v1.9.7] Reddit r/{subreddit} error: {str(e)}")
             continue
     
-    print(f"[v1.9.5] Reddit: Total {len(all_posts)} posts from {len(subreddits)} subreddits")
+    print(f"[v1.9.7] Reddit: Total {len(all_posts)} posts")
     return all_posts
 
 def fetch_iranwire_rss():
-    """Fetch articles from Iran Wire RSS feeds with enhanced error handling"""
+    """Fetch articles from Iran Wire RSS feeds - FIXED v1.9.7 with iranwire tag"""
     articles = []
     
     feeds = {
@@ -635,20 +604,19 @@ def fetch_iranwire_rss():
     
     for lang, feed_url in feeds.items():
         try:
-            print(f"[v1.9.6] Iran Wire {lang}: Attempting to fetch RSS...")
+            print(f"[v1.9.7] Iran Wire {lang}: Attempting to fetch RSS...")
             response = requests.get(feed_url, timeout=10)
             
             if response.status_code != 200:
-                print(f"[v1.9.6] Iran Wire {lang}: HTTP {response.status_code}")
+                print(f"[v1.9.7] Iran Wire {lang}: HTTP {response.status_code}")
                 continue
             
-            # Simple RSS parsing
             import xml.etree.ElementTree as ET
             
             try:
                 root = ET.fromstring(response.content)
             except ET.ParseError as e:
-                print(f"[v1.9.6] Iran Wire {lang}: XML parse error: {e}")
+                print(f"[v1.9.7] Iran Wire {lang}: XML parse error: {e}")
                 continue
             
             articles_before = len(articles)
@@ -667,20 +635,21 @@ def fetch_iranwire_rss():
                         'publishedAt': pubDate.text if pubDate is not None else '',
                         'source': {'name': 'Iran Wire'},
                         'content': '',
-                        'language': lang
+                        'language': lang,
+                        'iranwire': True  # CRITICAL: Tag for frontend filtering
                     })
             
             articles_added = len(articles) - articles_before
-            print(f"[v1.9.6] Iran Wire {lang}: ✓ Fetched {articles_added} articles")
+            print(f"[v1.9.7] Iran Wire {lang}: ✓ Fetched {articles_added} articles")
             
         except requests.Timeout:
-            print(f"[v1.9.6] Iran Wire {lang}: Timeout after 10s")
+            print(f"[v1.9.7] Iran Wire {lang}: Timeout after 10s")
         except requests.ConnectionError as e:
-            print(f"[v1.9.6] Iran Wire {lang}: Connection error: {str(e)[:100]}")
+            print(f"[v1.9.7] Iran Wire {lang}: Connection error")
         except Exception as e:
-            print(f"[v1.9.6] Iran Wire {lang}: Unexpected error: {str(e)[:100]}")
+            print(f"[v1.9.7] Iran Wire {lang}: Unexpected error: {str(e)[:100]}")
     
-    print(f"[v1.9.6] Iran Wire: Total {len(articles)} articles from both feeds")
+    print(f"[v1.9.7] Iran Wire: Total {len(articles)} articles")
     return articles
 
 # ========================================
@@ -690,7 +659,6 @@ def fetch_iranwire_rss():
 def scan():
     """Main scanning endpoint for target analysis"""
     try:
-        # Check rate limit
         if not check_rate_limit():
             return jsonify({
                 'error': 'Rate limit exceeded',
@@ -703,37 +671,28 @@ def scan():
         if target not in TARGET_KEYWORDS:
             return jsonify({'error': 'Invalid target'}), 400
         
-        # Fetch articles
         query = ' OR '.join(TARGET_KEYWORDS[target]['keywords'])
         
-        # NewsAPI (English)
         articles_en = fetch_newsapi_articles(query, days)
-        
-        # GDELT (MULTILINGUAL!) - v1.9.5
         articles_gdelt_en = fetch_gdelt_articles(query, days, 'eng')
         articles_gdelt_ar = fetch_gdelt_articles(query, days, 'ara')
         articles_gdelt_he = fetch_gdelt_articles(query, days, 'heb')
         
-        # Farsi only for Iran target
         articles_gdelt_fa = []
         if target == 'iran':
             articles_gdelt_fa = fetch_gdelt_articles(query, days, 'fas')
         
-        # Reddit
         articles_reddit = fetch_reddit_posts(
             target,
             TARGET_KEYWORDS[target]['reddit_keywords'],
             days
         )
         
-        # Combine all articles
         all_articles = (articles_en + articles_gdelt_en + articles_gdelt_ar + 
                        articles_gdelt_he + articles_gdelt_fa + articles_reddit)
         
-        # Calculate probability
         probability = min(len(all_articles) * 2 + 35, 99)
         
-        # Determine timeline
         if probability < 30:
             timeline = "180+ Days (Low priority)"
         elif probability < 50:
@@ -748,24 +707,24 @@ def scan():
             'target': target,
             'probability': probability,
             'timeline': timeline,
-            'articles': all_articles[:50],  # Return top 50
+            'articles': all_articles[:50],
             'articles_en': articles_en[:20],
-            'articles_ar': articles_gdelt_ar[:20],  # NEW: Arabic GDELT
-            'articles_he': articles_gdelt_he[:20],  # NEW: Hebrew GDELT
-            'articles_fa': articles_gdelt_fa[:20],  # NEW: Farsi GDELT (Iran only)
+            'articles_ar': articles_gdelt_ar[:20],
+            'articles_he': articles_gdelt_he[:20],
+            'articles_fa': articles_gdelt_fa[:20],
             'articles_reddit': articles_reddit[:20],
             'total_articles': len(all_articles),
             'totalResults_en': len(articles_en),
-            'totalResults_ar': len(articles_gdelt_ar),  # NEW
-            'totalResults_he': len(articles_gdelt_he),  # NEW
-            'totalResults_fa': len(articles_gdelt_fa),  # NEW
+            'totalResults_ar': len(articles_gdelt_ar),
+            'totalResults_he': len(articles_gdelt_he),
+            'totalResults_fa': len(articles_gdelt_fa),
             'totalResults_reddit': len(articles_reddit),
             'reddit_subreddits': REDDIT_SUBREDDITS.get(target, []),
             'escalation_keywords': ESCALATION_KEYWORDS,
             'target_keywords': TARGET_KEYWORDS[target]['keywords'],
             'rate_limit': get_rate_limit_info(),
             'cached': False,
-            'version': '1.9.6'
+            'version': '1.9.7'
         })
         
     except Exception as e:
@@ -775,11 +734,11 @@ def scan():
         }), 500
 
 # ========================================
-# IRAN PROTESTS ENDPOINT
+# IRAN PROTESTS ENDPOINT - FIXED v1.9.7
 # ========================================
 @app.route('/scan-iran-protests', methods=['GET'])
 def scan_iran_protests():
-    """Enhanced Iran protests endpoint with full casualty tracking"""
+    """FIXED: Iran protests endpoint with separate Iran Wire tracking"""
     try:
         if not check_rate_limit():
             return jsonify({
@@ -789,14 +748,12 @@ def scan_iran_protests():
         
         days = int(request.args.get('days', 7))
         
-        # Fetch articles from multiple sources
+        # Fetch all articles
         all_articles = []
         
-        # NewsAPI - English
         newsapi_articles = fetch_newsapi_articles('Iran protests', days)
         all_articles.extend(newsapi_articles)
         
-        # GDELT - Multiple languages with FIXED syntax
         gdelt_query = 'iran OR persia OR protest OR protests OR demonstration'
         gdelt_en = fetch_gdelt_articles(gdelt_query, days, 'eng')
         gdelt_ar = fetch_gdelt_articles(gdelt_query, days, 'ara')
@@ -808,7 +765,6 @@ def scan_iran_protests():
         all_articles.extend(gdelt_fa)
         all_articles.extend(gdelt_he)
         
-        # Reddit posts (RESTORED!)
         reddit_posts = fetch_reddit_posts(
             'iran',
             ['Iran', 'protest', 'protests', 'demonstration', 'Tehran'],
@@ -816,7 +772,7 @@ def scan_iran_protests():
         )
         all_articles.extend(reddit_posts)
         
-        # Iran Wire RSS
+        # CRITICAL FIX: Fetch Iran Wire separately
         iranwire_articles = fetch_iranwire_rss()
         all_articles.extend(iranwire_articles)
         
@@ -829,14 +785,12 @@ def scan_iran_protests():
             cities_found = extract_cities_from_text(text)
             cities_data.extend(cities_found)
         
-        # Count unique cities
         city_counts = {}
         for city, importance in cities_data:
             if city not in city_counts:
                 city_counts[city] = {'count': 0, 'importance': importance}
             city_counts[city]['count'] += 1
         
-        # Sort by importance
         sorted_cities = sorted(
             city_counts.items(),
             key=lambda x: x[1]['importance'] * x[1]['count'],
@@ -852,13 +806,9 @@ def scan_iran_protests():
             for city, data in sorted_cities[:10]
         ]
         
-        # Extract casualties
         casualties = extract_casualty_data(all_articles)
-        
-        # Extract flight cancellations
         flight_cancellations = extract_flight_cancellations(all_articles)
         
-        # Calculate intensity
         articles_per_day = len(all_articles) / days
         intensity_score = min(
             articles_per_day * 2 + 
@@ -872,7 +822,7 @@ def scan_iran_protests():
         
         stability_score = 100 - intensity_score
         
-        # Build response
+        # CRITICAL FIX: Return separate Iran Wire array
         return jsonify({
             'success': True,
             'timestamp': datetime.now(timezone.utc).isoformat(),
@@ -881,32 +831,29 @@ def scan_iran_protests():
             'intensity': int(intensity_score),
             'stability': int(stability_score),
             
-            # EXPANDED CASUALTY DATA - v1.9.6
             'casualties': {
                 'deaths': casualties['deaths'],
                 'injuries': casualties['injuries'],
                 'arrests': casualties['arrests'],
                 'verified_sources': casualties['sources'],
-                'details': casualties.get('details', [])  # NEW: Detailed breakdown with sources
+                'details': casualties.get('details', [])
             },
             
-            # Geographic data
             'cities': top_cities,
             'num_cities_affected': len(city_counts),
-            
-            # Flight disruptions
             'flight_cancellations': flight_cancellations,
             
             # Articles by language
-            'articles_en': [a for a in all_articles if a.get('language') == 'en'][:20],
-            'articles_fa': [a for a in all_articles if a.get('language') == 'fa'][:20],
+            'articles_en': [a for a in all_articles if a.get('language') == 'en' and not a.get('iranwire')][:20],
+            'articles_fa': [a for a in all_articles if a.get('language') == 'fa' and not a.get('iranwire')][:20],
             'articles_ar': [a for a in all_articles if a.get('language') == 'ar'][:20],
             'articles_he': [a for a in all_articles if a.get('language') == 'he'][:5],
             'articles_reddit': [a for a in all_articles if a.get('source', {}).get('name', '').startswith('r/')][:20],
+            'articles_iranwire': [a for a in all_articles if a.get('iranwire')][:20],  # FIXED!
             
             'rate_limit': get_rate_limit_info(),
             'cached': False,
-            'version': '1.9.6'
+            'version': '1.9.7'
         })
         
     except Exception as e:
@@ -920,12 +867,11 @@ def scan_iran_protests():
 # ========================================
 @app.route('/flight-cancellations', methods=['GET'])
 def get_flight_cancellations():
-    """Aggregate flight cancellations from all targets for dashboard widget"""
+    """Aggregate flight cancellations from all targets"""
     try:
         days = 7
         all_cancellations = []
         
-        # Fetch recent news about flight cancellations
         for target_name, target_config in TARGET_KEYWORDS.items():
             query = ' OR '.join(target_config['keywords']) + ' AND (flight OR airline OR cancel OR suspend)'
             articles = fetch_newsapi_articles(query, days)
@@ -934,7 +880,6 @@ def get_flight_cancellations():
             cancellations = extract_flight_cancellations(articles)
             all_cancellations.extend(cancellations)
         
-        # Deduplicate by URL
         seen_urls = set()
         unique_cancellations = []
         for cancel in all_cancellations:
@@ -942,7 +887,6 @@ def get_flight_cancellations():
                 seen_urls.add(cancel['url'])
                 unique_cancellations.append(cancel)
         
-        # Sort by date
         sorted_cancellations = sorted(
             unique_cancellations,
             key=lambda x: x['date'],
@@ -953,7 +897,7 @@ def get_flight_cancellations():
             'success': True,
             'cancellations': sorted_cancellations[:10],
             'timestamp': datetime.now(timezone.utc).isoformat(),
-            'version': '1.9.6'
+            'version': '1.9.7'
         })
         
     except Exception as e:
@@ -969,7 +913,6 @@ def get_flight_cancellations():
 def polymarket_data():
     """Fetch Polymarket prediction market data"""
     try:
-        # Mock data for now - integrate real Polymarket API later
         markets = [
             {
                 'question': 'Will Israel strike Iran in 2026?',
@@ -987,7 +930,7 @@ def polymarket_data():
             'success': True,
             'markets': markets,
             'timestamp': datetime.now(timezone.utc).isoformat(),
-            'version': '1.9.6'
+            'version': '1.9.7'
         })
         
     except Exception as e:
@@ -1012,15 +955,15 @@ def health():
     """Health check endpoint"""
     return jsonify({
         'status': 'healthy',
-        'version': '1.9.6',
+        'version': '1.9.7',
         'timestamp': datetime.now(timezone.utc).isoformat(),
         'features': [
-            'NewsAPI (English) with premium source tracking',
-            'GDELT (4 languages) with domain logging',
-            'Reddit OSINT (3 subreddits, 2s delay)',
-            'Iran Wire RSS with enhanced error handling',
+            'NewsAPI (English)',
+            'GDELT (4 languages)',
+            'Reddit OSINT',
+            'Iran Wire RSS (FIXED - separate tracking)',
             'Flight monitoring',
-            'Enhanced casualty tracking with source attribution'
+            'Enhanced casualty tracking'
         ],
         'reddit_subreddits': REDDIT_SUBREDDITS
     })
@@ -1030,13 +973,12 @@ def home():
     """Root endpoint"""
     return jsonify({
         'name': 'Asifah Analytics Backend',
-        'version': '1.9.6',
+        'version': '1.9.7',
         'status': 'operational',
         'changes': [
-            'ENHANCED: Premium source tracking (NYT, WaPo, BBC)',
-            'ENHANCED: Detailed casualty tracking with source attribution',
-            'ENHANCED: Better error handling for all data sources',
-            'Logs now show which premium sources are being captured'
+            'FIXED: Iran Wire articles now tracked separately',
+            'FIXED: articles_iranwire array properly populated',
+            'Iran Wire articles tagged with iranwire:true flag'
         ],
         'endpoints': [
             '/scan',
