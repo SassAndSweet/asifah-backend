@@ -283,7 +283,7 @@ def parse_number_word(num_str):
     return 0
 
 def extract_casualty_data(articles):
-    """Extract verified casualty numbers from articles - ENHANCED v1.9.8"""
+    """Extract verified casualty numbers from articles - ENHANCED v1.9.8 (Fixed cross-contamination)"""
     casualties = {
         'deaths': 0,
         'injuries': 0,
@@ -294,20 +294,20 @@ def extract_casualty_data(articles):
     
     # ENHANCED: Multiple number patterns to catch different reporting styles
     number_patterns = [
-        # Standard: "X people killed"
-        r'(\d+(?:,\d{3})*)\s+(?:people\s+)?',
+        # Standard: "X people killed" (max 20 chars between number and keyword)
+        r'(\d+(?:,\d{3})*)\s+(?:people\s+)?.{0,20}?',
         
-        # "more than X" / "over X" / "at least X"
-        r'(?:more than|over|at least)\s+(\d+(?:,\d{3})*)\s+(?:people\s+)?',
+        # "more than X" / "over X" / "at least X" (max 30 chars)
+        r'(?:more than|over|at least)\s+(\d+(?:,\d{3})*)\s+(?:people\s+)?.{0,30}?',
         
-        # "X people have been killed/arrested"
-        r'(\d+(?:,\d{3})*)\s+people\s+(?:have been|had been|have)\s+',
+        # "X people have been killed/arrested" (max 20 chars)
+        r'(\d+(?:,\d{3})*)\s+people\s+(?:have been|had been|have)\s+.{0,20}?',
         
-        # Word numbers with modifiers
-        r'(hundreds?|thousands?|dozens?|several\s+(?:hundred|thousand|dozen))\s+(?:people\s+)?',
+        # Word numbers with modifiers (max 20 chars)
+        r'(hundreds?|thousands?|dozens?|several\s+(?:hundred|thousand|dozen))\s+(?:people\s+)?.{0,20}?',
         
-        # Specific thousands: "10 thousand"
-        r'(\d+)\s+thousand',
+        # Specific thousands: "10 thousand" (max 20 chars)
+        r'(\d+)\s+thousand\s*.{0,20}?',
     ]
     
     for article in articles:
@@ -320,69 +320,76 @@ def extract_casualty_data(articles):
         source = article.get('source', {}).get('name', 'Unknown')
         url = article.get('url', '')
         
-        # Track deaths
-        for keyword in CASUALTY_KEYWORDS['deaths']:
-            if keyword in text:
-                casualties['sources'].add(source)
-                
-                # Try each pattern
-                for pattern in number_patterns:
-                    match = re.search(pattern + r'.*?' + re.escape(keyword), text, re.IGNORECASE)
-                    if match:
-                        num_str = match.group(1)
-                        num = parse_number_word(num_str)
-                        
-                        if num > casualties['deaths']:
-                            casualties['deaths'] = num
-                            casualties['details'].append({
-                                'type': 'deaths',
-                                'count': num,
-                                'source': source,
-                                'url': url
-                            })
-                        break  # Found match, try next keyword
+        # CRITICAL FIX: Split text into sentences to prevent cross-contamination
+        # This ensures "2,600 arrested" doesn't match with "killed" in next sentence
+        sentences = re.split(r'[.!?]\s+', text)
         
-        # Track injuries
-        for keyword in CASUALTY_KEYWORDS['injuries']:
-            if keyword in text:
-                casualties['sources'].add(source)
-                
-                for pattern in number_patterns:
-                    match = re.search(pattern + r'.*?' + re.escape(keyword), text, re.IGNORECASE)
-                    if match:
-                        num_str = match.group(1)
-                        num = parse_number_word(num_str)
-                        
-                        if num > casualties['injuries']:
-                            casualties['injuries'] = num
-                            casualties['details'].append({
-                                'type': 'injuries',
-                                'count': num,
-                                'source': source,
-                                'url': url
-                            })
-                        break
+        # Track deaths - search within each sentence
+        for sentence in sentences:
+            for keyword in CASUALTY_KEYWORDS['deaths']:
+                if keyword in sentence:
+                    casualties['sources'].add(source)
+                    
+                    # Try each pattern within this sentence only
+                    for pattern in number_patterns:
+                        match = re.search(pattern + re.escape(keyword), sentence, re.IGNORECASE)
+                        if match:
+                            num_str = match.group(1)
+                            num = parse_number_word(num_str)
+                            
+                            if num > casualties['deaths']:
+                                casualties['deaths'] = num
+                                casualties['details'].append({
+                                    'type': 'deaths',
+                                    'count': num,
+                                    'source': source,
+                                    'url': url
+                                })
+                            break  # Found match, try next keyword
         
-        # Track arrests
-        for keyword in CASUALTY_KEYWORDS['arrests']:
-            if keyword in text:
-                casualties['sources'].add(source)
-                
-                for pattern in number_patterns:
-                    match = re.search(pattern + r'.*?' + re.escape(keyword), text, re.IGNORECASE)
-                    if match:
-                        num_str = match.group(1)
-                        num = parse_number_word(num_str)
-                        
-                        if num > casualties['arrests']:
-                            casualties['arrests'] = num
-                            casualties['details'].append({
-                                'type': 'arrests',
-                                'count': num,
-                                'source': source,
-                                'url': url
-                            })
-                        break
+        # Track injuries - search within each sentence
+        for sentence in sentences:
+            for keyword in CASUALTY_KEYWORDS['injuries']:
+                if keyword in sentence:
+                    casualties['sources'].add(source)
+                    
+                    for pattern in number_patterns:
+                        match = re.search(pattern + re.escape(keyword), sentence, re.IGNORECASE)
+                        if match:
+                            num_str = match.group(1)
+                            num = parse_number_word(num_str)
+                            
+                            if num > casualties['injuries']:
+                                casualties['injuries'] = num
+                                casualties['details'].append({
+                                    'type': 'injuries',
+                                    'count': num,
+                                    'source': source,
+                                    'url': url
+                                })
+                            break
+        
+        # Track arrests - search within each sentence
+        for sentence in sentences:
+            for keyword in CASUALTY_KEYWORDS['arrests']:
+                if keyword in sentence:
+                    casualties['sources'].add(source)
+                    
+                    for pattern in number_patterns:
+                        match = re.search(pattern + re.escape(keyword), sentence, re.IGNORECASE)
+                        if match:
+                            num_str = match.group(1)
+                            num = parse_number_word(num_str)
+                            
+                            if num > casualties['arrests']:
+                                casualties['arrests'] = num
+                                casualties['details'].append({
+                                    'type': 'arrests',
+                                    'count': num,
+                                    'source': source,
+                                    'url': url
+                                })
+                            break
     
     casualties['sources'] = list(casualties['sources'])
     
