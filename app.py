@@ -1,13 +1,13 @@
 """
-Asifah Analytics Backend v1.9.8
+Asifah Analytics Backend v1.9.9
 January 12, 2026
 
-Changes from v1.9.7:
-- ENHANCED: Casualty keyword detection for Bloomberg/AP/CBS reporting patterns
-- ENHANCED: Number parsing handles "10,681", "more than X", "over X", "at least X"
-- ENHANCED: Multiple regex patterns to catch different reporting styles
-- IMPROVED: Now catches "people have been killed/arrested/imprisoned" patterns
-- IMPROVED: Detects "death toll tops X" and "X thousand" patterns
+Changes from v1.9.9:
+- ENHANCED: Better injury number detection with ranges ("200 to 300")
+- ENHANCED: Added "roughly", "approximately", "around" patterns
+- ENHANCED: "many" now converts to conservative estimate (50)
+- IMPROVED: Injury detection keeps ALL found numbers in details for transparency
+- Now catches CNN's "200 to 300 patients" reporting style
 """
 
 from flask import Flask, jsonify, request
@@ -189,7 +189,7 @@ def extract_cities_from_text(text):
     return cities_found
 
 # ========================================
-# CASUALTY TRACKING - ENHANCED v1.9.8
+# CASUALTY TRACKING - ENHANCED v1.9.9
 # ========================================
 CASUALTY_KEYWORDS = {
     'deaths': [
@@ -216,6 +216,12 @@ CASUALTY_KEYWORDS = {
         'wounded protesters', 'protesters injured', 'suffering injuries',
         'treated for injuries', 'hospitals overwhelmed',
         
+        # NEW: Specific medical terms from CNN/Amnesty reporting
+        'shot in their limbs', 'shot in the head', 'shot in the eye',
+        'pellets lodged', 'gunshot injuries', 'suffering from gunshot',
+        'people wounded', 'people shot and wounded', 'cases of injuries',
+        'metal pellet wounds', 'head and eye injuries',
+        
         # Farsi/Arabic
         'مجروح', 'زخمی', 'آسیب'
     ],
@@ -236,7 +242,7 @@ CASUALTY_KEYWORDS = {
 }
 
 def parse_number_word(num_str):
-    """Convert number words to integers - ENHANCED v1.9.8"""
+    """Convert number words to integers - ENHANCED v1.9.9 with better injury handling"""
     num_str = num_str.lower().strip()
     
     # Try direct integer conversion first
@@ -280,10 +286,14 @@ def parse_number_word(num_str):
             return 24
         return 12
     
+    # NEW: Handle "many" for injuries (conservative estimate)
+    elif num_str == 'many':
+        return 50  # Conservative estimate for "many wounded"
+    
     return 0
 
 def extract_casualty_data(articles):
-    """Extract verified casualty numbers from articles - ENHANCED v1.9.8 (Fixed cross-contamination)"""
+    """Extract verified casualty numbers from articles - ENHANCED v1.9.9 (Fixed cross-contamination)"""
     casualties = {
         'deaths': 0,
         'injuries': 0,
@@ -292,7 +302,7 @@ def extract_casualty_data(articles):
         'details': []
     }
     
-    # ENHANCED: Multiple number patterns to catch different reporting styles
+    # ENHANCED: Multiple number patterns including ranges
     number_patterns = [
         # Standard: "X people killed" (max 20 chars between number and keyword)
         r'(\d+(?:,\d{3})*)\s+(?:people\s+)?.{0,20}?',
@@ -303,8 +313,14 @@ def extract_casualty_data(articles):
         # "X people have been killed/arrested" (max 20 chars)
         r'(\d+(?:,\d{3})*)\s+people\s+(?:have been|had been|have)\s+.{0,20}?',
         
+        # NEW: Ranges "X to Y", "X-Y" - capture the higher number
+        r'(?:\d+)\s*(?:to|-)\s*(\d+(?:,\d{3})*)\s+.{0,20}?',
+        
+        # NEW: "roughly X", "approximately X", "around X"
+        r'(?:roughly|approximately|around)\s+(\d+(?:,\d{3})*)\s+.{0,20}?',
+        
         # Word numbers with modifiers (max 20 chars)
-        r'(hundreds?|thousands?|dozens?|several\s+(?:hundred|thousand|dozen))\s+(?:people\s+)?.{0,20}?',
+        r'(hundreds?|thousands?|dozens?|several\s+(?:hundred|thousand|dozen)|many)\s+(?:people\s+)?.{0,20}?',
         
         # Specific thousands: "10 thousand" (max 20 chars)
         r'(\d+)\s+thousand\s*.{0,20}?',
@@ -359,8 +375,11 @@ def extract_casualty_data(articles):
                             num_str = match.group(1)
                             num = parse_number_word(num_str)
                             
-                            if num > casualties['injuries']:
-                                casualties['injuries'] = num
+                            # SPECIAL: For injuries, keep the HIGHEST number found
+                            if num > 0:
+                                if num > casualties['injuries']:
+                                    casualties['injuries'] = num
+                                # Always add to details for transparency
                                 casualties['details'].append({
                                     'type': 'injuries',
                                     'count': num,
@@ -395,11 +414,11 @@ def extract_casualty_data(articles):
     
     # Enhanced logging
     if casualties['deaths'] > 0:
-        print(f"[v1.9.8] ✓ Deaths: {casualties['deaths']} detected")
+        print(f"[v1.9.9] ✓ Deaths: {casualties['deaths']} detected")
     if casualties['injuries'] > 0:
-        print(f"[v1.9.8] ✓ Injuries: {casualties['injuries']} detected")
+        print(f"[v1.9.9] ✓ Injuries: {casualties['injuries']} detected")
     if casualties['arrests'] > 0:
-        print(f"[v1.9.8] ✓ Arrests: {casualties['arrests']} detected")
+        print(f"[v1.9.9] ✓ Arrests: {casualties['arrests']} detected")
     
     return casualties
 
@@ -818,7 +837,7 @@ def scan():
             'target_keywords': TARGET_KEYWORDS[target]['keywords'],
             'rate_limit': get_rate_limit_info(),
             'cached': False,
-            'version': '1.9.8'
+            'version': '1.9.9'
         })
         
     except Exception as e:
@@ -949,7 +968,7 @@ def scan_iran_protests():
             
             'rate_limit': get_rate_limit_info(),
             'cached': False,
-            'version': '1.9.8'
+            'version': '1.9.9'
         })
         
     except Exception as e:
@@ -993,7 +1012,7 @@ def get_flight_cancellations():
             'success': True,
             'cancellations': sorted_cancellations[:10],
             'timestamp': datetime.now(timezone.utc).isoformat(),
-            'version': '1.9.8'
+            'version': '1.9.9'
         })
         
     except Exception as e:
@@ -1026,7 +1045,7 @@ def polymarket_data():
             'success': True,
             'markets': markets,
             'timestamp': datetime.now(timezone.utc).isoformat(),
-            'version': '1.9.8'
+            'version': '1.9.9'
         })
         
     except Exception as e:
@@ -1051,7 +1070,7 @@ def health():
     """Health check endpoint"""
     return jsonify({
         'status': 'healthy',
-        'version': '1.9.8',
+        'version': '1.9.9',
         'timestamp': datetime.now(timezone.utc).isoformat(),
         'features': [
             'NewsAPI (English)',
@@ -1069,7 +1088,7 @@ def home():
     """Root endpoint"""
     return jsonify({
         'name': 'Asifah Analytics Backend',
-        'version': '1.9.8',
+        'version': '1.9.9',
         'status': 'operational',
         'changes': [
             'FIXED: Iran Wire articles now tracked separately',
