@@ -1,11 +1,13 @@
 """
-Asifah Analytics Backend v1.9.7
+Asifah Analytics Backend v1.9.8
 January 12, 2026
 
-Changes from v1.9.6:
-- FIXED: Iran Wire articles now tracked separately for frontend
-- FIXED: articles_iranwire array now properly populated
-- All Iran Wire articles now include 'iranwire' source tag
+Changes from v1.9.7:
+- ENHANCED: Casualty keyword detection for Bloomberg/AP/CBS reporting patterns
+- ENHANCED: Number parsing handles "10,681", "more than X", "over X", "at least X"
+- ENHANCED: Multiple regex patterns to catch different reporting styles
+- IMPROVED: Now catches "people have been killed/arrested/imprisoned" patterns
+- IMPROVED: Detects "death toll tops X" and "X thousand" patterns
 """
 
 from flask import Flask, jsonify, request
@@ -187,44 +189,92 @@ def extract_cities_from_text(text):
     return cities_found
 
 # ========================================
-# CASUALTY TRACKING
+# CASUALTY TRACKING - ENHANCED v1.9.8
 # ========================================
 CASUALTY_KEYWORDS = {
     'deaths': [
+        # Primary death terms
         'killed', 'dead', 'died', 'death toll', 'fatalities', 'deaths',
         'shot dead', 'gunned down', 'killed by', 'killed in',
+        
+        # ENHANCED: Bloomberg/AP/CBS reporting patterns
+        'people have died', 'people have been killed', 'protesters killed',
+        'protesters had been killed', 'protesters have been killed',
+        'have died', 'have been killed', 'had been killed',
+        'death toll tops', 'death toll reaches', 'toll rises',
+        
+        # Farsi/Arabic
         'کشته', 'مرگ', 'قتل'
     ],
     'injuries': [
+        # Primary injury terms
         'injured', 'wounded', 'hurt', 'injuries', 'casualties',
         'hospitalized', 'critical condition', 'serious injuries',
+        
+        # ENHANCED: Medical/hospital patterns
+        'overwhelmed by injured', 'injured protesters', 'gunshot wounds',
+        'wounded protesters', 'protesters injured', 'suffering injuries',
+        'treated for injuries', 'hospitals overwhelmed',
+        
+        # Farsi/Arabic
         'مجروح', 'زخمی', 'آسیب'
     ],
     'arrests': [
+        # Primary arrest terms
         'arrested', 'detained', 'detention', 'arrest', 'arrests',
         'taken into custody', 'custody', 'apprehended', 'rounded up',
-        'mass arrests', 'detained protesters',
+        
+        # ENHANCED: Bloomberg imprisonment patterns
+        'imprisoned', 'people have been arrested', 'people have been imprisoned',
+        'people have also been imprisoned', 'protesters arrested',
+        'protesters detained', 'mass arrests', 'detained protesters',
+        'have been arrested', 'have been detained', 'had been arrested',
+        
+        # Farsi/Arabic
         'بازداشت', 'دستگیر', 'زندان'
     ]
 }
 
 def parse_number_word(num_str):
-    """Convert number words to integers"""
+    """Convert number words to integers - ENHANCED v1.9.8"""
     num_str = num_str.lower().strip()
     
+    # Try direct integer conversion first
     try:
         return int(num_str)
     except:
         pass
     
+    # ENHANCED: Handle comma-separated numbers (e.g., "10,681")
+    if ',' in num_str:
+        try:
+            return int(num_str.replace(',', ''))
+        except:
+            pass
+    
+    # Word conversions
     if 'hundred' in num_str or 'hundreds' in num_str:
+        # Check for "several hundred" etc
         if any(word in num_str for word in ['several', 'few', 'many']):
             return 200
+        # ENHANCED: "over X hundred"
+        if 'over' in num_str or 'more than' in num_str:
+            return 150
         return 100
+    
     elif 'thousand' in num_str or 'thousands' in num_str:
+        # ENHANCED: Check for specific thousands (e.g., "10 thousand")
+        match = re.search(r'(\d+)\s*thousand', num_str)
+        if match:
+            return int(match.group(1)) * 1000
+        
         if any(word in num_str for word in ['several', 'few', 'many']):
             return 2000
+        # ENHANCED: "over/more than X thousand"
+        if 'over' in num_str or 'more than' in num_str:
+            return 1500
         return 1000
+    
     elif 'dozen' in num_str or 'dozens' in num_str:
         if 'several' in num_str:
             return 24
@@ -233,7 +283,7 @@ def parse_number_word(num_str):
     return 0
 
 def extract_casualty_data(articles):
-    """Extract verified casualty numbers from articles"""
+    """Extract verified casualty numbers from articles - ENHANCED v1.9.8"""
     casualties = {
         'deaths': 0,
         'injuries': 0,
@@ -242,10 +292,26 @@ def extract_casualty_data(articles):
         'details': []
     }
     
-    number_pattern = r'(\d+|hundreds?|thousands?|dozens?|several\s+(?:hundred|thousand|dozen))\s+(?:people\s+)?'
+    # ENHANCED: Multiple number patterns to catch different reporting styles
+    number_patterns = [
+        # Standard: "X people killed"
+        r'(\d+(?:,\d{3})*)\s+(?:people\s+)?',
+        
+        # "more than X" / "over X" / "at least X"
+        r'(?:more than|over|at least)\s+(\d+(?:,\d{3})*)\s+(?:people\s+)?',
+        
+        # "X people have been killed/arrested"
+        r'(\d+(?:,\d{3})*)\s+people\s+(?:have been|had been|have)\s+',
+        
+        # Word numbers with modifiers
+        r'(hundreds?|thousands?|dozens?|several\s+(?:hundred|thousand|dozen))\s+(?:people\s+)?',
+        
+        # Specific thousands: "10 thousand"
+        r'(\d+)\s+thousand',
+    ]
     
     for article in articles:
-        # Safe concatenation - handle None values
+        # Safe concatenation
         title = article.get('title') or ''
         description = article.get('description') or ''
         content = article.get('content') or ''
@@ -254,62 +320,79 @@ def extract_casualty_data(articles):
         source = article.get('source', {}).get('name', 'Unknown')
         url = article.get('url', '')
         
+        # Track deaths
         for keyword in CASUALTY_KEYWORDS['deaths']:
             if keyword in text:
                 casualties['sources'].add(source)
-                match = re.search(number_pattern + keyword, text)
-                if match:
-                    num_str = match.group(1)
-                    num = parse_number_word(num_str)
-                    if num > casualties['deaths']:
-                        casualties['deaths'] = num
-                        casualties['details'].append({
-                            'type': 'deaths',
-                            'count': num,
-                            'source': source,
-                            'url': url
-                        })
+                
+                # Try each pattern
+                for pattern in number_patterns:
+                    match = re.search(pattern + r'.*?' + re.escape(keyword), text, re.IGNORECASE)
+                    if match:
+                        num_str = match.group(1)
+                        num = parse_number_word(num_str)
+                        
+                        if num > casualties['deaths']:
+                            casualties['deaths'] = num
+                            casualties['details'].append({
+                                'type': 'deaths',
+                                'count': num,
+                                'source': source,
+                                'url': url
+                            })
+                        break  # Found match, try next keyword
         
+        # Track injuries
         for keyword in CASUALTY_KEYWORDS['injuries']:
             if keyword in text:
                 casualties['sources'].add(source)
-                match = re.search(number_pattern + keyword, text)
-                if match:
-                    num_str = match.group(1)
-                    num = parse_number_word(num_str)
-                    if num > casualties['injuries']:
-                        casualties['injuries'] = num
-                        casualties['details'].append({
-                            'type': 'injuries',
-                            'count': num,
-                            'source': source,
-                            'url': url
-                        })
+                
+                for pattern in number_patterns:
+                    match = re.search(pattern + r'.*?' + re.escape(keyword), text, re.IGNORECASE)
+                    if match:
+                        num_str = match.group(1)
+                        num = parse_number_word(num_str)
+                        
+                        if num > casualties['injuries']:
+                            casualties['injuries'] = num
+                            casualties['details'].append({
+                                'type': 'injuries',
+                                'count': num,
+                                'source': source,
+                                'url': url
+                            })
+                        break
         
+        # Track arrests
         for keyword in CASUALTY_KEYWORDS['arrests']:
             if keyword in text:
                 casualties['sources'].add(source)
-                match = re.search(number_pattern + keyword, text)
-                if match:
-                    num_str = match.group(1)
-                    num = parse_number_word(num_str)
-                    if num > casualties['arrests']:
-                        casualties['arrests'] = num
-                        casualties['details'].append({
-                            'type': 'arrests',
-                            'count': num,
-                            'source': source,
-                            'url': url
-                        })
+                
+                for pattern in number_patterns:
+                    match = re.search(pattern + r'.*?' + re.escape(keyword), text, re.IGNORECASE)
+                    if match:
+                        num_str = match.group(1)
+                        num = parse_number_word(num_str)
+                        
+                        if num > casualties['arrests']:
+                            casualties['arrests'] = num
+                            casualties['details'].append({
+                                'type': 'arrests',
+                                'count': num,
+                                'source': source,
+                                'url': url
+                            })
+                        break
     
     casualties['sources'] = list(casualties['sources'])
     
+    # Enhanced logging
     if casualties['deaths'] > 0:
-        print(f"[v1.9.7] Casualties: {casualties['deaths']} deaths detected")
+        print(f"[v1.9.8] ✓ Deaths: {casualties['deaths']} detected")
     if casualties['injuries'] > 0:
-        print(f"[v1.9.7] Casualties: {casualties['injuries']} injuries detected")
+        print(f"[v1.9.8] ✓ Injuries: {casualties['injuries']} detected")
     if casualties['arrests'] > 0:
-        print(f"[v1.9.7] Casualties: {casualties['arrests']} arrests detected")
+        print(f"[v1.9.8] ✓ Arrests: {casualties['arrests']} detected")
     
     return casualties
 
@@ -728,7 +811,7 @@ def scan():
             'target_keywords': TARGET_KEYWORDS[target]['keywords'],
             'rate_limit': get_rate_limit_info(),
             'cached': False,
-            'version': '1.9.7'
+            'version': '1.9.8'
         })
         
     except Exception as e:
@@ -859,7 +942,7 @@ def scan_iran_protests():
             
             'rate_limit': get_rate_limit_info(),
             'cached': False,
-            'version': '1.9.7'
+            'version': '1.9.8'
         })
         
     except Exception as e:
@@ -903,7 +986,7 @@ def get_flight_cancellations():
             'success': True,
             'cancellations': sorted_cancellations[:10],
             'timestamp': datetime.now(timezone.utc).isoformat(),
-            'version': '1.9.7'
+            'version': '1.9.8'
         })
         
     except Exception as e:
@@ -936,7 +1019,7 @@ def polymarket_data():
             'success': True,
             'markets': markets,
             'timestamp': datetime.now(timezone.utc).isoformat(),
-            'version': '1.9.7'
+            'version': '1.9.8'
         })
         
     except Exception as e:
@@ -961,7 +1044,7 @@ def health():
     """Health check endpoint"""
     return jsonify({
         'status': 'healthy',
-        'version': '1.9.7',
+        'version': '1.9.8',
         'timestamp': datetime.now(timezone.utc).isoformat(),
         'features': [
             'NewsAPI (English)',
@@ -979,7 +1062,7 @@ def home():
     """Root endpoint"""
     return jsonify({
         'name': 'Asifah Analytics Backend',
-        'version': '1.9.7',
+        'version': '1.9.8',
         'status': 'operational',
         'changes': [
             'FIXED: Iran Wire articles now tracked separately',
