@@ -475,7 +475,7 @@ def search_news(target, language="en"):
             if language == "en":
                 query = "Israel Iran military strike attack threat latest news"
             elif language == "he":
-                query = "ישראל איران תקיפה צבאית איום חדשות"
+                query = "ישראל איראן תקיפה צבאית איום חדשות"
             elif language == "ar":
                 query = "إسرائيل إيران ضربة عسكرية تهديد أخبار"
             elif language == "fa":
@@ -510,30 +510,24 @@ def search_news(target, language="en"):
                     "role": "user",
                     "content": f"""Search for recent news articles about: {query}
 
-Focus on articles from the last 7 days that discuss:
-- Military threats or actions
-- Diplomatic tensions
-- Strategic developments
-- Expert analysis
-- Official statements
+Focus on articles from the last 7 days. Return ONLY a valid JSON object (no markdown, no explanation) with this exact structure:
 
-Return the results as a JSON object with this structure:
 {{
     "articles": [
         {{
-            "title": "article title",
-            "description": "article description",
-            "url": "article url",
-            "source": {{"name": "source name"}},
+            "title": "string",
+            "description": "string",
+            "url": "string",
+            "source": {{"name": "string"}},
             "publishedAt": "ISO date string",
-            "content": "article content snippet",
+            "content": "string",
             "language": "{language}"
         }}
     ],
-    "totalResults": number
+    "totalResults": 0
 }}
 
-Search for at least 20 articles if available."""
+Return at least 20 articles if available. Output ONLY the JSON, nothing else."""
                 }
             ]
         )
@@ -544,6 +538,13 @@ Search for at least 20 articles if available."""
             if block.type == "text":
                 result_text += block.text
         
+        # Remove any markdown code blocks
+        result_text = result_text.strip()
+        if result_text.startswith('```'):
+            # Remove markdown code fences
+            lines = result_text.split('\n')
+            result_text = '\n'.join(lines[1:-1] if len(lines) > 2 else lines)
+        
         # Try to parse JSON from the response
         try:
             # Find JSON in the response
@@ -552,22 +553,29 @@ Search for at least 20 articles if available."""
             if start_idx != -1 and end_idx != 0:
                 json_str = result_text[start_idx:end_idx]
                 results = json.loads(json_str)
+                
+                # Validate structure
+                if 'articles' not in results:
+                    results = {'articles': [], 'totalResults': 0}
+                
                 return results
-        except json.JSONDecodeError:
-            # If JSON parsing fails, return a structured error
+            else:
+                return {
+                    "articles": [],
+                    "totalResults": 0,
+                    "error": "No JSON found in response"
+                }
+        except json.JSONDecodeError as e:
+            print(f"JSON decode error for {target} ({language}): {e}")
+            print(f"Response text: {result_text[:500]}")
             return {
                 "articles": [],
                 "totalResults": 0,
-                "error": "Failed to parse search results"
+                "error": f"Failed to parse JSON: {str(e)}"
             }
         
-        return {
-            "articles": [],
-            "totalResults": 0
-        }
-        
     except Exception as e:
-        print(f"Error searching news: {e}")
+        print(f"Error searching news for {target} ({language}): {e}")
         return {
             "articles": [],
             "totalResults": 0,
@@ -606,28 +614,23 @@ def search_reddit(target):
 
 Focus on subreddits: {', '.join(['r/' + s for s in subreddits])}
 
-Look for posts from the last 7 days that discuss:
-- Military developments
-- Strategic analysis
-- Breaking news
-- Expert opinions
+Return ONLY a valid JSON array (no markdown, no explanation) with this exact structure:
 
-Return results as a JSON array of post objects with this structure:
 [
     {{
-        "title": "post title",
-        "url": "post url",
-        "source": {{"name": "r/subreddit"}},
+        "title": "string",
+        "url": "string",
+        "source": {{"name": "string"}},
         "publishedAt": "ISO date string",
-        "content": "post content",
-        "reddit_score": score,
-        "reddit_comments": comment_count,
-        "reddit_upvote_ratio": ratio,
+        "content": "string",
+        "reddit_score": 0,
+        "reddit_comments": 0,
+        "reddit_upvote_ratio": 0.0,
         "language": "en"
     }}
 ]
 
-Return at least 5-10 relevant posts if available."""
+Return at least 5-10 relevant posts if available. Output ONLY the JSON array, nothing else."""
                 }
             ]
         )
@@ -638,6 +641,12 @@ Return at least 5-10 relevant posts if available."""
             if block.type == "text":
                 result_text += block.text
         
+        # Remove any markdown code blocks
+        result_text = result_text.strip()
+        if result_text.startswith('```'):
+            lines = result_text.split('\n')
+            result_text = '\n'.join(lines[1:-1] if len(lines) > 2 else lines)
+        
         # Try to parse JSON from the response
         try:
             start_idx = result_text.find('[')
@@ -645,14 +654,16 @@ Return at least 5-10 relevant posts if available."""
             if start_idx != -1 and end_idx != 0:
                 json_str = result_text[start_idx:end_idx]
                 results = json.loads(json_str)
-                return results
-        except json.JSONDecodeError:
+                return results if isinstance(results, list) else []
+            else:
+                return []
+        except json.JSONDecodeError as e:
+            print(f"JSON decode error for Reddit {target}: {e}")
+            print(f"Response text: {result_text[:500]}")
             return []
         
-        return []
-        
     except Exception as e:
-        print(f"Error searching Reddit: {e}")
+        print(f"Error searching Reddit for {target}: {e}")
         return []
 
 @app.route('/')
