@@ -1,1354 +1,699 @@
-"""
-Asifah Analytics Backend v2.0.0
-January 16, 2026
-
-Changes from v1.9.9:
-- MAJOR: Implemented sophisticated threat probability algorithm
-- Time decay weighting (2-day half-life for article relevance)
-- Source credibility tiers (Premium/Regional/Standard/GDELT/Social)
-- De-escalation keyword detection (reduces threat scores)
-- Momentum analysis (increasing/decreasing/stable trends)
-- Keyword severity levels (Critical/High/Elevated/Moderate)
-- Fixed: No longer pegs Iran at 99% when rhetoric has cooled
-- Fixed: Houthi strikes properly weighted based on credible sources
-"""
-
-from flask import Flask, jsonify, request
-from flask_cors import CORS
-import requests
-from datetime import datetime, timezone, timedelta
+import anthropic
 import os
-import time
-import re
-import math
+from datetime import datetime, timedelta
+import json
+from flask import Flask, render_template, jsonify, request
+from flask_cors import CORS
 
 app = Flask(__name__)
 CORS(app)
 
-# ========================================
-# CONFIGURATION
-# ========================================
-NEWSAPI_KEY = os.environ.get('NEWSAPI_KEY')
-GDELT_BASE_URL = "http://api.gdeltproject.org/api/v2/doc/doc"
+# Initialize the Anthropic client
+client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
 
-# Rate limiting
-RATE_LIMIT = 100
-RATE_LIMIT_WINDOW = 86400
-rate_limit_data = {
-    'requests': 0,
-    'reset_time': time.time() + RATE_LIMIT_WINDOW
+# Define threat assessment keywords with severity weights
+ESCALATION_KEYWORDS = {
+    # Direct military action - highest severity
+    "strike": 3.0,
+    "attack": 3.0,
+    "bombing": 3.0,
+    "airstrike": 3.0,
+    "missile": 2.5,
+    "rocket": 2.5,
+    "military operation": 2.5,
+    "offensive": 2.5,
+    
+    # Retaliation and response - high severity
+    "retaliate": 2.5,
+    "retaliation": 2.5,
+    "response": 1.5,
+    "counterattack": 2.5,
+    
+    # Territorial actions - high severity
+    "invasion": 3.0,
+    "incursion": 2.5,
+    
+    # Threats and warnings - medium severity
+    "threatens": 2.0,
+    "warned": 2.0,
+    "vowed": 2.0,
+    "promised to strike": 2.5,
+    "will respond": 2.0,
+    "severe response": 2.5,
+    "consequences": 1.5,
+    
+    # Military buildup - medium severity
+    "mobilization": 2.0,
+    "troops deployed": 2.0,
+    "forces gathering": 2.0,
+    "military buildup": 2.0,
+    "reserves called up": 2.0,
+    
+    # Casualties - high severity
+    "killed": 2.5,
+    "dead": 2.5,
+    "casualties": 2.5,
+    "wounded": 2.0,
+    "injured": 2.0,
+    "death toll": 2.5,
+    "fatalities": 2.5,
+    
+    # Flight disruptions - medium severity (indicator of escalation)
+    "flight cancellations": 2.0,
+    "cancelled flights": 2.0,
+    "suspend flights": 2.0,
+    "suspended flights": 2.0,
+    "airline suspends": 2.0,
+    "suspended service to": 2.0,
+    "halted flights": 2.0,
+    "halt flights": 2.0,
+    "grounded flights": 2.0,
+    "airspace closed": 2.5,
+    "no-fly zone": 2.5,
+    
+    # Travel advisories - medium severity
+    "travel advisory": 1.5,
+    "do not travel": 2.0,
+    "avoid all travel": 2.0,
+    "reconsider travel": 1.5,
+    
+    # Specific airline suspensions - medium severity
+    "emirates suspend": 2.0,
+    "emirates cancel": 2.0,
+    "emirates halt": 2.0,
+    "turkish airlines suspend": 2.0,
+    "turkish airlines cancel": 2.0,
+    "turkish airlines halt": 2.0,
+    "lufthansa suspend": 2.0,
+    "lufthansa cancel": 2.0,
+    "air france suspend": 2.0,
+    "air france cancel": 2.0,
+    "british airways suspend": 2.0,
+    "british airways cancel": 2.0,
+    "qatar airways suspend": 2.0,
+    "qatar airways cancel": 2.0,
+    "etihad suspend": 2.0,
+    "etihad cancel": 2.0,
+    "klm suspend": 2.0,
+    "klm cancel": 2.0,
 }
 
-# ========================================
-# v2.0 SCORING ALGORITHM - SOURCE WEIGHTS
-# ========================================
-SOURCE_WEIGHTS = {
-    'premium': {
-        'sources': [
-            'The New York Times', 'The Washington Post', 'Reuters', 
-            'Associated Press', 'AP News', 'BBC News', 'The Guardian',
-            'Financial Times', 'Wall Street Journal', 'The Economist'
-        ],
-        'weight': 1.0
-    },
-    'regional': {
-        'sources': [
-            'Iran Wire', 'Al Jazeera', 'Haaretz', 'Times of Israel',
-            'Al Arabiya', 'The Jerusalem Post', 'Middle East Eye'
-        ],
-        'weight': 0.8
-    },
-    'standard': {
-        'sources': [
-            'CNN', 'MSNBC', 'Fox News', 'NBC News', 'CBS News',
-            'ABC News', 'Bloomberg', 'CNBC'
-        ],
-        'weight': 0.6
-    },
-    'gdelt': {
-        'sources': ['GDELT'],
-        'weight': 0.4
-    },
-    'social': {
-        'sources': ['Reddit', 'r/'],
-        'weight': 0.3
-    }
+DEESCALATION_KEYWORDS = {
+    # Diplomatic efforts - negative weight (reduces threat)
+    "ceasefire": -2.0,
+    "truce": -2.0,
+    "peace talks": -2.0,
+    "diplomatic": -1.5,
+    "negotiation": -1.5,
+    "dialogue": -1.5,
+    "agreement": -1.5,
+    "de-escalation": -2.0,
+    "deescalation": -2.0,
+    "calm": -1.5,
+    "restraint": -1.5,
+    "stand down": -2.0,
+    "pullback": -2.0,
+    "withdrawal": -1.5,
 }
 
-# ========================================
-# v2.0 SCORING ALGORITHM - KEYWORD SEVERITY
-# ========================================
-KEYWORD_SEVERITY = {
-    'critical': {
-        'keywords': [
-            'nuclear strike', 'nuclear attack', 'nuclear threat',
-            'full-scale war', 'declaration of war', 'state of war',
-            'mobilization order', 'reserves called up', 'troops deployed'
-        ],
-        'multiplier': 2.5
-    },
-    'high': {
-        'keywords': [
-            'imminent strike', 'imminent attack', 'preparing to strike',
-            'military buildup', 'forces gathering', 'will strike',
-            'vowed to attack', 'threatened to strike'
-        ],
-        'multiplier': 2.0
-    },
-    'elevated': {
-        'keywords': [
-            'strike', 'attack', 'airstrike', 'bombing', 'missile',
-            'rocket', 'retaliate', 'retaliation', 'response'
-        ],
-        'multiplier': 1.5
-    },
-    'moderate': {
-        'keywords': [
-            'threatens', 'warned', 'tensions', 'escalation',
-            'conflict', 'crisis'
-        ],
-        'multiplier': 1.0
-    }
-}
-
-# ========================================
-# v2.0 SCORING ALGORITHM - DE-ESCALATION
-# ========================================
-DEESCALATION_KEYWORDS = [
-    'ceasefire', 'cease-fire', 'truce', 'peace talks', 'peace agreement',
-    'diplomatic solution', 'negotiations', 'de-escalation', 'de-escalate',
-    'tensions ease', 'tensions cool', 'tensions subside', 'calm',
-    'defused', 'avoided', 'no plans to', 'ruled out', 'backs down',
-    'restraint', 'diplomatic efforts', 'unlikely to strike'
-]
-
-# ========================================
-# v2.0 SCORING ALGORITHM - HELPER FUNCTIONS
-# ========================================
-def calculate_time_decay(published_date, current_time, half_life_days=2.0):
-    """Calculate exponential time decay for article relevance"""
-    try:
-        if isinstance(published_date, str):
-            pub_dt = datetime.fromisoformat(published_date.replace('Z', '+00:00'))
-        else:
-            pub_dt = published_date
-        
-        if pub_dt.tzinfo is None:
-            pub_dt = pub_dt.replace(tzinfo=timezone.utc)
-        
-        age_hours = (current_time - pub_dt).total_seconds() / 3600
-        age_days = age_hours / 24
-        
-        decay_factor = math.exp(-math.log(2) * age_days / half_life_days)
-        return decay_factor
-    except Exception:
-        return 0.1
-
-def get_source_weight(source_name):
-    """Get credibility weight for a source"""
-    if not source_name:
-        return 0.3
-    
-    source_lower = source_name.lower()
-    
-    for tier_data in SOURCE_WEIGHTS.values():
-        for source in tier_data['sources']:
-            if source.lower() in source_lower or source_lower in source.lower():
-                return tier_data['weight']
-    
-    return 0.5
-
-def detect_keyword_severity(text):
-    """Detect highest severity keywords in text"""
-    if not text:
-        return 1.0
-    
-    text_lower = text.lower()
-    
-    for severity_level in ['critical', 'high', 'elevated', 'moderate']:
-        for keyword in KEYWORD_SEVERITY[severity_level]['keywords']:
-            if keyword in text_lower:
-                return KEYWORD_SEVERITY[severity_level]['multiplier']
-    
-    return 1.0
-
-def detect_deescalation(text):
-    """Check if article indicates de-escalation"""
-    if not text:
-        return False
-    
-    text_lower = text.lower()
-    
-    for keyword in DEESCALATION_KEYWORDS:
-        if keyword in text_lower:
-            return True
-    
-    return False
-
-def calculate_threat_probability(articles, days_analyzed=7, target='iran'):
-    """Calculate sophisticated threat probability score"""
-    
-    if not articles:
-        return {
-            'probability': 15,
-            'momentum': 'stable',
-            'breakdown': {
-                'base_score': 15,
-                'article_count': 0,
-                'weighted_score': 0,
-                'time_decay_applied': True,
-                'deescalation_detected': False
-            }
-        }
-    
-    current_time = datetime.now(timezone.utc)
-    
-    weighted_score = 0
-    deescalation_count = 0
-    recent_articles = 0
-    older_articles = 0
-    
-    article_details = []
-    
-    for article in articles:
-        title = article.get('title', '')
-        description = article.get('description', '')
-        content = article.get('content', '')
-        full_text = f"{title} {description} {content}"
-        
-        source_name = article.get('source', {}).get('name', 'Unknown')
-        published_date = article.get('publishedAt', '')
-        
-        time_decay = calculate_time_decay(published_date, current_time)
-        source_weight = get_source_weight(source_name)
-        severity_multiplier = detect_keyword_severity(full_text)
-        is_deescalation = detect_deescalation(full_text)
-        
-        if is_deescalation:
-            article_contribution = -3 * time_decay * source_weight
-            deescalation_count += 1
-        else:
-            article_contribution = time_decay * source_weight * severity_multiplier
-        
-        weighted_score += article_contribution
-        
-        try:
-            pub_dt = datetime.fromisoformat(published_date.replace('Z', '+00:00'))
-            age_hours = (current_time - pub_dt).total_seconds() / 3600
-            
-            if age_hours <= 48:
-                recent_articles += 1
-            else:
-                older_articles += 1
-        except:
-            older_articles += 1
-        
-        article_details.append({
-            'source': source_name,
-            'source_weight': source_weight,
-            'time_decay': round(time_decay, 3),
-            'severity': severity_multiplier,
-            'deescalation': is_deescalation,
-            'contribution': round(article_contribution, 2)
-        })
-    
-    # Calculate momentum
-    if recent_articles > 0 and older_articles > 0:
-        recent_density = recent_articles / 2.0
-        older_density = older_articles / (days_analyzed - 2)
-        
-        momentum_ratio = recent_density / older_density if older_density > 0 else 2.0
-        
-        if momentum_ratio > 1.5:
-            momentum = 'increasing'
-            momentum_multiplier = 1.2
-        elif momentum_ratio < 0.7:
-            momentum = 'decreasing'
-            momentum_multiplier = 0.8
-        else:
-            momentum = 'stable'
-            momentum_multiplier = 1.0
-    else:
-        momentum = 'stable'
-        momentum_multiplier = 1.0
-    
-    weighted_score *= momentum_multiplier
-    
-    base_score = 15
-    
-    if weighted_score < 0:
-        probability = max(5, base_score + weighted_score)
-    else:
-        probability = base_score + (weighted_score * 2.5)
-    
-    probability = min(int(probability), 99)
-    probability = max(int(probability), 5)
-    
-    print(f"[v2.0.0] {target} scoring:")
-    print(f"  Total articles: {len(articles)}")
-    print(f"  Recent (48h): {recent_articles}")
-    print(f"  Weighted score: {weighted_score:.2f}")
-    print(f"  Momentum: {momentum} ({momentum_multiplier}x)")
-    print(f"  De-escalation articles: {deescalation_count}")
-    print(f"  Final probability: {probability}%")
-    
-    return {
-        'probability': probability,
-        'momentum': momentum,
-        'breakdown': {
-            'base_score': base_score,
-            'article_count': len(articles),
-            'recent_articles_48h': recent_articles,
-            'older_articles': older_articles,
-            'weighted_score': round(weighted_score, 2),
-            'momentum_multiplier': momentum_multiplier,
-            'deescalation_count': deescalation_count,
-            'time_decay_applied': True,
-            'source_weighting_applied': True
-        },
-        'top_contributors': sorted(article_details, 
-                                   key=lambda x: abs(x['contribution']), 
-                                   reverse=True)[:5]
-    }
-
-# ========================================
-# REDDIT CONFIGURATION
-# ========================================
-REDDIT_USER_AGENT = "AsifahAnalytics/2.0.0 (OSINT monitoring tool)"
-REDDIT_SUBREDDITS = {
-    "hezbollah": ["ForbiddenBromance", "Israel", "Lebanon"],
-    "iran": ["Iran", "Israel", "geopolitics"],
-    "houthis": ["Yemen", "Israel", "geopolitics"]
-}
-
-# ========================================
-# KEYWORDS & ESCALATION INDICATORS
-# ========================================
-ESCALATION_KEYWORDS = [
-    'strike', 'attack', 'bombing', 'airstrike', 'missile', 'rocket',
-    'military operation', 'offensive', 'retaliate', 'retaliation',
-    'response', 'counterattack', 'invasion', 'incursion',
-    'threatens', 'warned', 'vowed', 'promised to strike',
-    'will respond', 'severe response', 'consequences',
-    'mobilization', 'troops deployed', 'forces gathering',
-    'military buildup', 'reserves called up',
-    'killed', 'dead', 'casualties', 'wounded', 'injured',
-    'death toll', 'fatalities',
-    'flight cancellations', 'cancelled flights', 'suspend flights', 'suspended flights',
-    'airline suspends', 'suspended service to', 'halted flights', 'halt flights',
-    'grounded flights', 'airspace closed', 'no-fly zone', 'travel advisory',
-    'do not travel', 'avoid all travel', 'reconsider travel',
-    'emirates suspend', 'emirates cancel', 'emirates halt',
-    'turkish airlines suspend', 'turkish airlines cancel', 'turkish airlines halt',
-    'lufthansa suspend', 'lufthansa cancel',
-    'air france suspend', 'air france cancel',
-    'british airways suspend', 'british airways cancel',
-    'qatar airways suspend', 'qatar airways cancel',
-    'etihad suspend', 'etihad cancel',
-    'klm suspend', 'klm cancel'
-]
-
+# Target-specific keywords for each threat
 TARGET_KEYWORDS = {
-    'hezbollah': {
-        'keywords': ['hezbollah', 'hizbollah', 'hizballah', 'lebanon', 'lebanese', 'nasrallah'],
-        'reddit_keywords': ['Hezbollah', 'Lebanon', 'Israel', 'IDF', 'Lebanese', 'border', 'missile', 'strike']
-    },
-    'iran': {
-        'keywords': ['iran', 'iranian', 'tehran', 'irgc', 'revolutionary guard', 'khamenei'],
-        'reddit_keywords': ['Iran', 'Israel', 'IRGC', 'nuclear', 'Tehran', 'strike', 'sanctions']
-    },
-    'houthis': {
-        'keywords': ['houthi', 'houthis', 'yemen', 'yemeni', 'ansarallah', 'ansar allah', 'sanaa'],
-        'reddit_keywords': ['Houthi', 'Yemen', 'Red Sea', 'shipping', 'missile', 'drone', 'Ansar Allah']
-    }
-}
-
-# ========================================
-# IRANIAN CITIES
-# ========================================
-IRANIAN_CITIES = {
-    'tehran': {
-        'variants': ['tehran', 'teheran', 'tehrān', 'طهران', 'تهران'],
-        'population': 9500000,
-        'importance': 10
-    },
-    'isfahan': {
-        'variants': ['isfahan', 'esfahan', 'ispahan', 'اصفهان'],
-        'population': 2200000,
-        'importance': 8
-    },
-    'shiraz': {
-        'variants': ['shiraz', 'shīrāz', 'شیراز'],
-        'population': 1900000,
-        'importance': 7
-    },
-    'mashhad': {
-        'variants': ['mashhad', 'mashad', 'meshed', 'مشهد'],
-        'population': 3300000,
-        'importance': 9
-    },
-    'tabriz': {
-        'variants': ['tabriz', 'tabrīz', 'تبریز'],
-        'population': 1700000,
-        'importance': 7
-    },
-    'karaj': {
-        'variants': ['karaj', 'کرج'],
-        'population': 1900000,
-        'importance': 7
-    },
-    'qom': {
-        'variants': ['qom', 'qum', 'ghom', 'قم'],
-        'population': 1200000,
-        'importance': 9
-    },
-    'ahvaz': {
-        'variants': ['ahvaz', 'ahwaz', 'اهواز'],
-        'population': 1300000,
-        'importance': 6
-    },
-    'kerman': {
-        'variants': ['kerman', 'kermān', 'کرمان'],
-        'population': 740000,
-        'importance': 6
-    },
-    'rasht': {
-        'variants': ['rasht', 'رشت'],
-        'population': 680000,
-        'importance': 6
-    },
-    'zahedan': {
-        'variants': ['zahedan', 'zāhedān', 'زاهدان'],
-        'population': 680000,
-        'importance': 6
-    },
-    'sanandaj': {
-        'variants': ['sanandaj', 'senneh', 'سنندج'],
-        'population': 415000,
-        'importance': 7
-    },
-    'kermanshah': {
-        'variants': ['kermanshah', 'kermānshāh', 'کرمانشاه'],
-        'population': 950000,
-        'importance': 7
-    },
-    'hamadan': {
-        'variants': ['hamadan', 'hamedān', 'همدان'],
-        'population': 550000,
-        'importance': 6
-    }
-}
-
-def extract_cities_from_text(text):
-    """Extract Iranian city mentions from text"""
-    if not text:
-        return []
-    
-    text_lower = text.lower()
-    cities_found = []
-    
-    for city, data in IRANIAN_CITIES.items():
-        for variant in data['variants']:
-            if variant.lower() in text_lower or variant in text:
-                cities_found.append((city, data['importance']))
-                break
-    
-    return cities_found
-
-# ========================================
-# CASUALTY TRACKING
-# ========================================
-CASUALTY_KEYWORDS = {
-    'deaths': [
-        'killed', 'dead', 'died', 'death toll', 'fatalities', 'deaths',
-        'shot dead', 'gunned down', 'killed by', 'killed in',
-        'people have died', 'people have been killed', 'protesters killed',
-        'protesters had been killed', 'protesters have been killed',
-        'have died', 'have been killed', 'had been killed',
-        'death toll tops', 'death toll reaches', 'toll rises',
-        'کشته', 'مرگ', 'قتل'
+    "iran": [
+        "iran", "iranian", "tehran", "isfahan", "natanz", 
+        "fordow", "irgc", "revolutionary guard", "khamenei",
+        "islamic republic", "persian"
     ],
-    'injuries': [
-        'injured', 'wounded', 'hurt', 'injuries', 'casualties',
-        'hospitalized', 'critical condition', 'serious injuries',
-        'overwhelmed by injured', 'injured protesters', 'gunshot wounds',
-        'wounded protesters', 'protesters injured', 'suffering injuries',
-        'treated for injuries', 'hospitals overwhelmed',
-        'shot in their limbs', 'shot in the head', 'shot in the eye',
-        'pellets lodged', 'gunshot injuries', 'suffering from gunshot',
-        'people wounded', 'people shot and wounded', 'cases of injuries',
-        'metal pellet wounds', 'head and eye injuries',
-        'مجروح', 'زخمی', 'آسیب'
+    "hezbollah": [
+        "hezbollah", "hizballah", "hizbollah", "nasrallah",
+        "lebanon", "lebanese", "beirut", "southern lebanon",
+        "dahieh", "dahiyeh", "litani", "shia militia", "shiite militia",
+        "bekaa", "tyre", "sidon"
     ],
-    'arrests': [
-        'arrested', 'detained', 'detention', 'arrest', 'arrests',
-        'taken into custody', 'custody', 'apprehended', 'rounded up',
-        'imprisoned', 'people have been arrested', 'people have been imprisoned',
-        'people have also been imprisoned', 'protesters arrested',
-        'protesters detained', 'mass arrests', 'detained protesters',
-        'have been arrested', 'have been detained', 'had been arrested',
-        'بازداشت', 'دستگیر', 'زندان'
+    "houthis": [
+        "houthi", "houthis", "yemen", "yemeni", "ansarallah",
+        "ansar allah", "sanaa", "sana'a", "hodeidah", "hodeida",
+        "red sea attacks", "saada", "aden"
     ]
 }
 
-def parse_number_word(num_str):
-    """Convert number words to integers"""
-    num_str = num_str.lower().strip()
+# Source credibility weights
+SOURCE_WEIGHTS = {
+    # Tier 1: High credibility international sources
+    "Reuters": 1.0,
+    "Associated Press": 1.0,
+    "BBC News": 1.0,
+    "The New York Times": 1.0,
+    "The Washington Post": 1.0,
+    "The Guardian": 1.0,
+    "Financial Times": 1.0,
+    "Wall Street Journal": 1.0,
     
-    try:
-        return int(num_str)
-    except:
-        pass
+    # Tier 2: Credible regional sources
+    "Al Jazeera English": 0.9,
+    "Haaretz": 0.9,
+    "The Times of Israel": 0.85,
+    "Al-Monitor": 0.85,
+    "Middle East Eye": 0.8,
     
-    if ',' in num_str:
-        try:
-            return int(num_str.replace(',', ''))
-        except:
-            pass
+    # Tier 3: Government/Official sources
+    "UN News": 0.95,
+    "U.S. Department of State": 0.95,
+    "Israeli Government": 0.9,
     
-    if 'hundred' in num_str or 'hundreds' in num_str:
-        if any(word in num_str for word in ['several', 'few', 'many']):
-            return 200
-        if 'over' in num_str or 'more than' in num_str:
-            return 150
-        return 100
+    # Tier 4: Other credible sources
+    "NPR": 0.9,
+    "CNN": 0.85,
+    "ABC News": 0.85,
+    "NBC News": 0.85,
+    "CBS News": 0.85,
     
-    elif 'thousand' in num_str or 'thousands' in num_str:
-        match = re.search(r'(\d+)\s*thousand', num_str)
-        if match:
-            return int(match.group(1)) * 1000
-        
-        if any(word in num_str for word in ['several', 'few', 'many']):
-            return 2000
-        if 'over' in num_str or 'more than' in num_str:
-            return 1500
-        return 1000
+    # Tier 5: Specialized/regional sources
+    "Jerusalem Post": 0.8,
+    "I24 News": 0.75,
+    "Axios": 0.85,
+    "The Atlantic": 0.85,
+    "Foreign Policy": 0.85,
     
-    elif 'dozen' in num_str or 'dozens' in num_str:
-        if 'several' in num_str:
-            return 24
-        return 12
-    
-    elif num_str == 'many':
-        return 50
-    
-    return 0
+    # Default weight for unknown sources
+    "default": 0.5
+}
 
-def extract_casualty_data(articles):
-    """Extract verified casualty numbers from articles"""
-    casualties = {
-        'deaths': 0,
-        'injuries': 0,
-        'arrests': 0,
-        'sources': set(),
-        'details': []
-    }
+def calculate_article_score(article, target, hours_old):
+    """
+    Calculate weighted score for a single article based on:
+    1. Keyword presence and severity
+    2. Source credibility
+    3. Time decay (more recent = higher weight)
+    4. Target relevance
+    """
+    score = 0
+    text = f"{article.get('title', '')} {article.get('description', '')} {article.get('content', '')}".lower()
     
-    number_patterns = [
-        r'(\d+(?:,\d{3})*)\s+(?:people\s+)?.{0,20}?',
-        r'(?:more than|over|at least)\s+(\d+(?:,\d{3})*)\s+(?:people\s+)?.{0,30}?',
-        r'(\d+(?:,\d{3})*)\s+people\s+(?:have been|had been|have)\s+.{0,20}?',
-        r'(?:\d+)\s*(?:to|-)\s*(\d+(?:,\d{3})*)\s+.{0,20}?',
-        r'(?:roughly|approximately|around)\s+(\d+(?:,\d{3})*)\s+.{0,20}?',
-        r'(hundreds?|thousands?|dozens?|several\s+(?:hundred|thousand|dozen)|many)\s+(?:people\s+)?.{0,20}?',
-        r'(\d+)\s+thousand\s*.{0,20}?',
-    ]
+    # Check for target relevance
+    target_matches = sum(1 for keyword in TARGET_KEYWORDS[target] if keyword in text)
+    if target_matches == 0:
+        return 0, {}, False  # Article not relevant to target
     
-    for article in articles:
-        title = article.get('title') or ''
-        description = article.get('description') or ''
-        content = article.get('content') or ''
-        text = (title + ' ' + description + ' ' + content).lower()
-        
-        source = article.get('source', {}).get('name', 'Unknown')
-        url = article.get('url', '')
-        
-        sentences = re.split(r'[.!?]\s+', text)
-        
-        for sentence in sentences:
-            for keyword in CASUALTY_KEYWORDS['deaths']:
-                if keyword in sentence:
-                    casualties['sources'].add(source)
-                    
-                    for pattern in number_patterns:
-                        match = re.search(pattern + re.escape(keyword), sentence, re.IGNORECASE)
-                        if match:
-                            num_str = match.group(1)
-                            num = parse_number_word(num_str)
-                            
-                            if num > casualties['deaths']:
-                                casualties['deaths'] = num
-                                casualties['details'].append({
-                                    'type': 'deaths',
-                                    'count': num,
-                                    'source': source,
-                                    'url': url
-                                })
-                            break
-        
-        for sentence in sentences:
-            for keyword in CASUALTY_KEYWORDS['injuries']:
-                if keyword in sentence:
-                    casualties['sources'].add(source)
-                    
-                    for pattern in number_patterns:
-                        match = re.search(pattern + re.escape(keyword), sentence, re.IGNORECASE)
-                        if match:
-                            num_str = match.group(1)
-                            num = parse_number_word(num_str)
-                            
-                            if num > 0:
-                                if num > casualties['injuries']:
-                                    casualties['injuries'] = num
-                                casualties['details'].append({
-                                    'type': 'injuries',
-                                    'count': num,
-                                    'source': source,
-                                    'url': url
-                                })
-                            break
-        
-        for sentence in sentences:
-            for keyword in CASUALTY_KEYWORDS['arrests']:
-                if keyword in sentence:
-                    casualties['sources'].add(source)
-                    
-                    for pattern in number_patterns:
-                        match = re.search(pattern + re.escape(keyword), sentence, re.IGNORECASE)
-                        if match:
-                            num_str = match.group(1)
-                            num = parse_number_word(num_str)
-                            
-                            if num > casualties['arrests']:
-                                casualties['arrests'] = num
-                                casualties['details'].append({
-                                    'type': 'arrests',
-                                    'count': num,
-                                    'source': source,
-                                    'url': url
-                                })
-                            break
+    # Calculate keyword severity score
+    matched_keywords = {}
+    is_deescalation = False
     
-    casualties['sources'] = list(casualties['sources'])
+    # Check escalation keywords
+    for keyword, severity in ESCALATION_KEYWORDS.items():
+        if keyword in text:
+            matched_keywords[keyword] = severity
+            score += severity
     
-    if casualties['deaths'] > 0:
-        print(f"[v2.0.0] ✓ Deaths: {casualties['deaths']} detected")
-    if casualties['injuries'] > 0:
-        print(f"[v2.0.0] ✓ Injuries: {casualties['injuries']} detected")
-    if casualties['arrests'] > 0:
-        print(f"[v2.0.0] ✓ Arrests: {casualties['arrests']} detected")
+    # Check deescalation keywords
+    for keyword, severity in DEESCALATION_KEYWORDS.items():
+        if keyword in text:
+            matched_keywords[keyword] = severity
+            score += severity  # These are negative values
+            is_deescalation = True
     
-    return casualties
-
-# ========================================
-# FLIGHT CANCELLATION TRACKING
-# ========================================
-def extract_flight_cancellations(articles):
-    """Extract airline cancellation data from articles"""
-    cancellations = []
+    # Apply source weight
+    source_name = article.get('source', {}).get('name', 'Unknown')
+    source_weight = SOURCE_WEIGHTS.get(source_name, SOURCE_WEIGHTS['default'])
     
-    airlines = [
-        'emirates', 'turkish airlines', 'lufthansa', 'air france',
-        'british airways', 'qatar airways', 'etihad', 'etihad airways', 'klm',
-        'austrian airlines', 'swiss', 'alitalia', 'flydubai', 'fly dubai',
-        'pegasus', 'pegasus airlines', 'wizz air', 'ryanair',
-        'air canada', 'united airlines', 'delta', 'american airlines'
-    ]
-    
-    for article in articles:
-        title = article.get('title') or ''
-        description = article.get('description') or ''
-        content = article.get('content') or ''
-        text = (title + ' ' + description + ' ' + content).lower()
-        
-        if any(keyword in text for keyword in ['suspend', 'cancel', 'halt', 'cancelled', 'suspended']):
-            
-            detected_airlines = []
-            for airline in airlines:
-                if airline in text:
-                    normalized = airline.title()
-                    if normalized not in detected_airlines:
-                        detected_airlines.append(normalized)
-            
-            destination = 'Unknown'
-            if 'iran' in text or 'tehran' in text:
-                destination = 'Tehran/Iran'
-            elif 'lebanon' in text or 'beirut' in text:
-                destination = 'Beirut/Lebanon'
-            elif 'yemen' in text or 'sanaa' in text:
-                destination = 'Sanaa/Yemen'
-            
-            if destination != 'Unknown' and detected_airlines:
-                for airline in detected_airlines:
-                    cancellations.append({
-                        'airline': airline,
-                        'destination': destination,
-                        'date': article.get('publishedAt', 'Unknown date')[:10],
-                        'source': article.get('source', {}).get('name', 'Unknown'),
-                        'url': article.get('url', '#'),
-                        'headline': article.get('title', '')
-                    })
-    
-    return cancellations
-
-# ========================================
-# RATE LIMITING
-# ========================================
-def check_rate_limit():
-    """Check if rate limit has been exceeded"""
-    global rate_limit_data
-    
-    current_time = time.time()
-    
-    if current_time >= rate_limit_data['reset_time']:
-        rate_limit_data['requests'] = 0
-        rate_limit_data['reset_time'] = current_time + RATE_LIMIT_WINDOW
-    
-    if rate_limit_data['requests'] >= RATE_LIMIT:
-        return False
-    
-    rate_limit_data['requests'] += 1
-    return True
-
-def get_rate_limit_info():
-    """Get current rate limit status"""
-    current_time = time.time()
-    remaining = RATE_LIMIT - rate_limit_data['requests']
-    resets_in = int(rate_limit_data['reset_time'] - current_time)
-    
-    return {
-        'requests_used': rate_limit_data['requests'],
-        'requests_remaining': max(0, remaining),
-        'requests_limit': RATE_LIMIT,
-        'resets_in_seconds': max(0, resets_in)
-    }
-
-# ========================================
-# NEWS API FUNCTIONS
-# ========================================
-def fetch_newsapi_articles(query, days=7):
-    """Fetch articles from NewsAPI"""
-    if not NEWSAPI_KEY:
-        print("[v2.0.0] NewsAPI: No API key configured")
-        return []
-    
-    from_date = (datetime.now() - timedelta(days=days)).strftime('%Y-%m-%d')
-    
-    url = f"https://newsapi.org/v2/everything"
-    params = {
-        'q': query,
-        'from': from_date,
-        'sortBy': 'publishedAt',
-        'language': 'en',
-        'apiKey': NEWSAPI_KEY,
-        'pageSize': 100
-    }
-    
-    try:
-        response = requests.get(url, params=params, timeout=10)
-        if response.status_code == 200:
-            data = response.json()
-            articles = data.get('articles', [])
-            for article in articles:
-                article['language'] = 'en'
-            
-            sources = {}
-            for article in articles:
-                source_name = article.get('source', {}).get('name', 'Unknown')
-                sources[source_name] = sources.get(source_name, 0) + 1
-            
-            nyt = sources.get('The New York Times', 0)
-            wapo = sources.get('The Washington Post', 0)
-            bbc = sources.get('BBC News', 0)
-            
-            print(f"[v2.0.0] NewsAPI: Fetched {len(articles)} articles")
-            if nyt > 0:
-                print(f"[v2.0.0] NewsAPI: ✓ NYT articles: {nyt}")
-            if wapo > 0:
-                print(f"[v2.0.0] NewsAPI: ✓ WaPo articles: {wapo}")
-            if bbc > 0:
-                print(f"[v2.0.0] NewsAPI: ✓ BBC articles: {bbc}")
-            
-            return articles
-        print(f"[v2.0.0] NewsAPI: HTTP {response.status_code}")
-        return []
-    except Exception as e:
-        print(f"[v2.0.0] NewsAPI error: {e}")
-        return []
-
-def fetch_gdelt_articles(query, days=7, language='eng'):
-    """Fetch articles from GDELT"""
-    try:
-        wrapped_query = f"({query})" if ' OR ' in query else query
-        
-        params = {
-            'query': wrapped_query,
-            'mode': 'artlist',
-            'maxrecords': 75,
-            'timespan': f'{days}d',
-            'format': 'json',
-            'sourcelang': language
-        }
-        
-        print(f"[v2.0.0] GDELT {language}: Query = {wrapped_query}")
-        
-        response = requests.get(GDELT_BASE_URL, params=params, timeout=15)
-        
-        content_type = response.headers.get('Content-Type', '')
-        if 'application/json' not in content_type:
-            print(f"[v2.0.0] GDELT warning: Response is not JSON")
-            return []
-        
-        if response.status_code == 200:
-            data = response.json()
-            articles = data.get('articles', [])
-            
-            standardized = []
-            lang_code = {'eng': 'en', 'ara': 'ar', 'heb': 'he', 'fas': 'fa'}.get(language, 'en')
-            
-            domains = {}
-            
-            for article in articles:
-                domain = article.get('domain', 'unknown')
-                domains[domain] = domains.get(domain, 0) + 1
-                
-                standardized.append({
-                    'title': article.get('title', ''),
-                    'description': article.get('title', ''),
-                    'url': article.get('url', ''),
-                    'publishedAt': article.get('seendate', ''),
-                    'source': {'name': article.get('domain', 'GDELT')},
-                    'content': article.get('title', ''),
-                    'language': lang_code
-                })
-            
-            print(f"[v2.0.0] GDELT {language}: Fetched {len(standardized)} articles")
-            
-            premium_domains = {
-                'nytimes.com': 'NYT',
-                'washingtonpost.com': 'WaPo',
-                'bbc.com': 'BBC',
-                'bbc.co.uk': 'BBC',
-                'reuters.com': 'Reuters',
-                'apnews.com': 'AP'
-            }
-            
-            for domain, count in domains.items():
-                for premium_domain, name in premium_domains.items():
-                    if premium_domain in domain.lower():
-                        print(f"[v2.0.0] GDELT {language}: ✓ {name} articles: {count}")
-                        break
-            
-            return standardized
-        
-        print(f"[v2.0.0] GDELT {language}: HTTP {response.status_code}")
-        return []
-    except Exception as e:
-        print(f"[v2.0.0] GDELT {language} error: {e}")
-        return []
-
-def fetch_reddit_posts(target, keywords, days=7):
-    """Fetch Reddit posts from relevant subreddits"""
-    print(f"[v2.0.0] Reddit: Starting fetch for {target}")
-    
-    subreddits = REDDIT_SUBREDDITS.get(target, [])
-    if not subreddits:
-        print(f"[v2.0.0] Reddit: No subreddits configured for {target}")
-        return []
-    
-    all_posts = []
-    
-    if days <= 1:
-        time_filter = "day"
-    elif days <= 7:
-        time_filter = "week"
-    elif days <= 30:
-        time_filter = "month"
+    # Apply time decay (exponential decay over 7 days)
+    # Recent articles (0-24h) get full weight
+    # After 24h, weight decays exponentially
+    if hours_old <= 24:
+        time_weight = 1.0
     else:
-        time_filter = "year"
+        days_old = hours_old / 24
+        time_weight = 0.5 ** (days_old / 7)  # Halves every 7 days
     
-    for subreddit in subreddits:
-        try:
-            query = " OR ".join(keywords[:3])
-            
-            url = f"https://www.reddit.com/r/{subreddit}/search.json"
-            params = {
-                "q": query,
-                "restrict_sr": "true",
-                "sort": "new",
-                "t": time_filter,
-                "limit": 25
-            }
-            
-            headers = {
-                "User-Agent": REDDIT_USER_AGENT
-            }
-            
-            time.sleep(2)
-            
-            response = requests.get(url, params=params, headers=headers, timeout=10)
-            
-            if response.status_code == 429:
-                print(f"[v2.0.0] Reddit r/{subreddit}: Rate limited")
-                continue
-            
-            response.raise_for_status()
-            data = response.json()
-            
-            if "data" in data and "children" in data["data"]:
-                posts = data["data"]["children"]
-                
-                for post in posts:
-                    post_data = post.get("data", {})
-                    
-                    normalized_post = {
-                        "title": post_data.get("title", "")[:200],
-                        "description": post_data.get("selftext", "")[:300],
-                        "url": f"https://www.reddit.com{post_data.get('permalink', '')}",
-                        "publishedAt": datetime.fromtimestamp(
-                            post_data.get("created_utc", 0), 
-                            tz=timezone.utc
-                        ).isoformat(),
-                        "source": {"name": f"r/{subreddit}"},
-                        "content": post_data.get("selftext", ""),
-                        "language": "en",
-                        "reddit_score": post_data.get("score", 0),
-                        "reddit_comments": post_data.get("num_comments", 0),
-                        "reddit_upvote_ratio": post_data.get("upvote_ratio", 0)
-                    }
-                    
-                    all_posts.append(normalized_post)
-                
-                print(f"[v2.0.0] Reddit r/{subreddit}: Found {len(posts)} posts")
-            
-        except Exception as e:
-            print(f"[v2.0.0] Reddit r/{subreddit} error: {str(e)}")
-            continue
+    # Calculate final weighted score
+    weighted_score = score * source_weight * time_weight
     
-    print(f"[v2.0.0] Reddit: Total {len(all_posts)} posts")
-    return all_posts
+    return weighted_score, matched_keywords, is_deescalation
 
-def fetch_iranwire_rss():
-    """Fetch articles from Iran Wire RSS feeds"""
-    articles = []
+def assess_threat_level(target="iran"):
+    """
+    Main function to assess threat level for Israeli military action
+    Returns probability (0-100), timeline estimate, and supporting data
+    """
     
-    feeds = {
-        'en': 'https://iranwire.com/en/feed/',
-        'fa': 'https://iranwire.com/fa/feed/'
-    }
-    
-    for lang, feed_url in feeds.items():
-        try:
-            print(f"[v2.0.0] Iran Wire {lang}: Attempting to fetch RSS...")
-            response = requests.get(feed_url, timeout=10)
-            
-            if response.status_code != 200:
-                print(f"[v2.0.0] Iran Wire {lang}: HTTP {response.status_code}")
-                continue
-            
-            import xml.etree.ElementTree as ET
-            
-            try:
-                root = ET.fromstring(response.content)
-            except ET.ParseError as e:
-                print(f"[v2.0.0] Iran Wire {lang}: XML parse error: {e}")
-                continue
-            
-            articles_before = len(articles)
-            
-            for item in root.findall('.//item')[:10]:
-                title = item.find('title')
-                link = item.find('link')
-                pubDate = item.find('pubDate')
-                description = item.find('description')
-                
-                if title is not None and link is not None:
-                    articles.append({
-                        'title': title.text or '',
-                        'description': description.text if description is not None else '',
-                        'url': link.text or '',
-                        'publishedAt': pubDate.text if pubDate is not None else '',
-                        'source': {'name': 'Iran Wire'},
-                        'content': '',
-                        'language': lang,
-                        'iranwire': True
-                    })
-            
-            articles_added = len(articles) - articles_before
-            print(f"[v2.0.0] Iran Wire {lang}: ✓ Fetched {articles_added} articles")
-            
-        except requests.Timeout:
-            print(f"[v2.0.0] Iran Wire {lang}: Timeout after 10s")
-        except requests.ConnectionError as e:
-            print(f"[v2.0.0] Iran Wire {lang}: Connection error")
-        except Exception as e:
-            print(f"[v2.0.0] Iran Wire {lang}: Unexpected error: {str(e)[:100]}")
-    
-    print(f"[v2.0.0] Iran Wire: Total {len(articles)} articles")
-    return articles
-
-# ========================================
-# MAIN SCAN ENDPOINT - v2.0 WITH IMPROVED SCORING
-# ========================================
-@app.route('/scan', methods=['GET'])
-def scan():
-    """Main scanning endpoint for target analysis"""
+    # Search for recent news about the target
     try:
-        if not check_rate_limit():
-            return jsonify({
-                'error': 'Rate limit exceeded',
-                'rate_limit': get_rate_limit_info()
-            }), 429
+        # Get English language articles
+        search_results_en = search_news(target, language="en")
         
-        target = request.args.get('target', 'iran')
-        days = int(request.args.get('days', 7))
+        # Get Hebrew language articles for Israeli perspective
+        search_results_he = search_news(target, language="he")
         
-        if target not in TARGET_KEYWORDS:
-            return jsonify({'error': 'Invalid target'}), 400
+        # Get Arabic articles for regional perspective
+        search_results_ar = search_news(target, language="ar")
         
-        query = ' OR '.join(TARGET_KEYWORDS[target]['keywords'])
+        # Get Farsi articles if target is Iran
+        search_results_fa = None
+        if target == "iran":
+            search_results_fa = search_news("iran", language="fa")
         
-        articles_en = fetch_newsapi_articles(query, days)
-        articles_gdelt_en = fetch_gdelt_articles(query, days, 'eng')
-        articles_gdelt_ar = fetch_gdelt_articles(query, days, 'ara')
-        articles_gdelt_he = fetch_gdelt_articles(query, days, 'heb')
+        # Get Reddit discussions from relevant subreddits
+        reddit_results = search_reddit(target)
         
-        articles_gdelt_fa = []
-        if target == 'iran':
-            articles_gdelt_fa = fetch_gdelt_articles(query, days, 'fas')
-        
-        articles_reddit = fetch_reddit_posts(
-            target,
-            TARGET_KEYWORDS[target]['reddit_keywords'],
-            days
-        )
-        
-        all_articles = (articles_en + articles_gdelt_en + articles_gdelt_ar + 
-                       articles_gdelt_he + articles_gdelt_fa + articles_reddit)
-        
-        # v2.0: Use sophisticated scoring algorithm
-        scoring_result = calculate_threat_probability(all_articles, days, target)
-        probability = scoring_result['probability']
-        momentum = scoring_result['momentum']
-        breakdown = scoring_result['breakdown']
-        
-        # Determine timeline based on probability and momentum
-        if probability < 30:
-            timeline = "180+ Days (Low priority)"
-        elif probability < 50:
-            timeline = "91-180 Days"
-        elif probability < 70:
-            timeline = "31-90 Days"
-        else:
-            timeline = "0-30 Days (Elevated threat)"
-        
-        # Adjust timeline based on momentum
-        if momentum == 'increasing' and probability > 50:
-            timeline = "0-30 Days (Elevated threat)"
-        elif momentum == 'decreasing' and probability < 70:
-            if "31-90" in timeline:
-                timeline = "91-180 Days"
-            elif "91-180" in timeline:
-                timeline = "180+ Days (Low priority)"
-        
-        return jsonify({
-            'success': True,
-            'target': target,
-            'probability': probability,
-            'momentum': momentum,
-            'timeline': timeline,
-            'scoring_breakdown': breakdown,
-            'top_scoring_articles': scoring_result.get('top_contributors', []),
-            'articles': all_articles[:50],
-            'articles_en': articles_en[:20],
-            'articles_ar': articles_gdelt_ar[:20],
-            'articles_he': articles_gdelt_he[:20],
-            'articles_fa': articles_gdelt_fa[:20],
-            'articles_reddit': articles_reddit[:20],
-            'total_articles': len(all_articles),
-            'totalResults_en': len(articles_en),
-            'totalResults_ar': len(articles_gdelt_ar),
-            'totalResults_he': len(articles_gdelt_he),
-            'totalResults_fa': len(articles_gdelt_fa),
-            'totalResults_reddit': len(articles_reddit),
-            'reddit_subreddits': REDDIT_SUBREDDITS.get(target, []),
-            'escalation_keywords': ESCALATION_KEYWORDS,
-            'target_keywords': TARGET_KEYWORDS[target]['keywords'],
-            'rate_limit': get_rate_limit_info(),
-            'cached': False,
-            'version': '2.0.0'
-        })
-        
-    except Exception as e:
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        }), 500
-
-# ========================================
-# IRAN PROTESTS ENDPOINT
-# ========================================
-@app.route('/scan-iran-protests', methods=['GET'])
-def scan_iran_protests():
-    """Iran protests endpoint with separate Iran Wire tracking"""
-    try:
-        if not check_rate_limit():
-            return jsonify({
-                'error': 'Rate limit exceeded',
-                'rate_limit': get_rate_limit_info()
-            }), 429
-        
-        days = int(request.args.get('days', 7))
-        
+        # Combine all results
         all_articles = []
         
-        newsapi_articles = fetch_newsapi_articles('Iran protests', days)
-        all_articles.extend(newsapi_articles)
+        if search_results_en and 'articles' in search_results_en:
+            all_articles.extend(search_results_en['articles'])
         
-        gdelt_query = 'iran OR persia OR protest OR protests OR demonstration'
-        gdelt_en = fetch_gdelt_articles(gdelt_query, days, 'eng')
-        gdelt_ar = fetch_gdelt_articles(gdelt_query, days, 'ara')
-        gdelt_fa = fetch_gdelt_articles(gdelt_query, days, 'fas')
-        gdelt_he = fetch_gdelt_articles(gdelt_query, days, 'heb')
+        if search_results_he and 'articles' in search_results_he:
+            all_articles.extend(search_results_he['articles'])
         
-        all_articles.extend(gdelt_en)
-        all_articles.extend(gdelt_ar)
-        all_articles.extend(gdelt_fa)
-        all_articles.extend(gdelt_he)
+        if search_results_ar and 'articles' in search_results_ar:
+            all_articles.extend(search_results_ar['articles'])
         
-        reddit_posts = fetch_reddit_posts(
-            'iran',
-            ['Iran', 'protest', 'protests', 'demonstration', 'Tehran'],
-            days
-        )
-        all_articles.extend(reddit_posts)
+        if search_results_fa and 'articles' in search_results_fa:
+            all_articles.extend(search_results_fa['articles'])
         
-        iranwire_articles = fetch_iranwire_rss()
-        all_articles.extend(iranwire_articles)
+        if reddit_results:
+            all_articles.extend(reddit_results)
         
-        cities_data = []
+        if not all_articles:
+            return {
+                "success": False,
+                "error": "No articles found",
+                "probability": 0,
+                "timeline": "Unknown",
+                "confidence": "Low"
+            }
+        
+        # Calculate weighted scores for all articles
+        article_scores = []
+        total_weighted_score = 0
+        recent_article_count = 0  # Articles from last 48 hours
+        older_article_count = 0
+        deescalation_count = 0
+        
+        current_time = datetime.now()
+        
         for article in all_articles:
-            title = article.get('title') or ''
-            description = article.get('description') or ''
-            content = article.get('content') or ''
-            text = (title + ' ' + description + ' ' + content).lower()
-            cities_found = extract_cities_from_text(text)
-            cities_data.extend(cities_found)
-        
-        city_counts = {}
-        for city, importance in cities_data:
-            if city not in city_counts:
-                city_counts[city] = {'count': 0, 'importance': importance}
-            city_counts[city]['count'] += 1
-        
-        sorted_cities = sorted(
-            city_counts.items(),
-            key=lambda x: x[1]['importance'] * x[1]['count'],
-            reverse=True
-        )
-        
-        top_cities = [
-            {
-                'name': city.title(),
-                'mentions': data['count'],
-                'importance': data['importance']
-            }
-            for city, data in sorted_cities[:10]
-        ]
-        
-        casualties = extract_casualty_data(all_articles)
-        flight_cancellations = extract_flight_cancellations(all_articles)
-        
-        articles_per_day = len(all_articles) / days
-        intensity_score = min(
-            articles_per_day * 2 + 
-            len(city_counts) * 4 + 
-            casualties['deaths'] * 0.5 + 
-            casualties['injuries'] * 0.2 + 
-            casualties['arrests'] * 0.1 +
-            len(flight_cancellations) * 8,
-            100
-        )
-        
-        stability_score = 100 - intensity_score
-        
-        return jsonify({
-            'success': True,
-            'timestamp': datetime.now(timezone.utc).isoformat(),
-            'days_analyzed': days,
-            'total_articles': len(all_articles),
-            'intensity': int(intensity_score),
-            'stability': int(stability_score),
+            # Calculate hours since publication
+            pub_date_str = article.get('publishedAt', '')
+            try:
+                if 'T' in pub_date_str:
+                    pub_date = datetime.fromisoformat(pub_date_str.replace('Z', '+00:00'))
+                else:
+                    pub_date = datetime.strptime(pub_date_str, '%Y-%m-%d')
+                hours_old = (current_time - pub_date.replace(tzinfo=None)).total_seconds() / 3600
+            except:
+                hours_old = 48  # Default to 48 hours if parsing fails
             
-            'casualties': {
-                'deaths': casualties['deaths'],
-                'injuries': casualties['injuries'],
-                'arrests': casualties['arrests'],
-                'verified_sources': casualties['sources'],
-                'details': casualties.get('details', [])
+            weighted_score, keywords, is_deescalation = calculate_article_score(article, target, hours_old)
+            
+            if weighted_score != 0:  # Only include relevant articles
+                article_scores.append({
+                    'article': article,
+                    'weighted_score': weighted_score,
+                    'keywords': keywords,
+                    'hours_old': hours_old,
+                    'is_deescalation': is_deescalation,
+                    'source_weight': SOURCE_WEIGHTS.get(
+                        article.get('source', {}).get('name', 'Unknown'),
+                        SOURCE_WEIGHTS['default']
+                    )
+                })
+                total_weighted_score += weighted_score
+                
+                if hours_old <= 48:
+                    recent_article_count += 1
+                else:
+                    older_article_count += 1
+                
+                if is_deescalation:
+                    deescalation_count += 1
+        
+        # Sort articles by weighted score (highest contribution first)
+        article_scores.sort(key=lambda x: abs(x['weighted_score']), reverse=True)
+        
+        # Calculate base probability
+        # Start with article count (more coverage = higher probability)
+        base_score = min(len(article_scores) * 0.5, 15)  # Cap at 15 points
+        
+        # Add weighted score component
+        # Normalize to 0-85 range (leaving room for other factors)
+        normalized_weighted_score = min(total_weighted_score * 2, 85)
+        
+        # Calculate momentum (recent vs older articles)
+        if older_article_count > 0:
+            momentum_ratio = recent_article_count / older_article_count
+            if momentum_ratio > 1.5:
+                momentum = "increasing"
+                momentum_multiplier = 1.2
+            elif momentum_ratio > 0.8:
+                momentum = "stable"
+                momentum_multiplier = 1.0
+            else:
+                momentum = "decreasing"
+                momentum_multiplier = 0.8
+        else:
+            momentum = "increasing"
+            momentum_multiplier = 1.2
+        
+        # Apply momentum multiplier
+        final_score = (base_score + normalized_weighted_score) * momentum_multiplier
+        
+        # Convert to probability (0-100)
+        probability = min(int(final_score), 99)  # Cap at 99%
+        
+        # Determine timeline based on probability and momentum
+        if probability >= 80:
+            if momentum == "increasing":
+                timeline = "0-7 Days (Imminent threat)"
+            else:
+                timeline = "0-14 Days (Very high threat)"
+        elif probability >= 60:
+            if momentum == "increasing":
+                timeline = "7-14 Days (High threat)"
+            else:
+                timeline = "14-30 Days (Elevated threat)"
+        elif probability >= 40:
+            timeline = "0-30 Days (Elevated threat)"
+        elif probability >= 20:
+            timeline = "30-60 Days (Moderate threat)"
+        else:
+            timeline = "60+ Days (Low threat)"
+        
+        # Determine confidence based on article count and source diversity
+        unique_sources = len(set(a['article'].get('source', {}).get('name', 'Unknown') 
+                                for a in article_scores))
+        
+        if len(article_scores) >= 20 and unique_sources >= 8:
+            confidence = "High"
+        elif len(article_scores) >= 10 and unique_sources >= 5:
+            confidence = "Medium"
+        else:
+            confidence = "Low"
+        
+        # Prepare top contributing articles for display
+        top_articles = []
+        for item in article_scores[:15]:  # Top 15 articles
+            article = item['article']
+            contribution_percent = (abs(item['weighted_score']) / max(abs(total_weighted_score), 1)) * 100
+            
+            top_articles.append({
+                'title': article.get('title', 'No title'),
+                'source': article.get('source', {}).get('name', 'Unknown'),
+                'url': article.get('url', ''),
+                'publishedAt': article.get('publishedAt', ''),
+                'contribution': round(item['weighted_score'], 2),
+                'contribution_percent': round(contribution_percent, 2),
+                'severity': max(item['keywords'].values()) if item['keywords'] else 0,
+                'source_weight': item['source_weight'],
+                'time_decay': 0.5 ** ((item['hours_old'] / 24) / 7) if item['hours_old'] > 24 else 1.0,
+                'deescalation': item['is_deescalation']
+            })
+        
+        return {
+            "success": True,
+            "target": target,
+            "probability": probability,
+            "timeline": timeline,
+            "confidence": confidence,
+            "momentum": momentum,
+            "total_articles": len(article_scores),
+            "recent_articles_48h": recent_article_count,
+            "older_articles": older_article_count,
+            "deescalation_count": deescalation_count,
+            "scoring_breakdown": {
+                "base_score": base_score,
+                "weighted_score": round(total_weighted_score, 2),
+                "momentum_multiplier": momentum_multiplier,
+                "article_count": len(article_scores),
+                "recent_articles_48h": recent_article_count,
+                "older_articles": older_article_count,
+                "source_weighting_applied": True,
+                "time_decay_applied": True
             },
-            
-            'cities': top_cities,
-            'num_cities_affected': len(city_counts),
-            'flight_cancellations': flight_cancellations,
-            
-            'articles_en': [a for a in all_articles if a.get('language') == 'en' and not a.get('iranwire')][:20],
-            'articles_fa': [a for a in all_articles if a.get('language') == 'fa' and not a.get('iranwire')][:20],
-            'articles_ar': [a for a in all_articles if a.get('language') == 'ar'][:20],
-            'articles_he': [a for a in all_articles if a.get('language') == 'he'][:5],
-            'articles_reddit': [a for a in all_articles if a.get('source', {}).get('name', '').startswith('r/')][:20],
-            'articles_iranwire': [a for a in all_articles if a.get('iranwire')][:20],
-            
-            'rate_limit': get_rate_limit_info(),
-            'cached': False,
-            'version': '2.0.0'
-        })
+            "top_scoring_articles": top_articles,
+            "escalation_keywords": list(ESCALATION_KEYWORDS.keys()),
+            "target_keywords": TARGET_KEYWORDS[target],
+            "articles_en": search_results_en.get('articles', []) if search_results_en else [],
+            "articles_he": search_results_he.get('articles', []) if search_results_he else [],
+            "articles_ar": search_results_ar.get('articles', []) if search_results_ar else [],
+            "articles_fa": search_results_fa.get('articles', []) if search_results_fa and target == "iran" else [],
+            "articles_reddit": reddit_results if reddit_results else [],
+            "totalResults_en": search_results_en.get('totalResults', 0) if search_results_en else 0,
+            "totalResults_he": search_results_he.get('totalResults', 0) if search_results_he else 0,
+            "totalResults_ar": search_results_ar.get('totalResults', 0) if search_results_ar else 0,
+            "totalResults_fa": search_results_fa.get('totalResults', 0) if search_results_fa and target == "iran" else 0,
+            "totalResults_reddit": len(reddit_results) if reddit_results else 0,
+            "reddit_subreddits": get_target_subreddits(target),
+            "rate_limit": search_results_en.get('rate_limit', {}) if search_results_en else {},
+            "cached": False,
+            "version": "2.0.0"
+        }
         
     except Exception as e:
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        }), 500
+        return {
+            "success": False,
+            "error": str(e),
+            "probability": 0,
+            "timeline": "Unknown",
+            "confidence": "Low"
+        }
 
-# ========================================
-# FLIGHT CANCELLATIONS ENDPOINT
-# ========================================
-@app.route('/flight-cancellations', methods=['GET'])
-def get_flight_cancellations():
-    """Aggregate flight cancellations from all targets"""
+def get_target_subreddits(target):
+    """Get relevant subreddits for each target"""
+    subreddit_map = {
+        "iran": ["Iran", "Iranian", "geopolitics", "worldnews"],
+        "hezbollah": ["Lebanon", "Israel", "geopolitics"],
+        "houthis": ["Yemen", "Israel", "geopolitics"]
+    }
+    return subreddit_map.get(target, ["geopolitics"])
+
+def search_news(target, language="en"):
+    """
+    Search for news articles about the target using Claude with web search
+    """
     try:
-        days = 7
-        all_cancellations = []
+        # Construct search query based on target and language
+        if target == "iran":
+            if language == "en":
+                query = "Israel Iran military strike attack threat latest news"
+            elif language == "he":
+                query = "ישראל איران תקיפה צבאית איום חדשות"
+            elif language == "ar":
+                query = "إسرائيل إيران ضربة عسكرية تهديد أخبار"
+            elif language == "fa":
+                query = "اسرائیل ایران حمله نظامی تهدید اخبار"
+        elif target == "hezbollah":
+            if language == "en":
+                query = "Israel Hezbollah military strike attack threat latest news"
+            elif language == "he":
+                query = "ישראל חיזבאללה תקיפה צבאית איום חדשות"
+            elif language == "ar":
+                query = "إسرائيل حزب الله ضربة عسكرية تهديد أخبار"
+        elif target == "houthis":
+            if language == "en":
+                query = "Israel Houthis Yemen military strike attack threat latest news"
+            elif language == "he":
+                query = "ישראל חות'ים תימן תקיפה צבאית איום חדשות"
+            elif language == "ar":
+                query = "إسرائيل الحوثيين اليمن ضربة عسكرية تهديد أخبار"
         
-        for target_name, target_config in TARGET_KEYWORDS.items():
-            query = ' OR '.join(target_config['keywords']) + ' AND (flight OR airline OR cancel OR suspend)'
-            articles = fetch_newsapi_articles(query, days)
-            articles.extend(fetch_gdelt_articles(query, days, 'eng'))
-            
-            cancellations = extract_flight_cancellations(articles)
-            all_cancellations.extend(cancellations)
-        
-        seen_urls = set()
-        unique_cancellations = []
-        for cancel in all_cancellations:
-            if cancel['url'] not in seen_urls:
-                seen_urls.add(cancel['url'])
-                unique_cancellations.append(cancel)
-        
-        sorted_cancellations = sorted(
-            unique_cancellations,
-            key=lambda x: x['date'],
-            reverse=True
+        response = client.messages.create(
+            model="claude-sonnet-4-20250514",
+            max_tokens=4096,
+            tools=[
+                {
+                    "type": "web_search_20250305",
+                    "name": "web_search",
+                    "search_tool_version": "2025-03-05"
+                }
+            ],
+            messages=[
+                {
+                    "role": "user",
+                    "content": f"""Search for recent news articles about: {query}
+
+Focus on articles from the last 7 days that discuss:
+- Military threats or actions
+- Diplomatic tensions
+- Strategic developments
+- Expert analysis
+- Official statements
+
+Return the results as a JSON object with this structure:
+{{
+    "articles": [
+        {{
+            "title": "article title",
+            "description": "article description",
+            "url": "article url",
+            "source": {{"name": "source name"}},
+            "publishedAt": "ISO date string",
+            "content": "article content snippet",
+            "language": "{language}"
+        }}
+    ],
+    "totalResults": number
+}}
+
+Search for at least 20 articles if available."""
+                }
+            ]
         )
         
-        return jsonify({
-            'success': True,
-            'cancellations': sorted_cancellations[:10],
-            'timestamp': datetime.now(timezone.utc).isoformat(),
-            'version': '2.0.0'
-        })
+        # Extract the search results from Claude's response
+        result_text = ""
+        for block in response.content:
+            if block.type == "text":
+                result_text += block.text
         
-    except Exception as e:
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        }), 500
-
-# ========================================
-# POLYMARKET DATA ENDPOINT
-# ========================================
-@app.route('/polymarket-data', methods=['GET'])
-def polymarket_data():
-    """Fetch Polymarket prediction market data"""
-    try:
-        markets = [
-            {
-                'question': 'Will Israel strike Iran in 2026?',
-                'probability': 0.42,
-                'url': 'https://polymarket.com'
-            },
-            {
-                'question': 'Major conflict in Middle East by March 2026?',
-                'probability': 0.58,
-                'url': 'https://polymarket.com'
+        # Try to parse JSON from the response
+        try:
+            # Find JSON in the response
+            start_idx = result_text.find('{')
+            end_idx = result_text.rfind('}') + 1
+            if start_idx != -1 and end_idx != 0:
+                json_str = result_text[start_idx:end_idx]
+                results = json.loads(json_str)
+                return results
+        except json.JSONDecodeError:
+            # If JSON parsing fails, return a structured error
+            return {
+                "articles": [],
+                "totalResults": 0,
+                "error": "Failed to parse search results"
             }
-        ]
         
-        return jsonify({
-            'success': True,
-            'markets': markets,
-            'timestamp': datetime.now(timezone.utc).isoformat(),
-            'version': '2.0.0'
-        })
+        return {
+            "articles": [],
+            "totalResults": 0
+        }
         
     except Exception as e:
+        print(f"Error searching news: {e}")
+        return {
+            "articles": [],
+            "totalResults": 0,
+            "error": str(e)
+        }
+
+def search_reddit(target):
+    """
+    Search Reddit for discussions about the target
+    """
+    try:
+        subreddits = get_target_subreddits(target)
+        
+        # Construct search query
+        if target == "iran":
+            query = "Israel Iran strike attack military threat"
+        elif target == "hezbollah":
+            query = "Israel Hezbollah strike attack military threat Lebanon"
+        elif target == "houthis":
+            query = "Israel Houthis Yemen strike attack military threat"
+        
+        response = client.messages.create(
+            model="claude-sonnet-4-20250514",
+            max_tokens=4096,
+            tools=[
+                {
+                    "type": "web_search_20250305",
+                    "name": "web_search",
+                    "search_tool_version": "2025-03-05"
+                }
+            ],
+            messages=[
+                {
+                    "role": "user",
+                    "content": f"""Search Reddit for recent discussions about: {query}
+
+Focus on subreddits: {', '.join(['r/' + s for s in subreddits])}
+
+Look for posts from the last 7 days that discuss:
+- Military developments
+- Strategic analysis
+- Breaking news
+- Expert opinions
+
+Return results as a JSON array of post objects with this structure:
+[
+    {{
+        "title": "post title",
+        "url": "post url",
+        "source": {{"name": "r/subreddit"}},
+        "publishedAt": "ISO date string",
+        "content": "post content",
+        "reddit_score": score,
+        "reddit_comments": comment_count,
+        "reddit_upvote_ratio": ratio,
+        "language": "en"
+    }}
+]
+
+Return at least 5-10 relevant posts if available."""
+                }
+            ]
+        )
+        
+        # Extract the search results
+        result_text = ""
+        for block in response.content:
+            if block.type == "text":
+                result_text += block.text
+        
+        # Try to parse JSON from the response
+        try:
+            start_idx = result_text.find('[')
+            end_idx = result_text.rfind(']') + 1
+            if start_idx != -1 and end_idx != 0:
+                json_str = result_text[start_idx:end_idx]
+                results = json.loads(json_str)
+                return results
+        except json.JSONDecodeError:
+            return []
+        
+        return []
+        
+    except Exception as e:
+        print(f"Error searching Reddit: {e}")
+        return []
+
+@app.route('/')
+def index():
+    return render_template('index.html')
+
+@app.route('/api/threat/<target>')
+def get_threat(target):
+    """API endpoint to get threat assessment for a specific target"""
+    if target not in TARGET_KEYWORDS:
         return jsonify({
-            'success': False,
-            'error': str(e)
-        }), 500
+            "success": False,
+            "error": f"Invalid target. Must be one of: {', '.join(TARGET_KEYWORDS.keys())}"
+        }), 400
+    
+    result = assess_threat_level(target)
+    return jsonify(result)
 
-# ========================================
-# RATE LIMIT INFO ENDPOINT
-# ========================================
-@app.route('/rate-limit', methods=['GET'])
-def rate_limit():
-    """Get current rate limit status"""
-    return jsonify(get_rate_limit_info())
+@app.route('/api/threat/all')
+def get_all_threats():
+    """API endpoint to get threat assessments for all targets"""
+    results = {}
+    for target in TARGET_KEYWORDS.keys():
+        results[target] = assess_threat_level(target)
+    return jsonify(results)
 
-# ========================================
-# HEALTH CHECK
-# ========================================
-@app.route('/health', methods=['GET'])
-def health():
-    """Health check endpoint"""
-    return jsonify({
-        'status': 'healthy',
-        'version': '2.0.0',
-        'timestamp': datetime.now(timezone.utc).isoformat(),
-        'features': [
-            'NewsAPI (English)',
-            'GDELT (4 languages)',
-            'Reddit OSINT',
-            'Iran Wire RSS',
-            'Flight monitoring',
-            'Enhanced casualty tracking',
-            'v2.0 Sophisticated threat scoring',
-            'Time decay weighting',
-            'Source credibility tiers',
-            'De-escalation detection',
-            'Momentum analysis'
-        ],
-        'reddit_subreddits': REDDIT_SUBREDDITS
-    })
-
-@app.route('/', methods=['GET'])
-def home():
-    """Root endpoint"""
-    return jsonify({
-        'name': 'Asifah Analytics Backend',
-        'version': '2.0.0',
-        'status': 'operational',
-        'changes': [
-            'MAJOR: Implemented sophisticated threat probability algorithm',
-            'Time decay weighting (2-day half-life)',
-            'Source credibility tiers (Premium/Regional/Standard/GDELT/Social)',
-            'De-escalation keyword detection',
-            'Momentum analysis (increasing/decreasing/stable)',
-            'Keyword severity levels (Critical/High/Elevated/Moderate)'
-        ],
-        'endpoints': [
-            '/scan',
-            '/scan-iran-protests',
-            '/flight-cancellations',
-            '/polymarket-data',
-            '/rate-limit',
-            '/health'
-        ]
-    })
-
-# ========================================
-# RUN APPLICATION
-# ========================================
 if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port, debug=False)
+    # Test the threat assessment
+    print("Testing Iran threat assessment...")
+    result = assess_threat_level("iran")
+    print(json.dumps(result, indent=2))
+    
+    print("\n" + "="*80 + "\n")
+    print("Testing Hezbollah threat assessment...")
+    result = assess_threat_level("hezbollah")
+    print(json.dumps(result, indent=2))
+    
+    print("\n" + "="*80 + "\n")
+    print("Testing Houthis threat assessment...")
+    result = assess_threat_level("houthis")
+    print(json.dumps(result, indent=2))
+    
+    # Start Flask server
+    app.run(debug=True, port=5000)
