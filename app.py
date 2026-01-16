@@ -4,12 +4,74 @@ from datetime import datetime, timedelta
 import json
 from flask import Flask, render_template, jsonify, request
 from flask_cors import CORS
+import time
 
 app = Flask(__name__)
 CORS(app)
 
 # Initialize the Anthropic client
 client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
+
+# COST PROTECTION SETTINGS
+CACHE_DURATION_MINUTES = 30  # Cache results for 30 minutes
+MAX_REQUESTS_PER_HOUR = 10   # Maximum API requests per hour
+MAX_DAILY_COST_USD = 5.0     # Maximum daily spend (approximate)
+
+# Simple in-memory cache and rate limiting
+cache = {}
+request_log = []
+daily_cost_estimate = 0.0
+last_reset_date = datetime.now().date()
+
+def check_rate_limit():
+    """Check if we've exceeded our rate limits"""
+    global request_log, daily_cost_estimate, last_reset_date
+    
+    current_time = datetime.now()
+    current_date = current_time.date()
+    
+    # Reset daily counter at midnight
+    if current_date > last_reset_date:
+        daily_cost_estimate = 0.0
+        last_reset_date = current_date
+        print(f"Daily cost counter reset: {current_date}")
+    
+    # Check daily cost limit
+    if daily_cost_estimate >= MAX_DAILY_COST_USD:
+        return False, f"Daily cost limit of ${MAX_DAILY_COST_USD} reached. Resets at midnight."
+    
+    # Remove requests older than 1 hour
+    one_hour_ago = current_time - timedelta(hours=1)
+    request_log = [req_time for req_time in request_log if req_time > one_hour_ago]
+    
+    # Check hourly rate limit
+    if len(request_log) >= MAX_REQUESTS_PER_HOUR:
+        minutes_until_reset = int((request_log[0] + timedelta(hours=1) - current_time).total_seconds() / 60)
+        return False, f"Hourly limit of {MAX_REQUESTS_PER_HOUR} requests reached. Try again in {minutes_until_reset} minutes."
+    
+    return True, None
+
+def log_api_request(estimated_cost=0.15):
+    """Log an API request and estimated cost"""
+    global request_log, daily_cost_estimate
+    request_log.append(datetime.now())
+    daily_cost_estimate += estimated_cost
+    print(f"API request logged. Daily cost estimate: ${daily_cost_estimate:.2f}")
+
+def get_cached_data(cache_key):
+    """Get cached data if it exists and is fresh"""
+    if cache_key in cache:
+        cached_data, timestamp = cache[cache_key]
+        age_minutes = (datetime.now() - timestamp).total_seconds() / 60
+        if age_minutes < CACHE_DURATION_MINUTES:
+            print(f"Cache hit for {cache_key} (age: {age_minutes:.1f} minutes)")
+            return cached_data
+    return None
+
+def set_cached_data(cache_key, data):
+    """Store data in cache with timestamp"""
+    cache[cache_key] = (data, datetime.now())
+    print(f"Cached data for {cache_key}")
 
 # Define threat assessment keywords with severity weights
 ESCALATION_KEYWORDS = {
@@ -235,6 +297,25 @@ def assess_threat_level(target="iran"):
     Returns probability (0-100), timeline estimate, and supporting data
     """
     
+    # Check cache first
+    cache_key = f"threat_{target}"
+    cached_result = get_cached_data(cache_key)
+    if cached_result:
+        cached_result['cached'] = True
+        return cached_result
+    
+    # Check rate limit before making API calls
+    allowed, error_msg = check_rate_limit()
+    if not allowed:
+        return {
+            "success": False,
+            "error": error_msg,
+            "probability": 0,
+            "timeline": "Rate limited",
+            "confidence": "Low",
+            "rate_limited": True
+        }
+    
     # Search for recent news about the target
     try:
         # Get English language articles
@@ -407,7 +488,7 @@ def assess_threat_level(target="iran"):
                 'deescalation': item['is_deescalation']
             })
         
-        return {
+        result = {
             "success": True,
             "target": target,
             "probability": probability,
@@ -444,8 +525,16 @@ def assess_threat_level(target="iran"):
             "reddit_subreddits": get_target_subreddits(target),
             "rate_limit": search_results_en.get('rate_limit', {}) if search_results_en else {},
             "cached": False,
+            "cache_expires_minutes": CACHE_DURATION_MINUTES,
+            "requests_remaining_this_hour": MAX_REQUESTS_PER_HOUR - len(request_log),
+            "estimated_daily_cost": round(daily_cost_estimate, 2),
             "version": "2.0.0"
         }
+        
+        # Cache the result
+        set_cached_data(cache_key, result)
+        
+        return result
         
     except Exception as e:
         return {
@@ -469,6 +558,12 @@ def search_news(target, language="en"):
     """
     Search for news articles about the target using Claude with web search
     """
+    # Check cache first
+    cache_key = f"news_{target}_{language}"
+    cached_result = get_cached_data(cache_key)
+    if cached_result:
+        return cached_result
+    
     try:
         # Construct search query based on target and language
         if target == "iran":
@@ -494,6 +589,9 @@ def search_news(target, language="en"):
                 query = "ישראל חות'ים תימן תקיפה צבאית איום חדשות"
             elif language == "ar":
                 query = "إسرائيل الحوثيين اليمن ضربة عسكرية تهديد أخبار"
+        
+        # Log API request
+        log_api_request(estimated_cost=0.03)  # Estimate ~$0.03 per search
         
         response = client.messages.create(
             model="claude-sonnet-4-20250514",
@@ -558,6 +656,9 @@ Return at least 20 articles if available. Output ONLY the JSON, nothing else."""
                 if 'articles' not in results:
                     results = {'articles': [], 'totalResults': 0}
                 
+                # Cache the result
+                set_cached_data(cache_key, results)
+                
                 return results
             else:
                 return {
@@ -586,6 +687,12 @@ def search_reddit(target):
     """
     Search Reddit for discussions about the target
     """
+    # Check cache first
+    cache_key = f"reddit_{target}"
+    cached_result = get_cached_data(cache_key)
+    if cached_result:
+        return cached_result
+    
     try:
         subreddits = get_target_subreddits(target)
         
@@ -596,6 +703,9 @@ def search_reddit(target):
             query = "Israel Hezbollah strike attack military threat Lebanon"
         elif target == "houthis":
             query = "Israel Houthis Yemen strike attack military threat"
+        
+        # Log API request
+        log_api_request(estimated_cost=0.03)
         
         response = client.messages.create(
             model="claude-sonnet-4-20250514",
@@ -654,7 +764,13 @@ Return at least 5-10 relevant posts if available. Output ONLY the JSON array, no
             if start_idx != -1 and end_idx != 0:
                 json_str = result_text[start_idx:end_idx]
                 results = json.loads(json_str)
-                return results if isinstance(results, list) else []
+                
+                # Cache the result
+                if isinstance(results, list):
+                    set_cached_data(cache_key, results)
+                    return results
+                else:
+                    return []
             else:
                 return []
         except json.JSONDecodeError as e:
@@ -689,6 +805,25 @@ def get_all_threats():
     for target in TARGET_KEYWORDS.keys():
         results[target] = assess_threat_level(target)
     return jsonify(results)
+
+@app.route('/api/stats')
+def get_stats():
+    """API endpoint to get current usage statistics"""
+    global request_log, daily_cost_estimate, last_reset_date
+    
+    current_time = datetime.now()
+    one_hour_ago = current_time - timedelta(hours=1)
+    recent_requests = [req for req in request_log if req > one_hour_ago]
+    
+    return jsonify({
+        "requests_this_hour": len(recent_requests),
+        "requests_remaining_this_hour": MAX_REQUESTS_PER_HOUR - len(recent_requests),
+        "max_requests_per_hour": MAX_REQUESTS_PER_HOUR,
+        "estimated_daily_cost": round(daily_cost_estimate, 2),
+        "max_daily_cost": MAX_DAILY_COST_USD,
+        "cache_duration_minutes": CACHE_DURATION_MINUTES,
+        "last_reset_date": last_reset_date.isoformat()
+    })
 
 if __name__ == '__main__':
     # Test the threat assessment
