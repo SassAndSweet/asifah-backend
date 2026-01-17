@@ -678,6 +678,60 @@ def api_threat(target):
             'confidence': 'Low'
         }), 500
 
+@app.route('/polymarket-data', methods=['GET'])
+def polymarket_data():
+    """Fetch Polymarket prediction market data"""
+    try:
+        # Mock data for now - in production you'd fetch from Polymarket API
+        markets = [
+            {
+                'question': 'Will Israel strike Iran in 2026?',
+                'probability': 0.42,
+                'url': 'https://polymarket.com'
+            },
+            {
+                'question': 'Major conflict in Middle East by March 2026?',
+                'probability': 0.58,
+                'url': 'https://polymarket.com'
+            }
+        ]
+        
+        return jsonify({
+            'success': True,
+            'markets': markets,
+            'timestamp': datetime.now(timezone.utc).isoformat(),
+            'version': '2.0.0'
+        })
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/rate-limit', methods=['GET'])
+def rate_limit():
+    """Get current rate limit status"""
+    return jsonify(get_rate_limit_info())
+
+@app.route('/flight-cancellations', methods=['GET'])
+def get_flight_cancellations():
+    """Aggregate flight cancellations from all targets"""
+    try:
+        # For now, return empty array - would need web scraping for real data
+        return jsonify({
+            'success': True,
+            'cancellations': [],
+            'timestamp': datetime.now(timezone.utc).isoformat(),
+            'version': '2.0.0'
+        })
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
 @app.route('/', methods=['GET'])
 def home():
     """Root endpoint"""
@@ -687,6 +741,9 @@ def home():
         'version': '2.0.0',
         'endpoints': {
             '/api/threat/<target>': 'Get threat assessment for iran, hezbollah, or houthis',
+            '/polymarket-data': 'Get Polymarket prediction data',
+            '/rate-limit': 'Get rate limit status',
+            '/flight-cancellations': 'Get flight cancellations',
             '/health': 'Health check'
         }
     })
