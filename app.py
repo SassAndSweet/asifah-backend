@@ -550,6 +550,81 @@ def fetch_reddit_posts(target, keywords, days=7):
     print(f"[v2.0.0] Reddit: Total {len(all_posts)} posts")
     return all_posts
 
+def fetch_iranwire_rss():
+    """Fetch articles from Iran Wire RSS feeds"""
+    import xml.etree.ElementTree as ET
+    from datetime import datetime, timezone
+    
+    articles = []
+    
+    feeds = {
+        'en': 'https://iranwire.com/en/feed/',
+        'fa': 'https://iranwire.com/fa/feed/'
+    }
+    
+    for lang, feed_url in feeds.items():
+        try:
+            print(f"[v2.0.0] Iran Wire {lang}: Fetching RSS...")
+            response = requests.get(feed_url, timeout=15)
+            
+            if response.status_code != 200:
+                print(f"[v2.0.0] Iran Wire {lang}: HTTP {response.status_code}")
+                continue
+            
+            try:
+                root = ET.fromstring(response.content)
+            except ET.ParseError as e:
+                print(f"[v2.0.0] Iran Wire {lang}: XML parse error: {e}")
+                continue
+            
+            items_before = len(articles)
+            
+            # Try different RSS formats
+            items = root.findall('.//item')
+            if not items:
+                items = root.findall('.//{http://www.w3.org/2005/Atom}entry')
+            
+            for item in items[:15]:  # Get top 15 articles
+                title_elem = item.find('title')
+                link_elem = item.find('link')
+                pubDate_elem = item.find('pubDate')
+                description_elem = item.find('description')
+                content_elem = item.find('{http://purl.org/rss/1.0/modules/content/}encoded')
+                
+                if title_elem is not None and link_elem is not None:
+                    # Parse publication date
+                    pub_date = pubDate_elem.text if pubDate_elem is not None else datetime.now(timezone.utc).isoformat()
+                    
+                    # Get description/content
+                    description = ''
+                    if description_elem is not None and description_elem.text:
+                        description = description_elem.text[:500]
+                    elif content_elem is not None and content_elem.text:
+                        description = content_elem.text[:500]
+                    
+                    articles.append({
+                        'title': title_elem.text or '',
+                        'description': description,
+                        'url': link_elem.text or '',
+                        'publishedAt': pub_date,
+                        'source': {'name': 'Iran Wire'},
+                        'content': description,
+                        'language': lang
+                    })
+            
+            items_added = len(articles) - items_before
+            print(f"[v2.0.0] Iran Wire {lang}: ✓ Fetched {items_added} articles")
+            
+        except requests.Timeout:
+            print(f"[v2.0.0] Iran Wire {lang}: Timeout after 15s")
+        except requests.ConnectionError:
+            print(f"[v2.0.0] Iran Wire {lang}: Connection error")
+        except Exception as e:
+            print(f"[v2.0.0] Iran Wire {lang}: Error: {str(e)[:100]}")
+    
+    print(f"[v2.0.0] Iran Wire: Total {len(articles)} articles")
+    return articles
+
 # ========================================
 # API ENDPOINTS FOR FRONTEND COMPATIBILITY
 # ========================================
@@ -752,7 +827,8 @@ def extract_casualty_data(articles):
         'injuries': 0,
         'arrests': 0,
         'sources': set(),
-        'details': []
+        'details': [],
+        'articles_without_numbers': []  # NEW: Track articles mentioning casualties without specific numbers
     }
     
     number_patterns = [
@@ -776,12 +852,18 @@ def extract_casualty_data(articles):
         
         sentences = re.split(r'[.!?]\s+', text)
         
+        # Track if this article mentions any casualty type
+        article_mentions = {'deaths': False, 'injuries': False, 'arrests': False}
+        article_has_numbers = {'deaths': False, 'injuries': False, 'arrests': False}
+        
         # Check for deaths
         for sentence in sentences:
             for keyword in CASUALTY_KEYWORDS['deaths']:
                 if keyword in sentence:
                     casualties['sources'].add(source)
+                    article_mentions['deaths'] = True
                     
+                    number_found = False
                     for pattern in number_patterns:
                         match = re.search(pattern + re.escape(keyword), sentence, re.IGNORECASE)
                         if match:
@@ -796,14 +878,19 @@ def extract_casualty_data(articles):
                                     'source': source,
                                     'url': url
                                 })
+                            number_found = True
+                            article_has_numbers['deaths'] = True
                             break
+                    break
         
         # Check for injuries
         for sentence in sentences:
             for keyword in CASUALTY_KEYWORDS['injuries']:
                 if keyword in sentence:
                     casualties['sources'].add(source)
+                    article_mentions['injuries'] = True
                     
+                    number_found = False
                     for pattern in number_patterns:
                         match = re.search(pattern + re.escape(keyword), sentence, re.IGNORECASE)
                         if match:
@@ -819,14 +906,19 @@ def extract_casualty_data(articles):
                                     'source': source,
                                     'url': url
                                 })
+                            number_found = True
+                            article_has_numbers['injuries'] = True
                             break
+                    break
         
         # Check for arrests
         for sentence in sentences:
             for keyword in CASUALTY_KEYWORDS['arrests']:
                 if keyword in sentence:
                     casualties['sources'].add(source)
+                    article_mentions['arrests'] = True
                     
+                    number_found = False
                     for pattern in number_patterns:
                         match = re.search(pattern + re.escape(keyword), sentence, re.IGNORECASE)
                         if match:
@@ -841,13 +933,28 @@ def extract_casualty_data(articles):
                                     'source': source,
                                     'url': url
                                 })
+                            number_found = True
+                            article_has_numbers['arrests'] = True
                             break
+                    break
+        
+        # NEW: If article mentions casualties but we couldn't extract numbers, save it
+        for casualty_type in ['deaths', 'injuries', 'arrests']:
+            if article_mentions[casualty_type] and not article_has_numbers[casualty_type]:
+                casualties['articles_without_numbers'].append({
+                    'type': casualty_type,
+                    'source': source,
+                    'url': url,
+                    'title': title,
+                    'note': 'Casualties mentioned but no specific numbers found'
+                })
     
     casualties['sources'] = list(casualties['sources'])
     
     print(f"[v2.0.0] ✓ Deaths: {casualties['deaths']} detected")
     print(f"[v2.0.0] ✓ Injuries: {casualties['injuries']} detected")
     print(f"[v2.0.0] ✓ Arrests: {casualties['arrests']} detected")
+    print(f"[v2.0.0] ✓ Articles without numbers: {len(casualties['articles_without_numbers'])}")
     
     return casualties
 
@@ -910,8 +1017,12 @@ def scan_iran_protests():
             print(f"Reddit error: {e}")
             reddit_posts = []
         
-        # Iran Wire RSS (if available - mock for now)
-        iranwire_articles = []
+        # Iran Wire RSS
+        try:
+            iranwire_articles = fetch_iranwire_rss()
+        except Exception as e:
+            print(f"Iran Wire error: {e}")
+            iranwire_articles = []
         
         all_articles = newsapi_articles + gdelt_en + gdelt_ar + gdelt_fa + gdelt_he + reddit_posts + iranwire_articles
         
@@ -965,7 +1076,8 @@ def scan_iran_protests():
                 'injuries': casualties['injuries'],
                 'arrests': casualties['arrests'],
                 'verified_sources': casualties['sources'],
-                'details': casualties.get('details', [])
+                'details': casualties.get('details', []),
+                'articles_without_numbers': casualties.get('articles_without_numbers', [])
             },
             
             'cities': cities,
