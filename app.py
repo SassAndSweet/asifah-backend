@@ -678,6 +678,182 @@ def api_threat(target):
             'confidence': 'Low'
         }), 500
 
+# ========================================
+# CASUALTY TRACKING
+# ========================================
+CASUALTY_KEYWORDS = {
+    'deaths': [
+        'killed', 'dead', 'died', 'death toll', 'fatalities', 'deaths',
+        'shot dead', 'gunned down', 'killed by', 'killed in',
+        'people have died', 'people have been killed', 'protesters killed',
+        'کشته', 'مرگ', 'قتل'
+    ],
+    'injuries': [
+        'injured', 'wounded', 'hurt', 'injuries', 'casualties',
+        'hospitalized', 'critical condition', 'serious injuries',
+        'overwhelmed by injured', 'injured protesters', 'gunshot wounds',
+        'مجروح', 'زخمی', 'آسیب'
+    ],
+    'arrests': [
+        'arrested', 'detained', 'detention', 'arrest', 'arrests',
+        'taken into custody', 'custody', 'apprehended', 'rounded up',
+        'imprisoned', 'people have been arrested',
+        'بازداشت', 'دستگیر', 'زندان'
+    ]
+}
+
+def parse_number_word(num_str):
+    """Convert number words to integers"""
+    num_str = num_str.lower().strip()
+    
+    try:
+        return int(num_str)
+    except:
+        pass
+    
+    if ',' in num_str:
+        try:
+            return int(num_str.replace(',', ''))
+        except:
+            pass
+    
+    if 'hundred' in num_str or 'hundreds' in num_str:
+        if any(word in num_str for word in ['several', 'few', 'many']):
+            return 200
+        if 'over' in num_str or 'more than' in num_str:
+            return 150
+        return 100
+    
+    elif 'thousand' in num_str or 'thousands' in num_str:
+        match = re.search(r'(\d+)\s*thousand', num_str)
+        if match:
+            return int(match.group(1)) * 1000
+        
+        if any(word in num_str for word in ['several', 'few', 'many']):
+            return 2000
+        if 'over' in num_str or 'more than' in num_str:
+            return 1500
+        return 1000
+    
+    elif 'dozen' in num_str or 'dozens' in num_str:
+        if 'several' in num_str:
+            return 24
+        return 12
+    
+    elif num_str == 'many':
+        return 50
+    
+    return 0
+
+def extract_casualty_data(articles):
+    """Extract verified casualty numbers from articles"""
+    casualties = {
+        'deaths': 0,
+        'injuries': 0,
+        'arrests': 0,
+        'sources': set(),
+        'details': []
+    }
+    
+    number_patterns = [
+        r'(\d+(?:,\d{3})*)\s+(?:people\s+)?.{0,20}?',
+        r'(?:more than|over|at least)\s+(\d+(?:,\d{3})*)\s+(?:people\s+)?.{0,30}?',
+        r'(\d+(?:,\d{3})*)\s+people\s+(?:have been|had been|have)\s+.{0,20}?',
+        r'(?:\d+)\s*(?:to|-)\s*(\d+(?:,\d{3})*)\s+.{0,20}?',
+        r'(?:roughly|approximately|around)\s+(\d+(?:,\d{3})*)\s+.{0,20}?',
+        r'(hundreds?|thousands?|dozens?|several\s+(?:hundred|thousand|dozen)|many)\s+(?:people\s+)?.{0,20}?',
+        r'(\d+)\s+thousand\s*.{0,20}?',
+    ]
+    
+    for article in articles:
+        title = article.get('title') or ''
+        description = article.get('description') or ''
+        content = article.get('content') or ''
+        text = (title + ' ' + description + ' ' + content).lower()
+        
+        source = article.get('source', {}).get('name', 'Unknown')
+        url = article.get('url', '')
+        
+        sentences = re.split(r'[.!?]\s+', text)
+        
+        # Check for deaths
+        for sentence in sentences:
+            for keyword in CASUALTY_KEYWORDS['deaths']:
+                if keyword in sentence:
+                    casualties['sources'].add(source)
+                    
+                    for pattern in number_patterns:
+                        match = re.search(pattern + re.escape(keyword), sentence, re.IGNORECASE)
+                        if match:
+                            num_str = match.group(1)
+                            num = parse_number_word(num_str)
+                            
+                            if num > casualties['deaths']:
+                                casualties['deaths'] = num
+                                casualties['details'].append({
+                                    'type': 'deaths',
+                                    'count': num,
+                                    'source': source,
+                                    'url': url
+                                })
+                            break
+        
+        # Check for injuries
+        for sentence in sentences:
+            for keyword in CASUALTY_KEYWORDS['injuries']:
+                if keyword in sentence:
+                    casualties['sources'].add(source)
+                    
+                    for pattern in number_patterns:
+                        match = re.search(pattern + re.escape(keyword), sentence, re.IGNORECASE)
+                        if match:
+                            num_str = match.group(1)
+                            num = parse_number_word(num_str)
+                            
+                            if num > 0:
+                                if num > casualties['injuries']:
+                                    casualties['injuries'] = num
+                                casualties['details'].append({
+                                    'type': 'injuries',
+                                    'count': num,
+                                    'source': source,
+                                    'url': url
+                                })
+                            break
+        
+        # Check for arrests
+        for sentence in sentences:
+            for keyword in CASUALTY_KEYWORDS['arrests']:
+                if keyword in sentence:
+                    casualties['sources'].add(source)
+                    
+                    for pattern in number_patterns:
+                        match = re.search(pattern + re.escape(keyword), sentence, re.IGNORECASE)
+                        if match:
+                            num_str = match.group(1)
+                            num = parse_number_word(num_str)
+                            
+                            if num > casualties['arrests']:
+                                casualties['arrests'] = num
+                                casualties['details'].append({
+                                    'type': 'arrests',
+                                    'count': num,
+                                    'source': source,
+                                    'url': url
+                                })
+                            break
+    
+    casualties['sources'] = list(casualties['sources'])
+    
+    print(f"[v2.0.0] ✓ Deaths: {casualties['deaths']} detected")
+    print(f"[v2.0.0] ✓ Injuries: {casualties['injuries']} detected")
+    print(f"[v2.0.0] ✓ Arrests: {casualties['arrests']} detected")
+    
+    return casualties
+
+# ========================================
+# IRAN PROTESTS ENDPOINT
+# ========================================
 @app.route('/scan-iran-protests', methods=['GET'])
 def scan_iran_protests():
     """Iran protests endpoint with casualty tracking"""
@@ -690,30 +866,69 @@ def scan_iran_protests():
         
         days = int(request.args.get('days', 7))
         
-        # Fetch articles from various sources
-        newsapi_articles = fetch_newsapi_articles('Iran protests', days)
+        # Fetch articles from various sources with error handling
+        try:
+            newsapi_articles = fetch_newsapi_articles('Iran protests', days)
+        except Exception as e:
+            print(f"NewsAPI error: {e}")
+            newsapi_articles = []
         
         # GDELT query for Iran protests
         gdelt_query = 'iran OR persia OR protest OR protests OR demonstration'
-        gdelt_en = fetch_gdelt_articles(gdelt_query, days, 'eng')
-        gdelt_ar = fetch_gdelt_articles(gdelt_query, days, 'ara')
-        gdelt_fa = fetch_gdelt_articles(gdelt_query, days, 'fas')
-        gdelt_he = fetch_gdelt_articles(gdelt_query, days, 'heb')
+        try:
+            gdelt_en = fetch_gdelt_articles(gdelt_query, days, 'eng')
+        except Exception as e:
+            print(f"GDELT EN error: {e}")
+            gdelt_en = []
+            
+        try:
+            gdelt_ar = fetch_gdelt_articles(gdelt_query, days, 'ara')
+        except Exception as e:
+            print(f"GDELT AR error: {e}")
+            gdelt_ar = []
+            
+        try:
+            gdelt_fa = fetch_gdelt_articles(gdelt_query, days, 'fas')
+        except Exception as e:
+            print(f"GDELT FA error: {e}")
+            gdelt_fa = []
+            
+        try:
+            gdelt_he = fetch_gdelt_articles(gdelt_query, days, 'heb')
+        except Exception as e:
+            print(f"GDELT HE error: {e}")
+            gdelt_he = []
         
         # Reddit posts
-        reddit_posts = fetch_reddit_posts(
-            'iran',
-            ['Iran', 'protest', 'protests', 'demonstration', 'Tehran'],
-            days
-        )
+        try:
+            reddit_posts = fetch_reddit_posts(
+                'iran',
+                ['Iran', 'protest', 'protests', 'demonstration', 'Tehran'],
+                days
+            )
+        except Exception as e:
+            print(f"Reddit error: {e}")
+            reddit_posts = []
         
         # Iran Wire RSS (if available - mock for now)
         iranwire_articles = []
         
         all_articles = newsapi_articles + gdelt_en + gdelt_ar + gdelt_fa + gdelt_he + reddit_posts + iranwire_articles
         
+        print(f"Total articles fetched: {len(all_articles)}")
+        
         # Extract casualty data
-        casualties = extract_casualty_data(all_articles)
+        try:
+            casualties = extract_casualty_data(all_articles)
+        except Exception as e:
+            print(f"Casualty extraction error: {e}")
+            casualties = {
+                'deaths': 0,
+                'injuries': 0,
+                'arrests': 0,
+                'sources': [],
+                'details': []
+            }
         
         # Calculate intensity and stability
         articles_per_day = len(all_articles) / days if days > 0 else 0
@@ -769,9 +984,23 @@ def scan_iran_protests():
         
     except Exception as e:
         print(f"Error in /scan-iran-protests: {e}")
+        import traceback
+        traceback.print_exc()
         return jsonify({
             'success': False,
-            'error': str(e)
+            'error': str(e),
+            'intensity': 0,
+            'stability': 100,
+            'casualties': {'deaths': 0, 'injuries': 0, 'arrests': 0, 'sources': [], 'details': []},
+            'cities': [],
+            'num_cities_affected': 0,
+            'articles_en': [],
+            'articles_fa': [],
+            'articles_ar': [],
+            'articles_he': [],
+            'articles_reddit': [],
+            'articles_iranwire': [],
+            'total_articles': 0
         }), 500
 
 @app.route('/polymarket-data', methods=['GET'])
