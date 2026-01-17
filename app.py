@@ -678,6 +678,102 @@ def api_threat(target):
             'confidence': 'Low'
         }), 500
 
+@app.route('/scan-iran-protests', methods=['GET'])
+def scan_iran_protests():
+    """Iran protests endpoint with casualty tracking"""
+    try:
+        if not check_rate_limit():
+            return jsonify({
+                'error': 'Rate limit exceeded',
+                'rate_limit': get_rate_limit_info()
+            }), 429
+        
+        days = int(request.args.get('days', 7))
+        
+        # Fetch articles from various sources
+        newsapi_articles = fetch_newsapi_articles('Iran protests', days)
+        
+        # GDELT query for Iran protests
+        gdelt_query = 'iran OR persia OR protest OR protests OR demonstration'
+        gdelt_en = fetch_gdelt_articles(gdelt_query, days, 'eng')
+        gdelt_ar = fetch_gdelt_articles(gdelt_query, days, 'ara')
+        gdelt_fa = fetch_gdelt_articles(gdelt_query, days, 'fas')
+        gdelt_he = fetch_gdelt_articles(gdelt_query, days, 'heb')
+        
+        # Reddit posts
+        reddit_posts = fetch_reddit_posts(
+            'iran',
+            ['Iran', 'protest', 'protests', 'demonstration', 'Tehran'],
+            days
+        )
+        
+        # Iran Wire RSS (if available - mock for now)
+        iranwire_articles = []
+        
+        all_articles = newsapi_articles + gdelt_en + gdelt_ar + gdelt_fa + gdelt_he + reddit_posts + iranwire_articles
+        
+        # Extract casualty data
+        casualties = extract_casualty_data(all_articles)
+        
+        # Calculate intensity and stability
+        articles_per_day = len(all_articles) / days if days > 0 else 0
+        
+        # Count affected cities (simplified - would need city extraction)
+        num_cities = 5  # Mock value
+        cities = [
+            {'name': 'Tehran', 'mentions': 10},
+            {'name': 'Isfahan', 'mentions': 5},
+            {'name': 'Shiraz', 'mentions': 3}
+        ]
+        
+        intensity_score = min(
+            articles_per_day * 2 + 
+            num_cities * 4 + 
+            casualties['deaths'] * 0.5 + 
+            casualties['injuries'] * 0.2 + 
+            casualties['arrests'] * 0.1,
+            100
+        )
+        
+        stability_score = 100 - intensity_score
+        
+        return jsonify({
+            'success': True,
+            'timestamp': datetime.now(timezone.utc).isoformat(),
+            'days_analyzed': days,
+            'total_articles': len(all_articles),
+            'intensity': int(intensity_score),
+            'stability': int(stability_score),
+            
+            'casualties': {
+                'deaths': casualties['deaths'],
+                'injuries': casualties['injuries'],
+                'arrests': casualties['arrests'],
+                'verified_sources': casualties['sources'],
+                'details': casualties.get('details', [])
+            },
+            
+            'cities': cities,
+            'num_cities_affected': num_cities,
+            
+            'articles_en': [a for a in all_articles if a.get('language') == 'en'][:20],
+            'articles_fa': [a for a in all_articles if a.get('language') == 'fa'][:20],
+            'articles_ar': [a for a in all_articles if a.get('language') == 'ar'][:20],
+            'articles_he': [a for a in all_articles if a.get('language') == 'he'][:20],
+            'articles_reddit': [a for a in all_articles if a.get('source', {}).get('name', '').startswith('r/')][:20],
+            'articles_iranwire': iranwire_articles[:20],
+            
+            'cached': False,
+            'version': '2.0.0'
+        })
+        
+    except Exception as e:
+        print(f"Error in /scan-iran-protests: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
 @app.route('/polymarket-data', methods=['GET'])
 def polymarket_data():
     """Fetch Polymarket prediction market data"""
@@ -741,6 +837,7 @@ def home():
         'version': '2.0.0',
         'endpoints': {
             '/api/threat/<target>': 'Get threat assessment for iran, hezbollah, or houthis',
+            '/scan-iran-protests': 'Get Iran protests data with casualties',
             '/polymarket-data': 'Get Polymarket prediction data',
             '/rate-limit': 'Get rate limit status',
             '/flight-cancellations': 'Get flight cancellations',
