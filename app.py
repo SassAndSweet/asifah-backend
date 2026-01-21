@@ -667,9 +667,17 @@ def fetch_hrana_rss():
     
     feed_url = 'https://en-hrana.org/feed/'
     
-    try:
+try:
         print(f"[v2.1.0] HRANA: Fetching RSS...")
-        response = requests.get(feed_url, timeout=20)
+        
+        # Add realistic User-Agent to avoid 403 blocking
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'application/rss+xml, application/xml, text/xml, */*',
+            'Accept-Language': 'en-US,en;q=0.9'
+        }
+        
+        response = requests.get(feed_url, headers=headers, timeout=20)
         
         if response.status_code != 200:
             print(f"[v2.1.0] HRANA: HTTP {response.status_code}")
