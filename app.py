@@ -655,21 +655,19 @@ def fetch_iranwire_rss():
     return articles
 
 def fetch_hrana_rss():
-    """Fetch articles from HRANA RSS feed"""
-    import xml.etree.ElementTree as ET
-    from datetime import datetime, timezone
+    """Fetch articles from HRANA RSS feed via proxy to avoid 403 blocking"""
+    import re
     
     articles = []
-    feed_url = 'https://en-hrana.org/feed/'
+    
+    # Use RSS2JSON as a proxy to bypass 403 blocking from HRANA's servers
+    feed_url = 'https://api.rss2json.com/v1/api.json?rss_url=https://en-hrana.org/feed/'
     
     try:
-        print(f"[v2.1.0] HRANA: Fetching RSS...")
+        print(f"[v2.1.0] HRANA: Fetching RSS via proxy...")
         
-        # Add realistic User-Agent to avoid 403 blocking
         headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Accept': 'application/rss+xml, application/xml, text/xml, */*',
-            'Accept-Language': 'en-US,en;q=0.9'
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
         }
         
         response = requests.get(feed_url, headers=headers, timeout=20)
@@ -678,36 +676,19 @@ def fetch_hrana_rss():
             print(f"[v2.1.0] HRANA: HTTP {response.status_code}")
             return []
         
-        try:
-            root = ET.fromstring(response.content)
-        except ET.ParseError as e:
-            print(f"[v2.1.0] HRANA: XML parse error: {e}")
+        data = response.json()
+        
+        if data.get('status') != 'ok':
+            print(f"[v2.1.0] HRANA: Proxy error - {data.get('message', 'unknown error')}")
             return []
         
-        # Define namespaces
-        namespaces = {
-            'content': 'http://purl.org/rss/1.0/modules/content/',
-            'dc': 'http://purl.org/dc/elements/1.1/'
-        }
-        
-        # Parse RSS items
-        for item in root.findall('.//item')[:10]:  # Get latest 10 articles
+        # Parse JSON response from RSS2JSON
+        for item in data.get('items', [])[:10]:  # Get latest 10 articles
             try:
-                title = item.find('title').text if item.find('title') is not None else 'No title'
-                link = item.find('link').text if item.find('link') is not None else ''
-                pub_date = item.find('pubDate').text if item.find('pubDate') is not None else ''
-                
-                # HRANA uses content:encoded for full article content
-                content_encoded = item.find('content:encoded', namespaces)
-                if content_encoded is not None and content_encoded.text:
-                    content = content_encoded.text
-                else:
-                    # Fallback to description
-                    description = item.find('description')
-                    content = description.text if description is not None else ''
+                # Extract content - RSS2JSON provides both description and full content
+                content = item.get('content', '') or item.get('description', '')
                 
                 # Strip HTML tags and get plain text
-                import re
                 plain_text = re.sub('<[^<]+?>', '', content)
                 plain_text = plain_text.strip()
                 
@@ -715,9 +696,9 @@ def fetch_hrana_rss():
                 preview = plain_text[:500] + '...' if len(plain_text) > 500 else plain_text
                 
                 article = {
-                    'title': title,
-                    'url': link,
-                    'publishedAt': pub_date,
+                    'title': item.get('title', 'No title'),
+                    'url': item.get('link', ''),
+                    'publishedAt': item.get('pubDate', ''),
                     'content': plain_text,  # Full content for pattern matching
                     'description': preview,  # Preview for display
                     'source': {'name': 'HRANA'}
@@ -728,7 +709,7 @@ def fetch_hrana_rss():
                 print(f"[v2.1.0] HRANA: Error parsing item: {e}")
                 continue
         
-        print(f"[v2.1.0] HRANA: ✓ Fetched {len(articles)} articles")
+        print(f"[v2.1.0] HRANA: ✓ Fetched {len(articles)} articles via proxy")
         return articles
         
     except requests.Timeout:
@@ -739,7 +720,7 @@ def fetch_hrana_rss():
         return []
     except Exception as e:
         print(f"[v2.1.0] HRANA: Error: {str(e)[:100]}")
-        return []
+        return [][]
     
 # ========================================
 # API ENDPOINTS
