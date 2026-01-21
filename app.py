@@ -1127,12 +1127,12 @@ def scan_iran_protests():
         
         print(f"Total articles fetched: {len(all_articles)}")
         
-        # Extract HRANA structured data (PRIORITY)
-        try:
-            hrana_data = extract_hrana_structured_data(hrana_articles)
-        except Exception as e:
-            print(f"HRANA structured data extraction error: {e}")
-            hrana_data = {'is_hrana_verified': False}
+# Extract HRANA structured data (PRIORITY) - TEMPORARILY DISABLED
+# try:
+#     hrana_data = extract_hrana_structured_data(hrana_articles)
+# except Exception as e:
+#     print(f"HRANA structured data extraction error: {e}")
+hrana_data = {'is_hrana_verified': False}
         
         # Extract casualty data using regex (FALLBACK)
         try:
