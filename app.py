@@ -1,16 +1,15 @@
 """
-Asifah Analytics Backend v2.0.0
-January 16, 2026
+Asifah Analytics Backend v2.1.0
+January 21, 2026
 
-Changes from v1.9.9:
-- MAJOR: Implemented sophisticated threat probability algorithm
-- Time decay weighting (2-day half-life for article relevance)
-- Source credibility tiers (Premium/Regional/Standard/GDELT/Social)
-- De-escalation keyword detection (reduces threat scores)
-- Momentum analysis (increasing/decreasing/stable trends)
-- Keyword severity levels (Critical/High/Elevated/Moderate)
-- Fixed: No longer pegs Iran at 99% when rhetoric has cooled
-- Fixed: Houthi strikes properly weighted based on credible sources
+Changes from v2.0.0:
+- FIXED: Scoring multiplier reduced from 2.5x to 0.8x
+- FIXED: Base score increased from 15 to 25 for better floor
+- FIXED: Target-specific baseline adjustments
+- FIXED: Caps now work properly (was hitting 99% ceiling instantly)
+- Hezbollah gets +10 bonus (active combat)
+- Iran gets +5 bonus (elevated tensions)
+- Houthis stay neutral (ongoing but distant)
 """
 
 from flask import Flask, jsonify, request
@@ -40,7 +39,7 @@ rate_limit_data = {
 }
 
 # ========================================
-# v2.0 SCORING ALGORITHM - SOURCE WEIGHTS
+# v2.1 SCORING ALGORITHM - SOURCE WEIGHTS
 # ========================================
 SOURCE_WEIGHTS = {
     'premium': {
@@ -76,7 +75,7 @@ SOURCE_WEIGHTS = {
 }
 
 # ========================================
-# v2.0 SCORING ALGORITHM - KEYWORD SEVERITY
+# v2.1 SCORING ALGORITHM - KEYWORD SEVERITY
 # ========================================
 KEYWORD_SEVERITY = {
     'critical': {
@@ -112,7 +111,7 @@ KEYWORD_SEVERITY = {
 }
 
 # ========================================
-# v2.0 SCORING ALGORITHM - DE-ESCALATION
+# v2.1 SCORING ALGORITHM - DE-ESCALATION
 # ========================================
 DEESCALATION_KEYWORDS = [
     'ceasefire', 'cease-fire', 'truce', 'peace talks', 'peace agreement',
@@ -123,7 +122,25 @@ DEESCALATION_KEYWORDS = [
 ]
 
 # ========================================
-# v2.0 SCORING ALGORITHM - HELPER FUNCTIONS
+# v2.1 NEW: TARGET-SPECIFIC BASELINES
+# ========================================
+TARGET_BASELINES = {
+    'hezbollah': {
+        'base_adjustment': +10,  # Active combat happening NOW
+        'description': 'Ongoing Israeli operations in Lebanon'
+    },
+    'iran': {
+        'base_adjustment': +5,   # Elevated tensions but not active combat
+        'description': 'Elevated regional tensions'
+    },
+    'houthis': {
+        'base_adjustment': 0,    # Red Sea strikes continue but more distant
+        'description': 'Red Sea shipping disruptions ongoing'
+    }
+}
+
+# ========================================
+# v2.1 SCORING ALGORITHM - HELPER FUNCTIONS
 # ========================================
 def calculate_time_decay(published_date, current_time, half_life_days=2.0):
     """Calculate exponential time decay for article relevance"""
@@ -186,14 +203,24 @@ def detect_deescalation(text):
     return False
 
 def calculate_threat_probability(articles, days_analyzed=7, target='iran'):
-    """Calculate sophisticated threat probability score"""
+    """
+    Calculate sophisticated threat probability score
+    
+    v2.1.0 Changes:
+    - Reduced multiplier from 2.5x to 0.8x (CRITICAL FIX)
+    - Increased base from 15 to 25
+    - Added target-specific baseline adjustments
+    - Better probability capping logic
+    """
     
     if not articles:
+        baseline_adjustment = TARGET_BASELINES.get(target, {}).get('base_adjustment', 0)
         return {
-            'probability': 15,
+            'probability': min(25 + baseline_adjustment, 99),
             'momentum': 'stable',
             'breakdown': {
-                'base_score': 15,
+                'base_score': 25,
+                'baseline_adjustment': baseline_adjustment,
                 'article_count': 0,
                 'weighted_score': 0,
                 'time_decay_applied': True,
@@ -274,17 +301,23 @@ def calculate_threat_probability(articles, days_analyzed=7, target='iran'):
     
     weighted_score *= momentum_multiplier
     
-    base_score = 15
+    # v2.1.0: NEW SCORING FORMULA
+    base_score = 25  # Increased from 15
+    baseline_adjustment = TARGET_BASELINES.get(target, {}).get('base_adjustment', 0)
     
+    # CRITICAL FIX: Reduced multiplier from 2.5x to 0.8x
     if weighted_score < 0:
-        probability = max(5, base_score + weighted_score)
+        probability = max(10, base_score + baseline_adjustment + weighted_score)
     else:
-        probability = base_score + (weighted_score * 2.5)
+        probability = base_score + baseline_adjustment + (weighted_score * 0.8)  # Changed from 2.5
     
-    probability = min(int(probability), 99)
-    probability = max(int(probability), 5)
+    # Better capping logic
+    probability = int(probability)
+    probability = max(10, min(probability, 95))  # Floor at 10%, ceiling at 95%
     
-    print(f"[v2.0.0] {target} scoring:")
+    print(f"[v2.1.0] {target} scoring:")
+    print(f"  Base score: {base_score}")
+    print(f"  Baseline adjustment: {baseline_adjustment}")
     print(f"  Total articles: {len(articles)}")
     print(f"  Recent (48h): {recent_articles}")
     print(f"  Weighted score: {weighted_score:.2f}")
@@ -297,6 +330,7 @@ def calculate_threat_probability(articles, days_analyzed=7, target='iran'):
         'momentum': momentum,
         'breakdown': {
             'base_score': base_score,
+            'baseline_adjustment': baseline_adjustment,
             'article_count': len(articles),
             'recent_articles_48h': recent_articles,
             'older_articles': older_articles,
@@ -304,7 +338,8 @@ def calculate_threat_probability(articles, days_analyzed=7, target='iran'):
             'momentum_multiplier': momentum_multiplier,
             'deescalation_count': deescalation_count,
             'time_decay_applied': True,
-            'source_weighting_applied': True
+            'source_weighting_applied': True,
+            'formula': 'base(25) + adjustment + (weighted_score * 0.8)'
         },
         'top_contributors': sorted(article_details, 
                                    key=lambda x: abs(x['contribution']), 
@@ -314,7 +349,7 @@ def calculate_threat_probability(articles, days_analyzed=7, target='iran'):
 # ========================================
 # REDDIT CONFIGURATION
 # ========================================
-REDDIT_USER_AGENT = "AsifahAnalytics/2.0.0 (OSINT monitoring tool)"
+REDDIT_USER_AGENT = "AsifahAnalytics/2.1.0 (OSINT monitoring tool)"
 REDDIT_SUBREDDITS = {
     "hezbollah": ["ForbiddenBromance", "Israel", "Lebanon"],
     "iran": ["Iran", "Israel", "geopolitics"],
@@ -363,7 +398,7 @@ TARGET_KEYWORDS = {
     }
 }
 
-# [Rest of helper functions for casualties, cities, etc. - keeping the file shorter for now]
+# [REST OF THE FILE STAYS EXACTLY THE SAME - just copying all the helper functions]
 
 # ========================================
 # RATE LIMITING
@@ -403,7 +438,7 @@ def get_rate_limit_info():
 def fetch_newsapi_articles(query, days=7):
     """Fetch articles from NewsAPI"""
     if not NEWSAPI_KEY:
-        print("[v2.0.0] NewsAPI: No API key configured")
+        print("[v2.1.0] NewsAPI: No API key configured")
         return []
     
     from_date = (datetime.now() - timedelta(days=days)).strftime('%Y-%m-%d')
@@ -426,12 +461,12 @@ def fetch_newsapi_articles(query, days=7):
             for article in articles:
                 article['language'] = 'en'
             
-            print(f"[v2.0.0] NewsAPI: Fetched {len(articles)} articles")
+            print(f"[v2.1.0] NewsAPI: Fetched {len(articles)} articles")
             return articles
-        print(f"[v2.0.0] NewsAPI: HTTP {response.status_code}")
+        print(f"[v2.1.0] NewsAPI: HTTP {response.status_code}")
         return []
     except Exception as e:
-        print(f"[v2.0.0] NewsAPI error: {e}")
+        print(f"[v2.1.0] NewsAPI error: {e}")
         return []
 
 def fetch_gdelt_articles(query, days=7, language='eng'):
@@ -468,18 +503,18 @@ def fetch_gdelt_articles(query, days=7, language='eng'):
                     'language': lang_code
                 })
             
-            print(f"[v2.0.0] GDELT {language}: Fetched {len(standardized)} articles")
+            print(f"[v2.1.0] GDELT {language}: Fetched {len(standardized)} articles")
             return standardized
         
-        print(f"[v2.0.0] GDELT {language}: HTTP {response.status_code}")
+        print(f"[v2.1.0] GDELT {language}: HTTP {response.status_code}")
         return []
     except Exception as e:
-        print(f"[v2.0.0] GDELT {language} error: {e}")
+        print(f"[v2.1.0] GDELT {language} error: {e}")
         return []
 
 def fetch_reddit_posts(target, keywords, days=7):
     """Fetch Reddit posts from relevant subreddits"""
-    print(f"[v2.0.0] Reddit: Starting fetch for {target}")
+    print(f"[v2.1.0] Reddit: Starting fetch for {target}")
     
     subreddits = REDDIT_SUBREDDITS.get(target, [])
     if not subreddits:
@@ -541,13 +576,13 @@ def fetch_reddit_posts(target, keywords, days=7):
                         
                         all_posts.append(normalized_post)
                     
-                    print(f"[v2.0.0] Reddit r/{subreddit}: Found {len(posts)} posts")
+                    print(f"[v2.1.0] Reddit r/{subreddit}: Found {len(posts)} posts")
             
         except Exception as e:
-            print(f"[v2.0.0] Reddit r/{subreddit} error: {str(e)}")
+            print(f"[v2.1.0] Reddit r/{subreddit} error: {str(e)}")
             continue
     
-    print(f"[v2.0.0] Reddit: Total {len(all_posts)} posts")
+    print(f"[v2.1.0] Reddit: Total {len(all_posts)} posts")
     return all_posts
 
 def fetch_iranwire_rss():
@@ -564,27 +599,26 @@ def fetch_iranwire_rss():
     
     for lang, feed_url in feeds.items():
         try:
-            print(f"[v2.0.0] Iran Wire {lang}: Fetching RSS...")
+            print(f"[v2.1.0] Iran Wire {lang}: Fetching RSS...")
             response = requests.get(feed_url, timeout=15)
             
             if response.status_code != 200:
-                print(f"[v2.0.0] Iran Wire {lang}: HTTP {response.status_code}")
+                print(f"[v2.1.0] Iran Wire {lang}: HTTP {response.status_code}")
                 continue
             
             try:
                 root = ET.fromstring(response.content)
             except ET.ParseError as e:
-                print(f"[v2.0.0] Iran Wire {lang}: XML parse error: {e}")
+                print(f"[v2.1.0] Iran Wire {lang}: XML parse error: {e}")
                 continue
             
             items_before = len(articles)
             
-            # Try different RSS formats
             items = root.findall('.//item')
             if not items:
                 items = root.findall('.//{http://www.w3.org/2005/Atom}entry')
             
-            for item in items[:15]:  # Get top 15 articles
+            for item in items[:15]:
                 title_elem = item.find('title')
                 link_elem = item.find('link')
                 pubDate_elem = item.find('pubDate')
@@ -592,10 +626,8 @@ def fetch_iranwire_rss():
                 content_elem = item.find('{http://purl.org/rss/1.0/modules/content/}encoded')
                 
                 if title_elem is not None and link_elem is not None:
-                    # Parse publication date
                     pub_date = pubDate_elem.text if pubDate_elem is not None else datetime.now(timezone.utc).isoformat()
                     
-                    # Get description/content
                     description = ''
                     if description_elem is not None and description_elem.text:
                         description = description_elem.text[:500]
@@ -613,20 +645,20 @@ def fetch_iranwire_rss():
                     })
             
             items_added = len(articles) - items_before
-            print(f"[v2.0.0] Iran Wire {lang}: ✓ Fetched {items_added} articles")
+            print(f"[v2.1.0] Iran Wire {lang}: ✓ Fetched {items_added} articles")
             
         except requests.Timeout:
-            print(f"[v2.0.0] Iran Wire {lang}: Timeout after 15s")
+            print(f"[v2.1.0] Iran Wire {lang}: Timeout after 15s")
         except requests.ConnectionError:
-            print(f"[v2.0.0] Iran Wire {lang}: Connection error")
+            print(f"[v2.1.0] Iran Wire {lang}: Connection error")
         except Exception as e:
-            print(f"[v2.0.0] Iran Wire {lang}: Error: {str(e)[:100]}")
+            print(f"[v2.1.0] Iran Wire {lang}: Error: {str(e)[:100]}")
     
-    print(f"[v2.0.0] Iran Wire: Total {len(articles)} articles")
+    print(f"[v2.1.0] Iran Wire: Total {len(articles)} articles")
     return articles
 
 # ========================================
-# API ENDPOINTS FOR FRONTEND COMPATIBILITY
+# API ENDPOINTS
 # ========================================
 @app.route('/api/threat/<target>', methods=['GET'])
 def api_threat(target):
@@ -740,7 +772,7 @@ def api_threat(target):
             'escalation_keywords': ESCALATION_KEYWORDS,
             'target_keywords': TARGET_KEYWORDS[target]['keywords'],
             'cached': False,
-            'version': '2.0.0'
+            'version': '2.1.0'
         })
         
     except Exception as e:
@@ -828,7 +860,7 @@ def extract_casualty_data(articles):
         'arrests': 0,
         'sources': set(),
         'details': [],
-        'articles_without_numbers': []  # NEW: Track articles mentioning casualties without specific numbers
+        'articles_without_numbers': []
     }
     
     number_patterns = [
@@ -852,18 +884,15 @@ def extract_casualty_data(articles):
         
         sentences = re.split(r'[.!?]\s+', text)
         
-        # Track if this article mentions any casualty type
         article_mentions = {'deaths': False, 'injuries': False, 'arrests': False}
         article_has_numbers = {'deaths': False, 'injuries': False, 'arrests': False}
         
-        # Check for deaths
         for sentence in sentences:
             for keyword in CASUALTY_KEYWORDS['deaths']:
                 if keyword in sentence:
                     casualties['sources'].add(source)
                     article_mentions['deaths'] = True
                     
-                    number_found = False
                     for pattern in number_patterns:
                         match = re.search(pattern + re.escape(keyword), sentence, re.IGNORECASE)
                         if match:
@@ -878,19 +907,16 @@ def extract_casualty_data(articles):
                                     'source': source,
                                     'url': url
                                 })
-                            number_found = True
                             article_has_numbers['deaths'] = True
                             break
                     break
         
-        # Check for injuries
         for sentence in sentences:
             for keyword in CASUALTY_KEYWORDS['injuries']:
                 if keyword in sentence:
                     casualties['sources'].add(source)
                     article_mentions['injuries'] = True
                     
-                    number_found = False
                     for pattern in number_patterns:
                         match = re.search(pattern + re.escape(keyword), sentence, re.IGNORECASE)
                         if match:
@@ -906,19 +932,16 @@ def extract_casualty_data(articles):
                                     'source': source,
                                     'url': url
                                 })
-                            number_found = True
                             article_has_numbers['injuries'] = True
                             break
                     break
         
-        # Check for arrests
         for sentence in sentences:
             for keyword in CASUALTY_KEYWORDS['arrests']:
                 if keyword in sentence:
                     casualties['sources'].add(source)
                     article_mentions['arrests'] = True
                     
-                    number_found = False
                     for pattern in number_patterns:
                         match = re.search(pattern + re.escape(keyword), sentence, re.IGNORECASE)
                         if match:
@@ -933,12 +956,10 @@ def extract_casualty_data(articles):
                                     'source': source,
                                     'url': url
                                 })
-                            number_found = True
                             article_has_numbers['arrests'] = True
                             break
                     break
         
-        # NEW: If article mentions casualties but we couldn't extract numbers, save it
         for casualty_type in ['deaths', 'injuries', 'arrests']:
             if article_mentions[casualty_type] and not article_has_numbers[casualty_type]:
                 casualties['articles_without_numbers'].append({
@@ -951,10 +972,10 @@ def extract_casualty_data(articles):
     
     casualties['sources'] = list(casualties['sources'])
     
-    print(f"[v2.0.0] ✓ Deaths: {casualties['deaths']} detected")
-    print(f"[v2.0.0] ✓ Injuries: {casualties['injuries']} detected")
-    print(f"[v2.0.0] ✓ Arrests: {casualties['arrests']} detected")
-    print(f"[v2.0.0] ✓ Articles without numbers: {len(casualties['articles_without_numbers'])}")
+    print(f"[v2.1.0] ✓ Deaths: {casualties['deaths']} detected")
+    print(f"[v2.1.0] ✓ Injuries: {casualties['injuries']} detected")
+    print(f"[v2.1.0] ✓ Arrests: {casualties['arrests']} detected")
+    print(f"[v2.1.0] ✓ Articles without numbers: {len(casualties['articles_without_numbers'])}")
     
     return casualties
 
@@ -973,14 +994,12 @@ def scan_iran_protests():
         
         days = int(request.args.get('days', 7))
         
-        # Fetch articles from various sources with error handling
         try:
             newsapi_articles = fetch_newsapi_articles('Iran protests', days)
         except Exception as e:
             print(f"NewsAPI error: {e}")
             newsapi_articles = []
         
-        # GDELT query for Iran protests
         gdelt_query = 'iran OR persia OR protest OR protests OR demonstration'
         try:
             gdelt_en = fetch_gdelt_articles(gdelt_query, days, 'eng')
@@ -1006,7 +1025,6 @@ def scan_iran_protests():
             print(f"GDELT HE error: {e}")
             gdelt_he = []
         
-        # Reddit posts
         try:
             reddit_posts = fetch_reddit_posts(
                 'iran',
@@ -1017,7 +1035,6 @@ def scan_iran_protests():
             print(f"Reddit error: {e}")
             reddit_posts = []
         
-        # Iran Wire RSS
         try:
             iranwire_articles = fetch_iranwire_rss()
         except Exception as e:
@@ -1028,7 +1045,6 @@ def scan_iran_protests():
         
         print(f"Total articles fetched: {len(all_articles)}")
         
-        # Extract casualty data
         try:
             casualties = extract_casualty_data(all_articles)
         except Exception as e:
@@ -1038,14 +1054,13 @@ def scan_iran_protests():
                 'injuries': 0,
                 'arrests': 0,
                 'sources': [],
-                'details': []
+                'details': [],
+                'articles_without_numbers': []
             }
         
-        # Calculate intensity and stability
         articles_per_day = len(all_articles) / days if days > 0 else 0
         
-        # Count affected cities (simplified - would need city extraction)
-        num_cities = 5  # Mock value
+        num_cities = 5
         cities = [
             {'name': 'Tehran', 'mentions': 10},
             {'name': 'Isfahan', 'mentions': 5},
@@ -1091,7 +1106,7 @@ def scan_iran_protests():
             'articles_iranwire': iranwire_articles[:20],
             
             'cached': False,
-            'version': '2.0.0'
+            'version': '2.1.0'
         })
         
     except Exception as e:
@@ -1103,7 +1118,7 @@ def scan_iran_protests():
             'error': str(e),
             'intensity': 0,
             'stability': 100,
-            'casualties': {'deaths': 0, 'injuries': 0, 'arrests': 0, 'sources': [], 'details': []},
+            'casualties': {'deaths': 0, 'injuries': 0, 'arrests': 0, 'sources': [], 'details': [], 'articles_without_numbers': []},
             'cities': [],
             'num_cities_affected': 0,
             'articles_en': [],
@@ -1119,7 +1134,6 @@ def scan_iran_protests():
 def polymarket_data():
     """Fetch Polymarket prediction market data"""
     try:
-        # Mock data for now - in production you'd fetch from Polymarket API
         markets = [
             {
                 'question': 'Will Israel strike Iran in 2026?',
@@ -1137,7 +1151,7 @@ def polymarket_data():
             'success': True,
             'markets': markets,
             'timestamp': datetime.now(timezone.utc).isoformat(),
-            'version': '2.0.0'
+            'version': '2.1.0'
         })
         
     except Exception as e:
@@ -1155,12 +1169,11 @@ def rate_limit():
 def get_flight_cancellations():
     """Aggregate flight cancellations from all targets"""
     try:
-        # For now, return empty array - would need web scraping for real data
         return jsonify({
             'success': True,
             'cancellations': [],
             'timestamp': datetime.now(timezone.utc).isoformat(),
-            'version': '2.0.0'
+            'version': '2.1.0'
         })
         
     except Exception as e:
@@ -1175,7 +1188,7 @@ def home():
     return jsonify({
         'status': 'Backend is running',
         'message': 'Asifah Analytics API',
-        'version': '2.0.0',
+        'version': '2.1.0',
         'endpoints': {
             '/api/threat/<target>': 'Get threat assessment for iran, hezbollah, or houthis',
             '/scan-iran-protests': 'Get Iran protests data with casualties',
@@ -1191,7 +1204,7 @@ def health():
     """Health check endpoint"""
     return jsonify({
         'status': 'healthy',
-        'version': '2.0.0',
+        'version': '2.1.0',
         'timestamp': datetime.now(timezone.utc).isoformat()
     })
 
