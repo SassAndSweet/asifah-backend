@@ -657,6 +657,182 @@ def fetch_iranwire_rss():
     print(f"[v2.1.0] Iran Wire: Total {len(articles)} articles")
     return articles
 
+def fetch_hrana_rss():
+    """Fetch articles from HRANA (Human Rights Activists News Agency) RSS feed
+    
+    HRANA provides the most authoritative casualty data for Iranian protests.
+    Their articles contain structured statistics that we parse separately.
+    """
+    import xml.etree.ElementTree as ET
+    from datetime import datetime, timezone
+    
+    articles = []
+    
+    feed_url = 'https://en-hrana.org/feed/'
+    
+    try:
+        print(f"[v2.1.0] HRANA: Fetching RSS...")
+        response = requests.get(feed_url, timeout=20)
+        
+        if response.status_code != 200:
+            print(f"[v2.1.0] HRANA: HTTP {response.status_code}")
+            return []
+        
+        try:
+            root = ET.fromstring(response.content)
+        except ET.ParseError as e:
+            print(f"[v2.1.0] HRANA: XML parse error: {e}")
+            return []
+        
+        # Find all items in the RSS feed
+        items = root.findall('.//item')
+        
+        for item in items[:20]:  # Get top 20 articles
+            title_elem = item.find('title')
+            link_elem = item.find('link')
+            pubDate_elem = item.find('pubDate')
+            description_elem = item.find('description')
+            content_elem = item.find('{http://purl.org/rss/1.0/modules/content/}encoded')
+            
+            if title_elem is not None and link_elem is not None:
+                # Parse publication date (format: Wed, 21 Jan 2026 12:46:08 +0000)
+                pub_date = pubDate_elem.text if pubDate_elem is not None else datetime.now(timezone.utc).isoformat()
+                
+                # Get full content for parsing
+                content = ''
+                if content_elem is not None and content_elem.text:
+                    content = content_elem.text[:5000]  # Get more content for structured data parsing
+                elif description_elem is not None and description_elem.text:
+                    content = description_elem.text[:500]
+                
+                articles.append({
+                    'title': title_elem.text or '',
+                    'description': content[:500],  # First 500 chars for description
+                    'url': link_elem.text or '',
+                    'publishedAt': pub_date,
+                    'source': {'name': 'HRANA'},
+                    'content': content,  # Full content for structured data extraction
+                    'language': 'en'
+                })
+        
+        print(f"[v2.1.0] HRANA: ✓ Fetched {len(articles)} articles")
+        return articles
+        
+    except requests.Timeout:
+        print(f"[v2.1.0] HRANA: Timeout after 20s")
+        return []
+    except requests.ConnectionError:
+        print(f"[v2.1.0] HRANA: Connection error")
+        return []
+    except Exception as e:
+        print(f"[v2.1.0] HRANA: Error: {str(e)[:100]}")
+        return []
+
+def extract_hrana_structured_data(articles):
+    """Extract structured protest statistics from HRANA articles
+    
+    HRANA publishes daily summary articles with structured statistics like:
+    - Confirmed deaths: 4,519
+    - Deaths under investigation: 9,049
+    - Seriously injured: 5,811
+    - Total arrests: 26,314
+    - Cities affected: 188
+    - Provinces: 31
+    
+    This function looks for these patterns and extracts the numbers.
+    """
+    
+    structured_data = {
+        'confirmed_deaths': 0,
+        'deaths_under_investigation': 0,
+        'seriously_injured': 0,
+        'total_arrests': 0,
+        'cities_affected': 0,
+        'provinces_affected': 0,
+        'protest_gatherings': 0,
+        'source_article': None,
+        'last_updated': None,
+        'is_hrana_verified': False
+    }
+    
+    # HRANA patterns for structured statistics
+    patterns = {
+        'confirmed_deaths': [
+            r'confirmed\s+deaths?\s*:?\s*(\d{1,3}(?:,\d{3})*)',
+            r'confirmed\s+fatalities\s*:?\s*(\d{1,3}(?:,\d{3})*)',
+            r'number\s+of\s+confirmed\s+deaths?\s*:?\s*(\d{1,3}(?:,\d{3})*)'
+        ],
+        'deaths_under_investigation': [
+            r'deaths?\s+under\s+(?:review|investigation)\s*:?\s*(\d{1,3}(?:,\d{3})*)',
+            r'fatalities\s+under\s+(?:review|investigation)\s*:?\s*(\d{1,3}(?:,\d{3})*)'
+        ],
+        'seriously_injured': [
+            r'seriously?\s+injured\s*:?\s*(\d{1,3}(?:,\d{3})*)',
+            r'severe\s+injuries\s*:?\s*(\d{1,3}(?:,\d{3})*)',
+            r'(?:at\s+least\s+)?(\d{1,3}(?:,\d{3})*)\s+people\s+have\s+sustained\s+serious\s+injuries'
+        ],
+        'total_arrests': [
+            r'total\s+arrests?\s*:?\s*(\d{1,3}(?:,\d{3})*)',
+            r'number\s+of\s+arrests?\s*:?\s*(\d{1,3}(?:,\d{3})*)',
+            r'total\s+number\s+of\s+arrests?\s*(?:has\s+risen\s+to)?\s*(\d{1,3}(?:,\d{3})*)'
+        ],
+        'cities_affected': [
+            r'(\d{1,3})\s+cities\s+(?:affected|involved)',
+            r'number\s+of\s+cities\s+involved.*?:\s*(\d{1,3})'
+        ],
+        'provinces_affected': [
+            r'(?:all\s+)?(\d{1,2})\s+provinces',
+            r'number\s+of\s+provinces\s+involved.*?:\s*(\d{1,2})'
+        ],
+        'protest_gatherings': [
+            r'(\d{1,3}(?:,\d{3})*)\s+protest\s+gatherings?',
+            r'number\s+of\s+recorded\s+(?:protest\s+)?gatherings?\s*:?\s*(\d{1,3}(?:,\d{3})*)'
+        ]
+    }
+    
+    # Look through HRANA articles for structured data
+    # Prioritize articles with "Day [Number]" in title (daily summaries)
+    hrana_articles = [a for a in articles if a.get('source', {}).get('name') == 'HRANA']
+    
+    for article in hrana_articles:
+        title = article.get('title', '').lower()
+        content = article.get('content', '').lower()
+        
+        # Check if this is a daily summary article
+        is_summary = 'day ' in title and ('protest' in title or 'aggregated data' in content)
+        
+        if is_summary or 'aggregated data' in content:
+            # This article likely has structured data
+            full_text = content
+            
+            for key, pattern_list in patterns.items():
+                for pattern in pattern_list:
+                    match = re.search(pattern, full_text, re.IGNORECASE)
+                    if match:
+                        number_str = match.group(1).replace(',', '')
+                        try:
+                            number = int(number_str)
+                            # Only update if we found a higher number
+                            if number > structured_data[key]:
+                                structured_data[key] = number
+                                structured_data['source_article'] = article.get('url')
+                                structured_data['last_updated'] = article.get('publishedAt')
+                                structured_data['is_hrana_verified'] = True
+                        except:
+                            pass
+    
+    if structured_data['is_hrana_verified']:
+        print(f"[v2.1.0] HRANA Structured Data Found:")
+        print(f"  Confirmed deaths: {structured_data['confirmed_deaths']}")
+        print(f"  Seriously injured: {structured_data['seriously_injured']}")
+        print(f"  Total arrests: {structured_data['total_arrests']}")
+        print(f"  Cities: {structured_data['cities_affected']}")
+        print(f"  Source: {structured_data['source_article']}")
+    else:
+        print(f"[v2.1.0] HRANA: No structured data found in recent articles")
+    
+    return structured_data
+    
 # ========================================
 # API ENDPOINTS
 # ========================================
@@ -984,7 +1160,7 @@ def extract_casualty_data(articles):
 # ========================================
 @app.route('/scan-iran-protests', methods=['GET'])
 def scan_iran_protests():
-    """Iran protests endpoint with casualty tracking"""
+    """Iran protests endpoint with casualty tracking and HRANA integration"""
     try:
         if not check_rate_limit():
             return jsonify({
@@ -994,12 +1170,14 @@ def scan_iran_protests():
         
         days = int(request.args.get('days', 7))
         
+        # Fetch articles from various sources
         try:
             newsapi_articles = fetch_newsapi_articles('Iran protests', days)
         except Exception as e:
             print(f"NewsAPI error: {e}")
             newsapi_articles = []
         
+        # GDELT query for Iran protests
         gdelt_query = 'iran OR persia OR protest OR protests OR demonstration'
         try:
             gdelt_en = fetch_gdelt_articles(gdelt_query, days, 'eng')
@@ -1025,6 +1203,7 @@ def scan_iran_protests():
             print(f"GDELT HE error: {e}")
             gdelt_he = []
         
+        # Reddit posts
         try:
             reddit_posts = fetch_reddit_posts(
                 'iran',
@@ -1035,21 +1214,38 @@ def scan_iran_protests():
             print(f"Reddit error: {e}")
             reddit_posts = []
         
+        # Iran Wire RSS
         try:
             iranwire_articles = fetch_iranwire_rss()
         except Exception as e:
             print(f"Iran Wire error: {e}")
             iranwire_articles = []
         
-        all_articles = newsapi_articles + gdelt_en + gdelt_ar + gdelt_fa + gdelt_he + reddit_posts + iranwire_articles
+        # NEW: HRANA RSS (most authoritative source)
+        try:
+            hrana_articles = fetch_hrana_rss()
+        except Exception as e:
+            print(f"HRANA error: {e}")
+            hrana_articles = []
+        
+        all_articles = (newsapi_articles + gdelt_en + gdelt_ar + gdelt_fa + 
+                       gdelt_he + reddit_posts + iranwire_articles + hrana_articles)
         
         print(f"Total articles fetched: {len(all_articles)}")
         
+        # Extract HRANA structured data (PRIORITY)
         try:
-            casualties = extract_casualty_data(all_articles)
+            hrana_data = extract_hrana_structured_data(hrana_articles)
+        except Exception as e:
+            print(f"HRANA structured data extraction error: {e}")
+            hrana_data = {'is_hrana_verified': False}
+        
+        # Extract casualty data using regex (FALLBACK)
+        try:
+            casualties_regex = extract_casualty_data(all_articles)
         except Exception as e:
             print(f"Casualty extraction error: {e}")
-            casualties = {
+            casualties_regex = {
                 'deaths': 0,
                 'injuries': 0,
                 'arrests': 0,
@@ -1058,15 +1254,36 @@ def scan_iran_protests():
                 'articles_without_numbers': []
             }
         
+        # MERGE DATA: HRANA takes priority over regex extraction
+        if hrana_data['is_hrana_verified']:
+            casualties = {
+                'deaths': max(hrana_data['confirmed_deaths'], casualties_regex['deaths']),
+                'deaths_under_investigation': hrana_data['deaths_under_investigation'],
+                'injuries': max(hrana_data['seriously_injured'], casualties_regex['injuries']),
+                'arrests': max(hrana_data['total_arrests'], casualties_regex['arrests']),
+                'sources': list(set(['HRANA (verified)'] + casualties_regex['sources'])),
+                'details': casualties_regex['details'],
+                'articles_without_numbers': casualties_regex['articles_without_numbers'],
+                'hrana_verified': True,
+                'hrana_source': hrana_data['source_article'],
+                'hrana_updated': hrana_data['last_updated']
+            }
+            num_cities = hrana_data['cities_affected'] or 5
+        else:
+            casualties = casualties_regex
+            casualties['hrana_verified'] = False
+            num_cities = 5  # Fallback
+        
         articles_per_day = len(all_articles) / days if days > 0 else 0
         
-        num_cities = 5
+        # Simple city extraction (could be enhanced)
         cities = [
             {'name': 'Tehran', 'mentions': 10},
             {'name': 'Isfahan', 'mentions': 5},
             {'name': 'Shiraz', 'mentions': 3}
         ]
         
+        # Calculate intensity
         intensity_score = min(
             articles_per_day * 2 + 
             num_cities * 4 + 
@@ -1088,11 +1305,15 @@ def scan_iran_protests():
             
             'casualties': {
                 'deaths': casualties['deaths'],
+                'deaths_under_investigation': casualties.get('deaths_under_investigation', 0),
                 'injuries': casualties['injuries'],
                 'arrests': casualties['arrests'],
                 'verified_sources': casualties['sources'],
                 'details': casualties.get('details', []),
-                'articles_without_numbers': casualties.get('articles_without_numbers', [])
+                'articles_without_numbers': casualties.get('articles_without_numbers', []),
+                'hrana_verified': casualties.get('hrana_verified', False),
+                'hrana_source': casualties.get('hrana_source'),
+                'hrana_updated': casualties.get('hrana_updated')
             },
             
             'cities': cities,
@@ -1104,9 +1325,10 @@ def scan_iran_protests():
             'articles_he': [a for a in all_articles if a.get('language') == 'he'][:20],
             'articles_reddit': [a for a in all_articles if a.get('source', {}).get('name', '').startswith('r/')][:20],
             'articles_iranwire': iranwire_articles[:20],
+            'articles_hrana': hrana_articles[:20],
             
             'cached': False,
-            'version': '2.1.0'
+            'version': '2.1.0-HRANA'
         })
         
     except Exception as e:
@@ -1118,7 +1340,15 @@ def scan_iran_protests():
             'error': str(e),
             'intensity': 0,
             'stability': 100,
-            'casualties': {'deaths': 0, 'injuries': 0, 'arrests': 0, 'sources': [], 'details': [], 'articles_without_numbers': []},
+            'casualties': {
+                'deaths': 0, 
+                'injuries': 0, 
+                'arrests': 0, 
+                'sources': [], 
+                'details': [],
+                'articles_without_numbers': [],
+                'hrana_verified': False
+            },
             'cities': [],
             'num_cities_affected': 0,
             'articles_en': [],
@@ -1127,59 +1357,8 @@ def scan_iran_protests():
             'articles_he': [],
             'articles_reddit': [],
             'articles_iranwire': [],
+            'articles_hrana': [],
             'total_articles': 0
-        }), 500
-
-@app.route('/polymarket-data', methods=['GET'])
-def polymarket_data():
-    """Fetch Polymarket prediction market data"""
-    try:
-        markets = [
-            {
-                'question': 'Will Israel strike Iran in 2026?',
-                'probability': 0.42,
-                'url': 'https://polymarket.com'
-            },
-            {
-                'question': 'Major conflict in Middle East by March 2026?',
-                'probability': 0.58,
-                'url': 'https://polymarket.com'
-            }
-        ]
-        
-        return jsonify({
-            'success': True,
-            'markets': markets,
-            'timestamp': datetime.now(timezone.utc).isoformat(),
-            'version': '2.1.0'
-        })
-        
-    except Exception as e:
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        }), 500
-
-@app.route('/rate-limit', methods=['GET'])
-def rate_limit():
-    """Get current rate limit status"""
-    return jsonify(get_rate_limit_info())
-
-@app.route('/flight-cancellations', methods=['GET'])
-def get_flight_cancellations():
-    """Aggregate flight cancellations from all targets"""
-    try:
-        return jsonify({
-            'success': True,
-            'cancellations': [],
-            'timestamp': datetime.now(timezone.utc).isoformat(),
-            'version': '2.1.0'
-        })
-        
-    except Exception as e:
-        return jsonify({
-            'success': False,
-            'error': str(e)
         }), 500
 
 @app.route('/', methods=['GET'])
