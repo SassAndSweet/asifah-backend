@@ -1155,7 +1155,42 @@ except Exception as e:
                 'details': [],
                 'articles_without_numbers': []
             }
+
+def extract_iranian_cities(articles):
+    """Extract Iranian city names mentioned in articles"""
+    import re
+    
+    # Major Iranian cities to look for (expanded list from HRANA data)
+    major_cities = [
+        'Tehran', 'Mashhad', 'Isfahan', 'Karaj', 'Shiraz', 'Tabriz',
+        'Qom', 'Ahvaz', 'Kermanshah', 'Urmia', 'Rasht', 'Kerman',
+        'Zahedan', 'Hamadan', 'Yazd', 'Ardabil', 'Bandar Abbas',
+        'Arak', 'Eslamshahr', 'Zanjan', 'Sanandaj', 'Qazvin',
+        'Khorramabad', 'Gorgan', 'Sabzevar', 'Amol', 'Dezful',
+        'Najafabad', 'Varamin', 'Abadan', 'Ilam', 'Marvdasht',
+        'Sirjan', 'Rafsanjan', 'Marivan', 'Talesh', 'Shahreza',
+        'Neyriz', 'Fasa', 'Darab', 'Kazerun', 'Nourabad',
+        'Pasargad', 'Abadeh', 'Kovar', 'Borujerd', 'Aligudarz',
+        'Borazjan', 'Birjand', 'Khaf', 'Neyshapur', 'Dorud',
+        'Nowshahr', 'Saveh', 'Jiroft', 'Bam', 'Yasuj',
+        'Nahavand', 'Semnan', 'Hamedan', 'Ardabil', 'Qazvin'
+    ]
+    
+    city_mentions = {}
+    
+    for article in articles:
+        content = (article.get('content', '') + ' ' + 
+                  article.get('title', '') + ' ' + 
+                  article.get('description', '')).lower()
         
+        for city in major_cities:
+            if city.lower() in content:
+                city_mentions[city] = city_mentions.get(city, 0) + 1
+    
+    # Sort by frequency and return city names
+    sorted_cities = sorted(city_mentions.items(), key=lambda x: x[1], reverse=True)
+    return [city for city, count in sorted_cities]
+
         # MERGE DATA: HRANA takes priority over regex extraction
         if hrana_data['is_hrana_verified']:
             casualties = {
