@@ -655,19 +655,14 @@ def fetch_iranwire_rss():
     return articles
 
 def fetch_hrana_rss():
-    """Fetch articles from HRANA (Human Rights Activists News Agency) RSS feed
-    
-    HRANA provides the most authoritative casualty data for Iranian protests.
-    Their articles contain structured statistics that we parse separately.
-    """
+    """Fetch articles from HRANA RSS feed"""
     import xml.etree.ElementTree as ET
     from datetime import datetime, timezone
     
     articles = []
-    
     feed_url = 'https://en-hrana.org/feed/'
     
-try:
+    try:
         print(f"[v2.1.0] HRANA: Fetching RSS...")
         
         # Add realistic User-Agent to avoid 403 blocking
@@ -689,41 +684,12 @@ try:
             print(f"[v2.1.0] HRANA: XML parse error: {e}")
             return []
         
-        # Find all items in the RSS feed
-        items = root.findall('.//item')
-        
-        for item in items[:20]:  # Get top 20 articles
-            title_elem = item.find('title')
-            link_elem = item.find('link')
-            pubDate_elem = item.find('pubDate')
-            description_elem = item.find('description')
-            content_elem = item.find('{http://purl.org/rss/1.0/modules/content/}encoded')
-            
-            if title_elem is not None and link_elem is not None:
-                # Parse publication date (format: Wed, 21 Jan 2026 12:46:08 +0000)
-                pub_date = pubDate_elem.text if pubDate_elem is not None else datetime.now(timezone.utc).isoformat()
-                
-                # Get full content for parsing
-                content = ''
-                if content_elem is not None and content_elem.text:
-                    content = content_elem.text[:5000]  # Get more content for structured data parsing
-                elif description_elem is not None and description_elem.text:
-                    content = description_elem.text[:500]
-                
-                articles.append({
-                    'title': title_elem.text or '',
-                    'description': content[:500],  # First 500 chars for description
-                    'url': link_elem.text or '',
-                    'publishedAt': pub_date,
-                    'source': {'name': 'HRANA'},
-                    'content': content,  # Full content for structured data extraction
-                    'language': 'en'
-                })
+        # ... rest of parsing code ...
         
         print(f"[v2.1.0] HRANA: ✓ Fetched {len(articles)} articles")
         return articles
         
-    except requests.Timeout:
+    except requests.Timeout:  # ← This line needs to align with 'try:' above
         print(f"[v2.1.0] HRANA: Timeout after 20s")
         return []
     except requests.ConnectionError:
@@ -732,7 +698,6 @@ try:
     except Exception as e:
         print(f"[v2.1.0] HRANA: Error: {str(e)[:100]}")
         return []
-
 def extract_hrana_structured_data(articles):
     """Extract structured protest statistics from HRANA articles
     
