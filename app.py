@@ -661,29 +661,34 @@ def fetch_hrana_rss():
     articles = []
     
     # Use RSS2JSON as a proxy to bypass 403 blocking from HRANA's servers
-    feed_url = 'https://api.rss2json.com/v1/api.json?rss_url=https://en-hrana.org/feed/'
+    feed_url = 'https://api.rss2json.com/v1/api.json?rss_url=https%3A%2F%2Fen-hrana.org%2Ffeed%2F'
     
     try:
-        print(f"[v2.1.0] HRANA: Fetching RSS via proxy...")
+        print(f"[v2.1.0] HRANA: Fetching via RSS2JSON proxy...")
         
         headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
         }
         
         response = requests.get(feed_url, headers=headers, timeout=20)
         
+        print(f"[v2.1.0] HRANA: Proxy response status = {response.status_code}")
+        
         if response.status_code != 200:
-            print(f"[v2.1.0] HRANA: HTTP {response.status_code}")
+            print(f"[v2.1.0] HRANA: Proxy HTTP {response.status_code}")
             return []
         
         data = response.json()
         
         if data.get('status') != 'ok':
-            print(f"[v2.1.0] HRANA: Proxy error - {data.get('message', 'unknown error')}")
+            print(f"[v2.1.0] HRANA: RSS2JSON error - {data.get('message', 'unknown')}")
             return []
         
         # Parse JSON response from RSS2JSON
-        for item in data.get('items', [])[:10]:  # Get latest 10 articles
+        items = data.get('items', [])
+        print(f"[v2.1.0] HRANA: RSS2JSON returned {len(items)} items")
+        
+        for item in items[:10]:  # Get latest 10 articles
             try:
                 # Extract content - RSS2JSON provides both description and full content
                 content = item.get('content', '') or item.get('description', '')
@@ -709,17 +714,17 @@ def fetch_hrana_rss():
                 print(f"[v2.1.0] HRANA: Error parsing item: {e}")
                 continue
         
-        print(f"[v2.1.0] HRANA: ✓ Fetched {len(articles)} articles via proxy")
+        print(f"[v2.1.0] HRANA: ✓ Fetched {len(articles)} articles via RSS2JSON")
         return articles
         
     except requests.Timeout:
         print(f"[v2.1.0] HRANA: Timeout after 20s")
         return []
-    except requests.ConnectionError:
-        print(f"[v2.1.0] HRANA: Connection error")
+    except requests.ConnectionError as e:
+        print(f"[v2.1.0] HRANA: Connection error - {e}")
         return []
     except Exception as e:
-        print(f"[v2.1.0] HRANA: Error: {str(e)[:100]}")
+        print(f"[v2.1.0] HRANA: Error: {str(e)[:200]}")
         return []
     
 # ========================================
