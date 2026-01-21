@@ -1255,6 +1255,80 @@ hrana_data = {'is_hrana_verified': False}
             'total_articles': 0
         }), 500
 
+@app.route('/iran-protests-data')
+def get_iran_protests_data():
+    """Endpoint for Iran protests dashboard data"""
+    try:
+        # Fetch all data sources
+        newsapi_articles = fetch_newsapi_articles('Iran protests', 7)
+        
+        # GDELT
+        gdelt_query = 'iran OR persia OR protest OR protests OR demonstration'
+        gdelt_en = fetch_gdelt_articles(gdelt_query, 7, 'eng')
+        gdelt_ar = fetch_gdelt_articles(gdelt_query, 7, 'ara')
+        gdelt_fa = fetch_gdelt_articles(gdelt_query, 7, 'fas')
+        gdelt_he = fetch_gdelt_articles(gdelt_query, 7, 'heb')
+        
+        # Reddit
+        reddit_posts = fetch_reddit_posts('iran', ['Iran', 'protest', 'protests'], 7)
+        
+        # Iran Wire and HRANA
+        iranwire_articles = fetch_iranwire_rss()
+        hrana_articles = fetch_hrana_rss()
+        
+        # Combine all articles
+        all_articles = (newsapi_articles + gdelt_en + gdelt_ar + gdelt_fa + 
+                       gdelt_he + reddit_posts + iranwire_articles + hrana_articles)
+        
+        # Extract HRANA structured geographic data
+        try:
+            hrana_data = extract_hrana_structured_data(hrana_articles)
+        except Exception as e:
+            print(f"HRANA geographic data error: {e}")
+            hrana_data = {
+                'cities_affected': 0,
+                'provinces_affected': 0,
+                'confirmed_deaths': 0,
+                'seriously_injured': 0,
+                'total_arrests': 0,
+                'is_hrana_verified': False
+            }
+        
+        # Extract casualties (fallback)
+        casualties_regex = extract_casualty_data(all_articles)
+        
+        # Extract cities mentioned in articles
+        cities_mentioned = extract_iranian_cities(all_articles)
+        
+        response_data = {
+            'casualties': {
+                'deaths': hrana_data.get('confirmed_deaths', casualties_regex.get('deaths', 0)),
+                'injuries': hrana_data.get('seriously_injured', casualties_regex.get('injuries', 0)),
+                'arrests': hrana_data.get('total_arrests', casualties_regex.get('arrests', 0))
+            },
+            'geographic': {
+                'cities_affected': hrana_data.get('cities_affected', len(cities_mentioned)),
+                'provinces_affected': hrana_data.get('provinces_affected', 0),
+                'cities_mentioned': cities_mentioned[:10],
+                'is_hrana_verified': hrana_data.get('is_hrana_verified', False)
+            },
+            'articles': {
+                'hrana': len(hrana_articles),
+                'iran_wire': len(iranwire_articles),
+                'newsapi': len(newsapi_articles),
+                'gdelt': len(gdelt_en + gdelt_ar + gdelt_fa + gdelt_he),
+                'reddit': len(reddit_posts),
+                'total': len(all_articles)
+            },
+            'last_updated': datetime.now().isoformat()
+        }
+        
+        return jsonify(response_data)
+        
+    except Exception as e:
+        print(f"Error in /iran-protests-data endpoint: {e}")
+        return jsonify({'error': str(e)}), 500
+        
 @app.route('/', methods=['GET'])
 def home():
     """Root endpoint"""
