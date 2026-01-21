@@ -1127,20 +1127,20 @@ def scan_iran_protests():
         
         print(f"Total articles fetched: {len(all_articles)}")
         
-# Extract HRANA structured data (PRIORITY)
-try:
-    hrana_data = extract_hrana_structured_data(hrana_articles)
-except Exception as e:
-    print(f"HRANA structured data extraction error: {e}")
-    hrana_data = {
-        'is_hrana_verified': False,
-        'cities_affected': 0,
-        'provinces_affected': 0,
-        'confirmed_deaths': 0,
-        'deaths_under_investigation': 0,
-        'seriously_injured': 0,
-        'total_arrests': 0
-    }
+        # Extract HRANA structured data (PRIORITY)
+        try:
+            hrana_data = extract_hrana_structured_data(hrana_articles)
+        except Exception as e:
+            print(f"HRANA structured data extraction error: {e}")
+            hrana_data = {
+                'is_hrana_verified': False,
+                'cities_affected': 0,
+                'provinces_affected': 0,
+                'confirmed_deaths': 0,
+                'deaths_under_investigation': 0,
+                'seriously_injured': 0,
+                'total_arrests': 0
+            }
         
         # Extract casualty data using regex (FALLBACK)
         try:
@@ -1155,42 +1155,7 @@ except Exception as e:
                 'details': [],
                 'articles_without_numbers': []
             }
-
-def extract_iranian_cities(articles):
-    """Extract Iranian city names mentioned in articles"""
-    import re
-    
-    # Major Iranian cities to look for (expanded list from HRANA data)
-    major_cities = [
-        'Tehran', 'Mashhad', 'Isfahan', 'Karaj', 'Shiraz', 'Tabriz',
-        'Qom', 'Ahvaz', 'Kermanshah', 'Urmia', 'Rasht', 'Kerman',
-        'Zahedan', 'Hamadan', 'Yazd', 'Ardabil', 'Bandar Abbas',
-        'Arak', 'Eslamshahr', 'Zanjan', 'Sanandaj', 'Qazvin',
-        'Khorramabad', 'Gorgan', 'Sabzevar', 'Amol', 'Dezful',
-        'Najafabad', 'Varamin', 'Abadan', 'Ilam', 'Marvdasht',
-        'Sirjan', 'Rafsanjan', 'Marivan', 'Talesh', 'Shahreza',
-        'Neyriz', 'Fasa', 'Darab', 'Kazerun', 'Nourabad',
-        'Pasargad', 'Abadeh', 'Kovar', 'Borujerd', 'Aligudarz',
-        'Borazjan', 'Birjand', 'Khaf', 'Neyshapur', 'Dorud',
-        'Nowshahr', 'Saveh', 'Jiroft', 'Bam', 'Yasuj',
-        'Nahavand', 'Semnan', 'Hamedan', 'Ardabil', 'Qazvin'
-    ]
-    
-    city_mentions = {}
-    
-    for article in articles:
-        content = (article.get('content', '') + ' ' + 
-                  article.get('title', '') + ' ' + 
-                  article.get('description', '')).lower()
         
-        for city in major_cities:
-            if city.lower() in content:
-                city_mentions[city] = city_mentions.get(city, 0) + 1
-    
-    # Sort by frequency and return city names
-    sorted_cities = sorted(city_mentions.items(), key=lambda x: x[1], reverse=True)
-    return [city for city, count in sorted_cities]
-
         # MERGE DATA: HRANA takes priority over regex extraction
         if hrana_data['is_hrana_verified']:
             casualties = {
@@ -1213,10 +1178,9 @@ def extract_iranian_cities(articles):
         
         articles_per_day = len(all_articles) / days if days > 0 else 0
         
-# Extract cities from articles dynamically
+        # Extract cities from articles dynamically
         cities_mentioned = extract_iranian_cities(all_articles)
         cities = [{'name': city, 'mentions': i+1} for i, city in enumerate(cities_mentioned[:5])]
-        ]
         
         # Calculate intensity
         intensity_score = min(
@@ -1295,107 +1259,3 @@ def extract_iranian_cities(articles):
             'articles_hrana': [],
             'total_articles': 0
         }), 500
-
-@app.route('/iran-protests-data')
-def get_iran_protests_data():
-    """Endpoint for Iran protests dashboard data"""
-    try:
-        # Fetch all data sources
-        newsapi_articles = fetch_newsapi_articles('Iran protests', 7)
-        
-        # GDELT
-        gdelt_query = 'iran OR persia OR protest OR protests OR demonstration'
-        gdelt_en = fetch_gdelt_articles(gdelt_query, 7, 'eng')
-        gdelt_ar = fetch_gdelt_articles(gdelt_query, 7, 'ara')
-        gdelt_fa = fetch_gdelt_articles(gdelt_query, 7, 'fas')
-        gdelt_he = fetch_gdelt_articles(gdelt_query, 7, 'heb')
-        
-        # Reddit
-        reddit_posts = fetch_reddit_posts('iran', ['Iran', 'protest', 'protests'], 7)
-        
-        # Iran Wire and HRANA
-        iranwire_articles = fetch_iranwire_rss()
-        hrana_articles = fetch_hrana_rss()
-        
-        # Combine all articles
-        all_articles = (newsapi_articles + gdelt_en + gdelt_ar + gdelt_fa + 
-                       gdelt_he + reddit_posts + iranwire_articles + hrana_articles)
-        
-        # Extract HRANA structured geographic data
-        try:
-            hrana_data = extract_hrana_structured_data(hrana_articles)
-        except Exception as e:
-            print(f"HRANA geographic data error: {e}")
-            hrana_data = {
-                'cities_affected': 0,
-                'provinces_affected': 0,
-                'confirmed_deaths': 0,
-                'seriously_injured': 0,
-                'total_arrests': 0,
-                'is_hrana_verified': False
-            }
-        
-        # Extract casualties (fallback)
-        casualties_regex = extract_casualty_data(all_articles)
-        
-        # Extract cities mentioned in articles
-        cities_mentioned = extract_iranian_cities(all_articles)
-        
-        response_data = {
-            'casualties': {
-                'deaths': hrana_data.get('confirmed_deaths', casualties_regex.get('deaths', 0)),
-                'injuries': hrana_data.get('seriously_injured', casualties_regex.get('injuries', 0)),
-                'arrests': hrana_data.get('total_arrests', casualties_regex.get('arrests', 0))
-            },
-            'geographic': {
-                'cities_affected': hrana_data.get('cities_affected', len(cities_mentioned)),
-                'provinces_affected': hrana_data.get('provinces_affected', 0),
-                'cities_mentioned': cities_mentioned[:10],
-                'is_hrana_verified': hrana_data.get('is_hrana_verified', False)
-            },
-            'articles': {
-                'hrana': len(hrana_articles),
-                'iran_wire': len(iranwire_articles),
-                'newsapi': len(newsapi_articles),
-                'gdelt': len(gdelt_en + gdelt_ar + gdelt_fa + gdelt_he),
-                'reddit': len(reddit_posts),
-                'total': len(all_articles)
-            },
-            'last_updated': datetime.now().isoformat()
-        }
-        
-        return jsonify(response_data)
-        
-    except Exception as e:
-        print(f"Error in /iran-protests-data endpoint: {e}")
-        return jsonify({'error': str(e)}), 500
-        
-@app.route('/', methods=['GET'])
-def home():
-    """Root endpoint"""
-    return jsonify({
-        'status': 'Backend is running',
-        'message': 'Asifah Analytics API',
-        'version': '2.1.0',
-        'endpoints': {
-            '/api/threat/<target>': 'Get threat assessment for iran, hezbollah, or houthis',
-            '/scan-iran-protests': 'Get Iran protests data with casualties',
-            '/polymarket-data': 'Get Polymarket prediction data',
-            '/rate-limit': 'Get rate limit status',
-            '/flight-cancellations': 'Get flight cancellations',
-            '/health': 'Health check'
-        }
-    })
-
-@app.route('/health', methods=['GET'])
-def health():
-    """Health check endpoint"""
-    return jsonify({
-        'status': 'healthy',
-        'version': '2.2.0-HRANA',
-        'timestamp': datetime.now(timezone.utc).isoformat()
-    })
-
-if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port, debug=False)
