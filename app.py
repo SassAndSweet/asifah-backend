@@ -684,12 +684,54 @@ def fetch_hrana_rss():
             print(f"[v2.1.0] HRANA: XML parse error: {e}")
             return []
         
-        # ... rest of parsing code ...
+        # Define namespaces
+        namespaces = {
+            'content': 'http://purl.org/rss/1.0/modules/content/',
+            'dc': 'http://purl.org/dc/elements/1.1/'
+        }
+        
+        # Parse RSS items
+        for item in root.findall('.//item')[:10]:  # Get latest 10 articles
+            try:
+                title = item.find('title').text if item.find('title') is not None else 'No title'
+                link = item.find('link').text if item.find('link') is not None else ''
+                pub_date = item.find('pubDate').text if item.find('pubDate') is not None else ''
+                
+                # HRANA uses content:encoded for full article content
+                content_encoded = item.find('content:encoded', namespaces)
+                if content_encoded is not None and content_encoded.text:
+                    content = content_encoded.text
+                else:
+                    # Fallback to description
+                    description = item.find('description')
+                    content = description.text if description is not None else ''
+                
+                # Strip HTML tags and get plain text
+                import re
+                plain_text = re.sub('<[^<]+?>', '', content)
+                plain_text = plain_text.strip()
+                
+                # Create preview (first 500 chars)
+                preview = plain_text[:500] + '...' if len(plain_text) > 500 else plain_text
+                
+                article = {
+                    'title': title,
+                    'url': link,
+                    'publishedAt': pub_date,
+                    'content': plain_text,  # Full content for pattern matching
+                    'description': preview,  # Preview for display
+                    'source': {'name': 'HRANA'}
+                }
+                articles.append(article)
+                
+            except Exception as e:
+                print(f"[v2.1.0] HRANA: Error parsing item: {e}")
+                continue
         
         print(f"[v2.1.0] HRANA: ✓ Fetched {len(articles)} articles")
         return articles
         
-    except requests.Timeout:  # ← This line needs to align with 'try:' above
+    except requests.Timeout:
         print(f"[v2.1.0] HRANA: Timeout after 20s")
         return []
     except requests.ConnectionError:
@@ -698,110 +740,6 @@ def fetch_hrana_rss():
     except Exception as e:
         print(f"[v2.1.0] HRANA: Error: {str(e)[:100]}")
         return []
-def extract_hrana_structured_data(articles):
-    """Extract structured protest statistics from HRANA articles
-    
-    HRANA publishes daily summary articles with structured statistics like:
-    - Confirmed deaths: 4,519
-    - Deaths under investigation: 9,049
-    - Seriously injured: 5,811
-    - Total arrests: 26,314
-    - Cities affected: 188
-    - Provinces: 31
-    
-    This function looks for these patterns and extracts the numbers.
-    """
-    
-    structured_data = {
-        'confirmed_deaths': 0,
-        'deaths_under_investigation': 0,
-        'seriously_injured': 0,
-        'total_arrests': 0,
-        'cities_affected': 0,
-        'provinces_affected': 0,
-        'protest_gatherings': 0,
-        'source_article': None,
-        'last_updated': None,
-        'is_hrana_verified': False
-    }
-    
-    # HRANA patterns for structured statistics
-    patterns = {
-        'confirmed_deaths': [
-            r'confirmed\s+deaths?\s*:?\s*(\d{1,3}(?:,\d{3})*)',
-            r'confirmed\s+fatalities\s*:?\s*(\d{1,3}(?:,\d{3})*)',
-            r'number\s+of\s+confirmed\s+deaths?\s*:?\s*(\d{1,3}(?:,\d{3})*)'
-        ],
-        'deaths_under_investigation': [
-            r'deaths?\s+under\s+(?:review|investigation)\s*:?\s*(\d{1,3}(?:,\d{3})*)',
-            r'fatalities\s+under\s+(?:review|investigation)\s*:?\s*(\d{1,3}(?:,\d{3})*)'
-        ],
-        'seriously_injured': [
-            r'seriously?\s+injured\s*:?\s*(\d{1,3}(?:,\d{3})*)',
-            r'severe\s+injuries\s*:?\s*(\d{1,3}(?:,\d{3})*)',
-            r'(?:at\s+least\s+)?(\d{1,3}(?:,\d{3})*)\s+people\s+have\s+sustained\s+serious\s+injuries'
-        ],
-        'total_arrests': [
-            r'total\s+arrests?\s*:?\s*(\d{1,3}(?:,\d{3})*)',
-            r'number\s+of\s+arrests?\s*:?\s*(\d{1,3}(?:,\d{3})*)',
-            r'total\s+number\s+of\s+arrests?\s*(?:has\s+risen\s+to)?\s*(\d{1,3}(?:,\d{3})*)'
-        ],
-        'cities_affected': [
-            r'(\d{1,3})\s+cities\s+(?:affected|involved)',
-            r'number\s+of\s+cities\s+involved.*?:\s*(\d{1,3})'
-        ],
-        'provinces_affected': [
-            r'(?:all\s+)?(\d{1,2})\s+provinces',
-            r'number\s+of\s+provinces\s+involved.*?:\s*(\d{1,2})'
-        ],
-        'protest_gatherings': [
-            r'(\d{1,3}(?:,\d{3})*)\s+protest\s+gatherings?',
-            r'number\s+of\s+recorded\s+(?:protest\s+)?gatherings?\s*:?\s*(\d{1,3}(?:,\d{3})*)'
-        ]
-    }
-    
-    # Look through HRANA articles for structured data
-    # Prioritize articles with "Day [Number]" in title (daily summaries)
-    hrana_articles = [a for a in articles if a.get('source', {}).get('name') == 'HRANA']
-    
-    for article in hrana_articles:
-        title = article.get('title', '').lower()
-        content = article.get('content', '').lower()
-        
-        # Check if this is a daily summary article
-        is_summary = 'day ' in title and ('protest' in title or 'aggregated data' in content)
-        
-        if is_summary or 'aggregated data' in content:
-            # This article likely has structured data
-            full_text = content
-            
-            for key, pattern_list in patterns.items():
-                for pattern in pattern_list:
-                    match = re.search(pattern, full_text, re.IGNORECASE)
-                    if match:
-                        number_str = match.group(1).replace(',', '')
-                        try:
-                            number = int(number_str)
-                            # Only update if we found a higher number
-                            if number > structured_data[key]:
-                                structured_data[key] = number
-                                structured_data['source_article'] = article.get('url')
-                                structured_data['last_updated'] = article.get('publishedAt')
-                                structured_data['is_hrana_verified'] = True
-                        except:
-                            pass
-    
-    if structured_data['is_hrana_verified']:
-        print(f"[v2.1.0] HRANA Structured Data Found:")
-        print(f"  Confirmed deaths: {structured_data['confirmed_deaths']}")
-        print(f"  Seriously injured: {structured_data['seriously_injured']}")
-        print(f"  Total arrests: {structured_data['total_arrests']}")
-        print(f"  Cities: {structured_data['cities_affected']}")
-        print(f"  Source: {structured_data['source_article']}")
-    else:
-        print(f"[v2.1.0] HRANA: No structured data found in recent articles")
-    
-    return structured_data
     
 # ========================================
 # API ENDPOINTS
