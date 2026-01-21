@@ -1127,12 +1127,20 @@ def scan_iran_protests():
         
         print(f"Total articles fetched: {len(all_articles)}")
         
-# Extract HRANA structured data (PRIORITY) - TEMPORARILY DISABLED
-# try:
-#     hrana_data = extract_hrana_structured_data(hrana_articles)
-# except Exception as e:
-#     print(f"HRANA structured data extraction error: {e}")
-hrana_data = {'is_hrana_verified': False}
+# Extract HRANA structured data (PRIORITY)
+try:
+    hrana_data = extract_hrana_structured_data(hrana_articles)
+except Exception as e:
+    print(f"HRANA structured data extraction error: {e}")
+    hrana_data = {
+        'is_hrana_verified': False,
+        'cities_affected': 0,
+        'provinces_affected': 0,
+        'confirmed_deaths': 0,
+        'deaths_under_investigation': 0,
+        'seriously_injured': 0,
+        'total_arrests': 0
+    }
         
         # Extract casualty data using regex (FALLBACK)
         try:
@@ -1170,11 +1178,9 @@ hrana_data = {'is_hrana_verified': False}
         
         articles_per_day = len(all_articles) / days if days > 0 else 0
         
-        # Simple city extraction (could be enhanced)
-        cities = [
-            {'name': 'Tehran', 'mentions': 10},
-            {'name': 'Isfahan', 'mentions': 5},
-            {'name': 'Shiraz', 'mentions': 3}
+# Extract cities from articles dynamically
+        cities_mentioned = extract_iranian_cities(all_articles)
+        cities = [{'name': city, 'mentions': i+1} for i, city in enumerate(cities_mentioned[:5])]
         ]
         
         # Calculate intensity
