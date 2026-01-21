@@ -1353,7 +1353,7 @@ def health():
     """Health check endpoint"""
     return jsonify({
         'status': 'healthy',
-'version': '2.2.0-HRANA',
+        'version': '2.2.0-HRANA',
         'timestamp': datetime.now(timezone.utc).isoformat()
     })
 
