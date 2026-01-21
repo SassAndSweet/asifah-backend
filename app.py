@@ -1,15 +1,12 @@
 """
-Asifah Analytics Backend v2.1.0
+Asifah Analytics Backend v2.2.0
 January 21, 2026
 
-Changes from v2.0.0:
-- FIXED: Scoring multiplier reduced from 2.5x to 0.8x
-- FIXED: Base score increased from 15 to 25 for better floor
-- FIXED: Target-specific baseline adjustments
-- FIXED: Caps now work properly (was hitting 99% ceiling instantly)
-- Hezbollah gets +10 bonus (active combat)
-- Iran gets +5 bonus (elevated tensions)
-- Houthis stay neutral (ongoing but distant)
+Changes from v2.1.0:
+- ADDED: HRANA (Human Rights Activists News Agency) RSS integration
+- ADDED: Structured data parsing for verified protest statistics
+- HRANA numbers take priority over regex-extracted numbers
+- New fields: deaths_under_investigation, hrana_verified, hrana_source
 """
 
 from flask import Flask, jsonify, request
