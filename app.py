@@ -1049,6 +1049,7 @@ def extract_casualty_data(articles):
     
     return casualties
 
+
 def extract_hrana_structured_data(articles):
     """Extract structured protest statistics from HRANA articles"""
     import re
@@ -1110,6 +1111,35 @@ def extract_hrana_structured_data(articles):
 
 
 def extract_iranian_cities(articles):
+    """Extract Iranian city names mentioned in articles"""
+    import re
+    
+    major_cities = [
+        'Tehran', 'Mashhad', 'Isfahan', 'Karaj', 'Shiraz', 'Tabriz',
+        'Qom', 'Ahvaz', 'Kermanshah', 'Urmia', 'Rasht', 'Kerman',
+        'Zahedan', 'Hamadan', 'Yazd', 'Ardabil', 'Bandar Abbas',
+        'Arak', 'Zanjan', 'Sanandaj', 'Qazvin', 'Gorgan', 'Sabzevar',
+        'Amol', 'Dezful', 'Abadan', 'Ilam', 'Marvdasht', 'Sirjan',
+        'Rafsanjan', 'Marivan', 'Talesh', 'Shahreza', 'Neyriz',
+        'Fasa', 'Darab', 'Kazerun', 'Nourabad', 'Pasargad', 'Abadeh',
+        'Kovar', 'Borujerd', 'Aligudarz', 'Borazjan', 'Birjand',
+        'Khaf', 'Neyshapur', 'Dorud', 'Nowshahr', 'Saveh', 'Jiroft',
+        'Bam', 'Yasuj', 'Nahavand', 'Semnan'
+    ]
+    
+    city_mentions = {}
+    
+    for article in articles:
+        content = (article.get('content', '') + ' ' + 
+                  article.get('title', '') + ' ' + 
+                  article.get('description', '')).lower()
+        
+        for city in major_cities:
+            if city.lower() in content:
+                city_mentions[city] = city_mentions.get(city, 0) + 1
+    
+    sorted_cities = sorted(city_mentions.items(), key=lambda x: x[1], reverse=True)
+    return [city for city, count in sorted_cities]
     """Extract Iranian city names mentioned in articles"""
     import re
     
