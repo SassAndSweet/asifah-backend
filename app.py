@@ -1049,6 +1049,97 @@ def extract_casualty_data(articles):
     
     return casualties
 
+def extract_hrana_structured_data(articles):
+    """Extract structured protest statistics from HRANA articles"""
+    import re
+    
+    structured_data = {
+        'confirmed_deaths': 0,
+        'deaths_under_investigation': 0,
+        'seriously_injured': 0,
+        'total_arrests': 0,
+        'cities_affected': 0,
+        'provinces_affected': 0,
+        'protest_gatherings': 0,
+        'source_article': None,
+        'last_updated': None,
+        'is_hrana_verified': False
+    }
+    
+    patterns = {
+        'confirmed_deaths': [
+            r'confirmed\s+deaths?\s*:?\s*(\d{1,3}(?:,\d{3})*)',
+            r'number\s+of\s+confirmed\s+deaths?\s*:?\s*(\d{1,3}(?:,\d{3})*)'
+        ],
+        'seriously_injured': [
+            r'seriously?\s+injured\s*:?\s*(\d{1,3}(?:,\d{3})*)',
+        ],
+        'total_arrests': [
+            r'total\s+arrests?\s*:?\s*(\d{1,3}(?:,\d{3})*)',
+        ],
+        'cities_affected': [
+            r'(\d{1,3})\s+cities\s+(?:affected|involved)',
+        ],
+        'provinces_affected': [
+            r'(\d{1,2})\s+provinces',
+        ],
+    }
+    
+    hrana_articles = [a for a in articles if a.get('source', {}).get('name') == 'HRANA']
+    
+    for article in hrana_articles:
+        content = (article.get('content', '') + ' ' + article.get('description', '')).lower()
+        
+        if 'day ' in article.get('title', '').lower():
+            for key, pattern_list in patterns.items():
+                for pattern in pattern_list:
+                    match = re.search(pattern, content, re.IGNORECASE)
+                    if match:
+                        number_str = match.group(1).replace(',', '')
+                        try:
+                            number = int(number_str)
+                            if number > structured_data[key]:
+                                structured_data[key] = number
+                                structured_data['source_article'] = article.get('url')
+                                structured_data['last_updated'] = article.get('publishedAt')
+                                structured_data['is_hrana_verified'] = True
+                        except:
+                            pass
+    
+    return structured_data
+
+
+def extract_iranian_cities(articles):
+    """Extract Iranian city names mentioned in articles"""
+    import re
+    
+    major_cities = [
+        'Tehran', 'Mashhad', 'Isfahan', 'Karaj', 'Shiraz', 'Tabriz',
+        'Qom', 'Ahvaz', 'Kermanshah', 'Urmia', 'Rasht', 'Kerman',
+        'Zahedan', 'Hamadan', 'Yazd', 'Ardabil', 'Bandar Abbas',
+        'Arak', 'Zanjan', 'Sanandaj', 'Qazvin', 'Gorgan', 'Sabzevar',
+        'Amol', 'Dezful', 'Abadan', 'Ilam', 'Marvdasht', 'Sirjan',
+        'Rafsanjan', 'Marivan', 'Talesh', 'Shahreza', 'Neyriz',
+        'Fasa', 'Darab', 'Kazerun', 'Nourabad', 'Pasargad', 'Abadeh',
+        'Kovar', 'Borujerd', 'Aligudarz', 'Borazjan', 'Birjand',
+        'Khaf', 'Neyshapur', 'Dorud', 'Nowshahr', 'Saveh', 'Jiroft',
+        'Bam', 'Yasuj', 'Nahavand', 'Semnan'
+    ]
+    
+    city_mentions = {}
+    
+    for article in articles:
+        content = (article.get('content', '') + ' ' + 
+                  article.get('title', '') + ' ' + 
+                  article.get('description', '')).lower()
+        
+        for city in major_cities:
+            if city.lower() in content:
+                city_mentions[city] = city_mentions.get(city, 0) + 1
+    
+    sorted_cities = sorted(city_mentions.items(), key=lambda x: x[1], reverse=True)
+    return [city for city, count in sorted_cities]
+
 # ========================================
 # IRAN PROTESTS ENDPOINT
 # ========================================
