@@ -1,12 +1,13 @@
 """
-Asifah Analytics Backend v2.2.0
-January 21, 2026
+"""
+Asifah Analytics Backend v2.3.0
+January 23, 2026
 
-Changes from v2.1.0:
-- ADDED: HRANA (Human Rights Activists News Agency) RSS integration
-- ADDED: Structured data parsing for verified protest statistics
-- HRANA numbers take priority over regex-extracted numbers
-- New fields: deaths_under_investigation, hrana_verified, hrana_source
+Changes from v2.2.0:
+- FIXED: 24h/48h time window support with adaptive scoring
+- FIXED: Momentum calculation for short windows (no more division by zero)
+- ADDED: Adaptive time decay based on query window
+- ADDED: Adaptive scoring multiplier (1.2x for 24h/48h, 0.8x for 7d, 0.6x for 30d)
 """
 
 from flask import Flask, jsonify, request
@@ -137,10 +138,16 @@ TARGET_BASELINES = {
 }
 
 # ========================================
-# v2.1 SCORING ALGORITHM - HELPER FUNCTIONS
+# v2.3 SCORING ALGORITHM - HELPER FUNCTIONS
 # ========================================
-def calculate_time_decay(published_date, current_time, half_life_days=2.0):
-    """Calculate exponential time decay for article relevance"""
+def calculate_time_decay(published_date, current_time, half_life_days=2.0, time_window_days=7):
+    """
+    Calculate exponential time decay for article relevance
+    
+    v2.3.0 Changes:
+    - Added time_window_days parameter to adjust decay for shorter windows
+    - For 24h/48h queries, we use shorter half-life to emphasize recency more
+    """
     try:
         if isinstance(published_date, str):
             pub_dt = datetime.fromisoformat(published_date.replace('Z', '+00:00'))
@@ -153,7 +160,15 @@ def calculate_time_decay(published_date, current_time, half_life_days=2.0):
         age_hours = (current_time - pub_dt).total_seconds() / 3600
         age_days = age_hours / 24
         
-        decay_factor = math.exp(-math.log(2) * age_days / half_life_days)
+        # ADAPTIVE HALF-LIFE: Shorter windows = shorter half-life (emphasize recency more)
+        if time_window_days <= 2:  # 24h or 48h
+            adjusted_half_life = 0.5  # Very short half-life for 1-2 day windows
+        elif time_window_days <= 7:  # 7 days
+            adjusted_half_life = 2.0  # Standard half-life
+        else:  # 30 days
+            adjusted_half_life = 3.0  # Longer half-life for 30-day window
+        
+        decay_factor = math.exp(-math.log(2) * age_days / adjusted_half_life)
         return decay_factor
     except Exception:
         return 0.1
@@ -203,6 +218,12 @@ def calculate_threat_probability(articles, days_analyzed=7, target='iran'):
     """
     Calculate sophisticated threat probability score
     
+    v2.3.0 Changes:
+    - FIXED: Momentum calculation for short time windows (24h/48h) - no more division by zero
+    - FIXED: Adaptive time decay based on query window (24h/48h/7d/30d)
+    - FIXED: Adaptive scoring multiplier based on data volume
+    - Better handling of all time windows with appropriate weighting
+    
     v2.1.0 Changes:
     - Reduced multiplier from 2.5x to 0.8x (CRITICAL FIX)
     - Increased base from 15 to 25
@@ -243,7 +264,8 @@ def calculate_threat_probability(articles, days_analyzed=7, target='iran'):
         source_name = article.get('source', {}).get('name', 'Unknown')
         published_date = article.get('publishedAt', '')
         
-        time_decay = calculate_time_decay(published_date, current_time)
+        # v2.3.0: ADAPTIVE TIME DECAY - Pass the time window to adjust decay rate
+        time_decay = calculate_time_decay(published_date, current_time, time_window_days=days_analyzed)
         source_weight = get_source_weight(source_name)
         severity_multiplier = detect_keyword_severity(full_text)
         is_deescalation = detect_deescalation(full_text)
@@ -260,7 +282,13 @@ def calculate_threat_probability(articles, days_analyzed=7, target='iran'):
             pub_dt = datetime.fromisoformat(published_date.replace('Z', '+00:00'))
             age_hours = (current_time - pub_dt).total_seconds() / 3600
             
-            if age_hours <= 48:
+            # v2.3.0: ADAPTIVE RECENT THRESHOLD - "recent" means different things for different windows
+            if days_analyzed <= 2:  # 24h or 48h
+                recent_threshold = days_analyzed * 12  # First half of window
+            else:
+                recent_threshold = 48  # Standard 48-hour threshold
+            
+            if age_hours <= recent_threshold:
                 recent_articles += 1
             else:
                 older_articles += 1
@@ -276,10 +304,21 @@ def calculate_threat_probability(articles, days_analyzed=7, target='iran'):
             'contribution': round(article_contribution, 2)
         })
     
-    # Calculate momentum
-    if recent_articles > 0 and older_articles > 0:
-        recent_density = recent_articles / 2.0
-        older_density = older_articles / (days_analyzed - 2)
+    # v2.3.0: FIXED MOMENTUM CALCULATION - Handle short time windows properly
+    momentum = 'stable'
+    momentum_multiplier = 1.0
+    
+    if days_analyzed >= 3 and recent_articles > 0 and older_articles > 0:
+        # Standard momentum calculation for 7-day and 30-day windows
+        if days_analyzed <= 2:
+            recent_window = days_analyzed / 2  # Half the total window
+            older_window = days_analyzed / 2
+        else:
+            recent_window = 2.0  # Fixed 48-hour recent window
+            older_window = days_analyzed - 2
+        
+        recent_density = recent_articles / recent_window
+        older_density = older_articles / older_window if older_window > 0 else 1
         
         momentum_ratio = recent_density / older_density if older_density > 0 else 2.0
         
@@ -292,32 +331,50 @@ def calculate_threat_probability(articles, days_analyzed=7, target='iran'):
         else:
             momentum = 'stable'
             momentum_multiplier = 1.0
-    else:
-        momentum = 'stable'
-        momentum_multiplier = 1.0
+    elif days_analyzed < 3:
+        # For 24h/48h windows, use article count as momentum indicator instead
+        if len(articles) >= 15:
+            momentum = 'high_activity'
+            momentum_multiplier = 1.15
+        elif len(articles) <= 5:
+            momentum = 'low_activity'
+            momentum_multiplier = 0.85
+        else:
+            momentum = 'stable'
+            momentum_multiplier = 1.0
     
     weighted_score *= momentum_multiplier
     
-    # v2.1.0: NEW SCORING FORMULA
+    # v2.3.0: ADAPTIVE SCORING FORMULA based on time window
     base_score = 25  # Increased from 15
     baseline_adjustment = TARGET_BASELINES.get(target, {}).get('base_adjustment', 0)
     
-    # CRITICAL FIX: Reduced multiplier from 2.5x to 0.8x
+    # v2.3.0: ADAPTIVE MULTIPLIER - Shorter windows get higher multiplier (less data = more weight per article)
+    if days_analyzed <= 2:  # 24h or 48h
+        score_multiplier = 1.2  # Higher multiplier for short windows
+    elif days_analyzed <= 7:  # 7 days
+        score_multiplier = 0.8  # Standard multiplier
+    else:  # 30 days
+        score_multiplier = 0.6  # Lower multiplier for long windows (more data = less weight per article)
+    
+    # CRITICAL FIX: Reduced multiplier from 2.5x to adaptive multiplier
     if weighted_score < 0:
         probability = max(10, base_score + baseline_adjustment + weighted_score)
     else:
-        probability = base_score + baseline_adjustment + (weighted_score * 0.8)  # Changed from 2.5
+        probability = base_score + baseline_adjustment + (weighted_score * score_multiplier)
     
     # Better capping logic
     probability = int(probability)
     probability = max(10, min(probability, 95))  # Floor at 10%, ceiling at 95%
     
-    print(f"[v2.1.0] {target} scoring:")
+    print(f"[v2.3.0] {target} scoring ({days_analyzed}d window):")
     print(f"  Base score: {base_score}")
     print(f"  Baseline adjustment: {baseline_adjustment}")
     print(f"  Total articles: {len(articles)}")
-    print(f"  Recent (48h): {recent_articles}")
+    print(f"  Recent articles: {recent_articles}")
+    print(f"  Older articles: {older_articles}")
     print(f"  Weighted score: {weighted_score:.2f}")
+    print(f"  Score multiplier: {score_multiplier}x (adaptive for {days_analyzed}d)")
     print(f"  Momentum: {momentum} ({momentum_multiplier}x)")
     print(f"  De-escalation articles: {deescalation_count}")
     print(f"  Final probability: {probability}%")
@@ -336,11 +393,14 @@ def calculate_threat_probability(articles, days_analyzed=7, target='iran'):
             'deescalation_count': deescalation_count,
             'time_decay_applied': True,
             'source_weighting_applied': True,
-            'formula': 'base(25) + adjustment + (weighted_score * 0.8)'
+            'time_window_days': days_analyzed,
+            'adaptive_multiplier': score_multiplier,
+            'formula': f'base(25) + adjustment + (weighted_score * {score_multiplier})'
         },
         'top_contributors': sorted(article_details, 
                                    key=lambda x: abs(x['contribution']), 
                                    reverse=True)[:15]
+    }
     }
 
 # ========================================
