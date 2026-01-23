@@ -1,5 +1,4 @@
 """
-"""
 Asifah Analytics Backend v2.3.0
 January 23, 2026
 
@@ -8,6 +7,15 @@ Changes from v2.2.0:
 - FIXED: Momentum calculation for short windows (no more division by zero)
 - ADDED: Adaptive time decay based on query window
 - ADDED: Adaptive scoring multiplier (1.2x for 24h/48h, 0.8x for 7d, 0.6x for 30d)
+
+Changes from v2.1.0:
+- ADDED: HRANA (Human Rights Activists News Agency) RSS integration
+- ADDED: Structured data parsing for verified protest statistics
+- HRANA numbers take priority over regex-extracted numbers
+- New fields: deaths_under_investigation, hrana_verified, hrana_source
+- ADDED: Polymarket data endpoint
+- ADDED: Flight cancellations endpoint  
+- ADDED: Rate limit status endpoint
 """
 
 from flask import Flask, jsonify, request
