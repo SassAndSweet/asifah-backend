@@ -793,7 +793,7 @@ def fetch_hrana_rss():
         return []
     except Exception as e:
         print(f"[v2.1.0] HRANA: Error: {str(e)[:200]}")
-        return []
+        return [] 
     
 # ========================================
 # API ENDPOINTS
