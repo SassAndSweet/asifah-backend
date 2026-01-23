@@ -390,7 +390,7 @@ def calculate_threat_probability(articles, days_analyzed=7, target='iran'):
     return {
         'probability': probability,
         'momentum': momentum,
-        'breakdown': {
+'breakdown': {
             'base_score': base_score,
             'baseline_adjustment': baseline_adjustment,
             'article_count': len(articles),
@@ -408,7 +408,6 @@ def calculate_threat_probability(articles, days_analyzed=7, target='iran'):
         'top_contributors': sorted(article_details, 
                                    key=lambda x: abs(x['contribution']), 
                                    reverse=True)[:15]
-    }
     }
 
 # ========================================
