@@ -16,12 +16,18 @@ Developer: RCGG
 
 Asifah Analytics Backend - Flask API Server
 Aggregates OSINT data from NewsAPI, GDELT, Reddit, Iran Wire, and HRANA
-Provides threat probability assessments for Iran, Hezbollah, and Houthis
+Provides threat probability assessments for Iran, Hezbollah, Houthis, and Syria
 Monitors Iranian protest activity with casualty tracking
 
 ================================================================================
 
 Version History:
+v2.4.0 (January 24, 2026):
+- ADDED: Syria monitoring as 4th target
+- ADDED: Post-Assad Syria keywords: ISIS, Al Qaeda, Kurds, HTS, SDF, Druze
+- ADDED: Syria baseline (+8) reflecting post-regime change volatility
+- ADDED: Syria-specific Reddit monitoring
+
 v2.3.1 (January 24, 2026):
 - FIXED: NoneType error in relevance filtering (HTTP 500 on Iran queries)
 - ADDED: Comprehensive null-safety checks for all article fields
@@ -160,12 +166,16 @@ DEESCALATION_KEYWORDS = [
 ]
 
 # ========================================
-# v2.3 TARGET-SPECIFIC BASELINES
+# v2.4 TARGET-SPECIFIC BASELINES
 # ========================================
 TARGET_BASELINES = {
     'hezbollah': {
         'base_adjustment': +10,  # Active combat happening NOW
         'description': 'Ongoing Israeli operations in Lebanon'
+    },
+    'syria': {
+        'base_adjustment': +8,   # Post-Assad chaos: ISIS, AQ, multiple factions active
+        'description': 'Post-regime change instability, multiple armed groups'
     },
     'iran': {
         'base_adjustment': +5,   # Elevated tensions but not active combat
@@ -476,11 +486,12 @@ def calculate_threat_probability(articles, days_analyzed=7, target='iran'):
 # ========================================
 # REDDIT CONFIGURATION
 # ========================================
-REDDIT_USER_AGENT = "AsifahAnalytics/2.3.1 (OSINT monitoring tool)"
+REDDIT_USER_AGENT = "AsifahAnalytics/2.4.0 (OSINT monitoring tool)"
 REDDIT_SUBREDDITS = {
     "hezbollah": ["ForbiddenBromance", "Israel", "Lebanon"],
     "iran": ["Iran", "Israel", "geopolitics"],
-    "houthis": ["Yemen", "Israel", "geopolitics"]
+    "houthis": ["Yemen", "Israel", "geopolitics"],
+    "syria": ["syriancivilwar", "Syria", "geopolitics"]
 }
 
 # ========================================
@@ -522,6 +533,25 @@ TARGET_KEYWORDS = {
     'houthis': {
         'keywords': ['houthi', 'houthis', 'yemen', 'yemeni', 'ansarallah', 'ansar allah', 'sanaa'],
         'reddit_keywords': ['Houthi', 'Yemen', 'Red Sea', 'shipping', 'missile', 'drone', 'Ansar Allah']
+    },
+    'syria': {
+        'keywords': [
+            'syria', 'syrian', 'damascus', 'aleppo', 'idlib', 'homs', 
+            'isis', 'isil', 'islamic state', 'daesh',
+            'al qaeda', 'al-qaeda', 'alqaeda', 'jabhat al-nusra', 'nusra',
+            'hts', 'hayat tahrir al-sham', 'tahrir al-sham',
+            'sdf', 'syrian democratic forces', 'kurdish forces', 'kurds', 'ypg', 'ypj',
+            'druze', 'druze community', 'golan', 'golan heights',
+            'assad regime', 'post-assad', 'syria transition'
+        ],
+        'reddit_keywords': [
+            'Syria', 'Syrian', 'Damascus', 'Aleppo', 'Idlib',
+            'ISIS', 'ISIL', 'Islamic State', 'Daesh',
+            'Al Qaeda', 'HTS', 'Nusra',
+            'SDF', 'Kurds', 'Kurdish', 'YPG',
+            'Druze', 'Golan', 'Israel', 'IDF',
+            'Assad', 'civil war', 'rebels'
+        ]
     }
 }
 
@@ -1075,7 +1105,7 @@ def api_threat(target):
             'escalation_keywords': ESCALATION_KEYWORDS,
             'target_keywords': TARGET_KEYWORDS[target]['keywords'],
             'cached': False,
-            'version': '2.3.1'
+            'version': '2.4.0'
         })
         
     except Exception as e:
@@ -1570,10 +1600,10 @@ def home():
     return jsonify({
         'status': 'Backend is running',
         'message': 'Asifah Analytics API',
-        'version': '2.3.1',
+        'version': '2.4.0',
         'copyright': '© 2025 RCGG. All Rights Reserved.',
         'endpoints': {
-            '/api/threat/<target>': 'Get threat assessment for iran, hezbollah, or houthis',
+            '/api/threat/<target>': 'Get threat assessment for iran, hezbollah, houthis, or syria',
             '/scan-iran-protests': 'Get Iran protests data with casualties',
             '/polymarket-data': 'Get Polymarket prediction data',
             '/rate-limit': 'Get rate limit status',
@@ -1587,7 +1617,7 @@ def health():
     """Health check endpoint"""
     return jsonify({
         'status': 'healthy',
-        'version': '2.3.1-HRANA',
+        'version': '2.4.0-Syria',
         'timestamp': datetime.now(timezone.utc).isoformat()
     })
 
