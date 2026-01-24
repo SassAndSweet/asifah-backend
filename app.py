@@ -1,59 +1,15 @@
 """
-Asifah Analytics Backend v2.3.1
-Middle East OSINT Threat Monitoring Platform
+Asifah Analytics Backend v2.5.0
+January 24, 2026
 
-Copyright (c) 2025 RCGG. All Rights Reserved.
-
-This software and associated documentation files (the "Software") are proprietary 
-and confidential. Unauthorized use, reproduction, distribution, modification, or 
-commercial exploitation is strictly prohibited without prior written consent.
-
-Development Timeline: December 2025 - January 2026
-Primary Use Case: Middle East regional threat analysis
-Developer: RCGG
-
-================================================================================
-
-Asifah Analytics Backend - Flask API Server
-Aggregates OSINT data from NewsAPI, GDELT, Reddit, Iran Wire, and HRANA
-Provides threat probability assessments for Iran, Hezbollah, Houthis, and Syria
-Monitors Iranian protest activity with casualty tracking
-
-================================================================================
-
-Version History:
-v2.4.0 (January 24, 2026):
-- ADDED: Syria monitoring as 4th target
-- ADDED: Post-Assad Syria keywords: ISIS, Al Qaeda, Kurds, HTS, SDF, Druze
-- ADDED: Syria baseline (+8) reflecting post-regime change volatility
-- ADDED: Syria-specific Reddit monitoring
-
-v2.3.1 (January 24, 2026):
-- FIXED: NoneType error in relevance filtering (HTTP 500 on Iran queries)
-- ADDED: Comprehensive null-safety checks for all article fields
-- IMPROVED: Robust handling of malformed data from external APIs
-- IMPROVED: Better error messages and logging
-
-v2.3.0 (January 24, 2026):
-- FIXED: Division by zero error for 24h/48h time windows
-- ADDED: Article relevance filtering (removes celebrity/fashion articles)
-- ADDED: Adaptive time decay based on query window
-- ADDED: Adaptive scoring multiplier (1.2x for 24h, 0.6x for 30d)
-- IMPROVED: Momentum calculation for short time windows
-
-v2.2.0 (January 21, 2026):
-- ADDED: HRANA (Human Rights Activists News Agency) RSS integration
-- ADDED: Structured data parsing for verified protest statistics
-- HRANA numbers take priority over regex-extracted numbers
-- New fields: deaths_under_investigation, hrana_verified, hrana_source
-
-v2.1.0 (January 2026):
-- ADDED: Reddit integration for social media monitoring
-- ADDED: Target-specific baseline adjustments
-- IMPROVED: Scoring algorithm with source weighting
-- IMPROVED: Time decay calculation
-
-For licensing inquiries or permission requests, contact the copyright holder.
+Changes from v2.4.0:
+- ADDED: Syria Conflicts Tracker endpoint (/api/syria-conflicts)
+- ADDED: Syria Direct RSS feed integration
+- ADDED: SOHR (Syrian Observatory for Human Rights) RSS feed
+- ADDED: Faction detection (HTS, SDF, ISIS, Druze, FSA, Al Qaeda)
+- ADDED: Geographic location tracking for clashes
+- ADDED: Displaced persons counting
+- Syria now has both threat monitoring AND conflict tracking
 """
 
 from flask import Flask, jsonify, request
@@ -83,7 +39,7 @@ rate_limit_data = {
 }
 
 # ========================================
-# v2.3 SCORING ALGORITHM - SOURCE WEIGHTS
+# SOURCE WEIGHTS
 # ========================================
 SOURCE_WEIGHTS = {
     'premium': {
@@ -97,7 +53,8 @@ SOURCE_WEIGHTS = {
     'regional': {
         'sources': [
             'Iran Wire', 'Al Jazeera', 'Haaretz', 'Times of Israel',
-            'Al Arabiya', 'The Jerusalem Post', 'Middle East Eye'
+            'Al Arabiya', 'The Jerusalem Post', 'Middle East Eye',
+            'Syria Direct', 'SOHR'
         ],
         'weight': 0.8
     },
@@ -119,7 +76,7 @@ SOURCE_WEIGHTS = {
 }
 
 # ========================================
-# v2.3 SCORING ALGORITHM - KEYWORD SEVERITY
+# KEYWORD SEVERITY
 # ========================================
 KEYWORD_SEVERITY = {
     'critical': {
@@ -155,7 +112,7 @@ KEYWORD_SEVERITY = {
 }
 
 # ========================================
-# v2.3 SCORING ALGORITHM - DE-ESCALATION
+# DE-ESCALATION
 # ========================================
 DEESCALATION_KEYWORDS = [
     'ceasefire', 'cease-fire', 'truce', 'peace talks', 'peace agreement',
@@ -166,29 +123,86 @@ DEESCALATION_KEYWORDS = [
 ]
 
 # ========================================
-# v2.4 TARGET-SPECIFIC BASELINES
+# TARGET-SPECIFIC BASELINES
 # ========================================
 TARGET_BASELINES = {
     'hezbollah': {
-        'base_adjustment': +10,  # Active combat happening NOW
+        'base_adjustment': +10,
         'description': 'Ongoing Israeli operations in Lebanon'
     },
-    'syria': {
-        'base_adjustment': +8,   # Post-Assad chaos: ISIS, AQ, multiple factions active
-        'description': 'Post-regime change instability, multiple armed groups'
-    },
     'iran': {
-        'base_adjustment': +5,   # Elevated tensions but not active combat
+        'base_adjustment': +5,
         'description': 'Elevated regional tensions'
     },
     'houthis': {
-        'base_adjustment': 0,    # Red Sea strikes continue but more distant
+        'base_adjustment': 0,
         'description': 'Red Sea shipping disruptions ongoing'
+    },
+    'syria': {
+        'base_adjustment': +8,
+        'description': 'Post-Assad volatility, opportunistic strikes'
     }
 }
 
 # ========================================
-# v2.3 SCORING ALGORITHM - HELPER FUNCTIONS
+# REDDIT CONFIGURATION
+# ========================================
+REDDIT_USER_AGENT = "AsifahAnalytics/2.5.0 (OSINT monitoring tool)"
+REDDIT_SUBREDDITS = {
+    "hezbollah": ["ForbiddenBromance", "Israel", "Lebanon"],
+    "iran": ["Iran", "Israel", "geopolitics"],
+    "houthis": ["Yemen", "Israel", "geopolitics"],
+    "syria": ["syriancivilwar", "Syria", "geopolitics"]
+}
+
+# ========================================
+# KEYWORDS & ESCALATION INDICATORS
+# ========================================
+ESCALATION_KEYWORDS = [
+    'strike', 'attack', 'bombing', 'airstrike', 'missile', 'rocket',
+    'military operation', 'offensive', 'retaliate', 'retaliation',
+    'response', 'counterattack', 'invasion', 'incursion',
+    'threatens', 'warned', 'vowed', 'promised to strike',
+    'will respond', 'severe response', 'consequences',
+    'mobilization', 'troops deployed', 'forces gathering',
+    'military buildup', 'reserves called up',
+    'killed', 'dead', 'casualties', 'wounded', 'injured',
+    'death toll', 'fatalities',
+    'flight cancellations', 'cancelled flights', 'suspend flights'
+]
+
+TARGET_KEYWORDS = {
+    'hezbollah': {
+        'keywords': ['hezbollah', 'hizbollah', 'hizballah', 'lebanon', 'lebanese', 'nasrallah'],
+        'reddit_keywords': ['Hezbollah', 'Lebanon', 'Israel', 'IDF', 'Lebanese', 'border', 'missile', 'strike']
+    },
+    'iran': {
+        'keywords': ['iran', 'iranian', 'tehran', 'irgc', 'revolutionary guard', 'khamenei'],
+        'reddit_keywords': ['Iran', 'Israel', 'IRGC', 'nuclear', 'Tehran', 'strike', 'sanctions']
+    },
+    'houthis': {
+        'keywords': ['houthi', 'houthis', 'yemen', 'yemeni', 'ansarallah', 'ansar allah', 'sanaa'],
+        'reddit_keywords': ['Houthi', 'Yemen', 'Red Sea', 'shipping', 'missile', 'drone', 'Ansar Allah']
+    },
+    'syria': {
+        'keywords': [
+            'syria', 'syrian', 'damascus', 'aleppo', 'idlib', 'homs',
+            'isis', 'isil', 'islamic state', 'daesh',
+            'al qaeda', 'al-qaeda', 'alqaeda', 'jabhat al-nusra', 'nusra',
+            'hts', 'hayat tahrir al-sham', 'tahrir al-sham',
+            'sdf', 'syrian democratic forces', 'kurdish forces', 'kurds', 'ypg', 'ypj',
+            'druze', 'druze community', 'golan', 'golan heights',
+            'assad regime', 'post-assad', 'syria transition'
+        ],
+        'reddit_keywords': [
+            'Syria', 'Damascus', 'ISIS', 'Al Qaeda', 'HTS', 'SDF', 
+            'Kurds', 'Druze', 'Golan', 'Israel', 'Assad', 'civil war'
+        ]
+    }
+}
+
+# ========================================
+# HELPER FUNCTIONS
 # ========================================
 def calculate_time_decay(published_date, current_time, half_life_days=2.0):
     """Calculate exponential time decay for article relevance"""
@@ -251,20 +265,7 @@ def detect_deescalation(text):
     return False
 
 def calculate_threat_probability(articles, days_analyzed=7, target='iran'):
-    """
-    Calculate sophisticated threat probability score
-    
-    v2.3.1 Changes:
-    - FIXED: NoneType error in relevance filtering
-    - ADDED: Comprehensive null-safety for all article fields
-    - IMPROVED: Robust handling of malformed data
-    
-    v2.3.0 Changes:
-    - FIXED: Division by zero for short time windows (24h/48h)
-    - ADDED: Adaptive time decay based on query window
-    - ADDED: Adaptive scoring multiplier
-    - ADDED: Article relevance filtering (removes celebrity/fashion noise)
-    """
+    """Calculate sophisticated threat probability score"""
     
     if not articles:
         baseline_adjustment = TARGET_BASELINES.get(target, {}).get('base_adjustment', 0)
@@ -275,29 +276,11 @@ def calculate_threat_probability(articles, days_analyzed=7, target='iran'):
                 'base_score': 25,
                 'baseline_adjustment': baseline_adjustment,
                 'article_count': 0,
-                'weighted_score': 0,
-                'time_decay_applied': True,
-                'deescalation_detected': False
+                'weighted_score': 0
             }
         }
     
     current_time = datetime.now(timezone.utc)
-    
-    # Adaptive time decay based on window size
-    if days_analyzed <= 2:
-        half_life_days = 0.5  # 12 hours for very short windows
-    elif days_analyzed <= 7:
-        half_life_days = 2.0  # Standard
-    else:
-        half_life_days = 3.0  # Slower decay for longer windows
-    
-    # Adaptive scoring multiplier (less data = higher weight per article)
-    if days_analyzed <= 2:
-        score_multiplier = 1.2
-    elif days_analyzed <= 7:
-        score_multiplier = 0.8
-    else:
-        score_multiplier = 0.6
     
     weighted_score = 0
     deescalation_count = 0
@@ -306,68 +289,16 @@ def calculate_threat_probability(articles, days_analyzed=7, target='iran'):
     
     article_details = []
     
-    # ========================================
-    # v2.3.1: PRE-FILTER INVALID ARTICLES
-    # ========================================
-    # Remove articles with missing critical fields before processing
-    valid_articles = []
     for article in articles:
-        # Must have at least a title and a source
-        if article.get('title') and article.get('source', {}).get('name'):
-            valid_articles.append(article)
-        else:
-            print(f"[v2.3.1] Skipped malformed article: missing title or source")
-    
-    print(f"[v2.3.1] Pre-filter: {len(valid_articles)}/{len(articles)} articles valid")
-    
-    # ========================================
-    # v2.3.1: FILTER OUT IRRELEVANT ARTICLES (NULL-SAFE)
-    # ========================================
-    # Remove articles that just happen to have target keywords but aren't about military/geopolitical topics
-    relevant_articles = []
-    for article in valid_articles:
-        # NULL-SAFE: Handle None values from data sources
-        title = (article.get('title') or '').lower()
-        description = (article.get('description') or '').lower()
-        content = (article.get('content') or '').lower()
+        title = article.get('title', '')
+        description = article.get('description', '')
+        content = article.get('content', '')
         full_text = f"{title} {description} {content}"
         
-        # Skip articles about celebrities, fashion, sports unless they mention military/conflict keywords
-        irrelevant_keywords = ['fashion', 'designer', 'celebrity', 'hairdresser', 'makeup', 'beauty', 
-                               'recipe', 'cooking', 'restaurant', 'sports', 'game', 'match', 'player',
-                               'music', 'album', 'concert', 'movie', 'film', 'actor', 'actress']
+        source_name = article.get('source', {}).get('name', 'Unknown')
+        published_date = article.get('publishedAt', '')
         
-        # Check if article is about irrelevant topics
-        is_irrelevant = False
-        for irrelevant in irrelevant_keywords:
-            if irrelevant in full_text:
-                # Unless it also has military/conflict context
-                relevant_context = ['military', 'strike', 'attack', 'missile', 'conflict', 'war', 
-                                   'tension', 'nuclear', 'weapon', 'defense', 'security']
-                has_relevant_context = any(ctx in full_text for ctx in relevant_context)
-                
-                if not has_relevant_context:
-                    is_irrelevant = True
-                    print(f"[v2.3.1] Filtered irrelevant: {title[:80]}")
-                    break
-        
-        if not is_irrelevant:
-            relevant_articles.append(article)
-    
-    print(f"[v2.3.1] Relevance filter: {len(relevant_articles)}/{len(valid_articles)} articles relevant")
-    
-    # Process only relevant articles
-    for article in relevant_articles:
-        # NULL-SAFE: Handle None values
-        title = article.get('title') or ''
-        description = article.get('description') or ''
-        content = article.get('content') or ''
-        full_text = f"{title} {description} {content}"
-        
-        source_name = article.get('source', {}).get('name') or 'Unknown'
-        published_date = article.get('publishedAt') or ''
-        
-        time_decay = calculate_time_decay(published_date, current_time, half_life_days)
+        time_decay = calculate_time_decay(published_date, current_time)
         source_weight = get_source_weight(source_name)
         severity_multiplier = detect_keyword_severity(full_text)
         is_deescalation = detect_deescalation(full_text)
@@ -400,24 +331,12 @@ def calculate_threat_probability(articles, days_analyzed=7, target='iran'):
             'contribution': round(article_contribution, 2)
         })
     
-    # ========================================
-    # v2.3.0: CALCULATE MOMENTUM (WITH DIVISION-BY-ZERO PROTECTION)
-    # ========================================
+    # Calculate momentum
     if recent_articles > 0 and older_articles > 0:
-        if days_analyzed >= 3:
-            # Standard momentum calculation (safe for days >= 3)
-            recent_density = recent_articles / 2.0
-            older_density = older_articles / (days_analyzed - 2)
-            momentum_ratio = recent_density / older_density if older_density > 0 else 2.0
-        else:
-            # For short windows (1-2 days), use article count comparison
-            # High recent activity = increasing momentum
-            if recent_articles > 5:
-                momentum_ratio = 1.6  # High activity
-            elif recent_articles > 2:
-                momentum_ratio = 1.0  # Moderate activity
-            else:
-                momentum_ratio = 0.7  # Low activity
+        recent_density = recent_articles / 2.0
+        older_density = older_articles / (days_analyzed - 2)
+        
+        momentum_ratio = recent_density / older_density if older_density > 0 else 2.0
         
         if momentum_ratio > 1.5:
             momentum = 'increasing'
@@ -434,29 +353,16 @@ def calculate_threat_probability(articles, days_analyzed=7, target='iran'):
     
     weighted_score *= momentum_multiplier
     
-    # v2.3.0: ADAPTIVE SCORING FORMULA
     base_score = 25
     baseline_adjustment = TARGET_BASELINES.get(target, {}).get('base_adjustment', 0)
     
     if weighted_score < 0:
         probability = max(10, base_score + baseline_adjustment + weighted_score)
     else:
-        probability = base_score + baseline_adjustment + (weighted_score * score_multiplier)
+        probability = base_score + baseline_adjustment + (weighted_score * 0.8)
     
-    # Better capping logic
     probability = int(probability)
-    probability = max(10, min(probability, 95))  # Floor at 10%, ceiling at 95%
-    
-    print(f"[v2.3.1] {target} scoring:")
-    print(f"  Base score: {base_score}")
-    print(f"  Baseline adjustment: {baseline_adjustment}")
-    print(f"  Total articles: {len(relevant_articles)} (from {len(articles)} fetched)")
-    print(f"  Recent (48h): {recent_articles}")
-    print(f"  Weighted score: {weighted_score:.2f}")
-    print(f"  Score multiplier: {score_multiplier}x")
-    print(f"  Momentum: {momentum} ({momentum_multiplier}x)")
-    print(f"  De-escalation articles: {deescalation_count}")
-    print(f"  Final probability: {probability}%")
+    probability = max(10, min(probability, 95))
     
     return {
         'probability': probability,
@@ -464,96 +370,21 @@ def calculate_threat_probability(articles, days_analyzed=7, target='iran'):
         'breakdown': {
             'base_score': base_score,
             'baseline_adjustment': baseline_adjustment,
-            'article_count': len(relevant_articles),
-            'articles_filtered': len(articles) - len(relevant_articles),
-            'articles_invalid': len(articles) - len(valid_articles),
+            'article_count': len(articles),
             'recent_articles_48h': recent_articles,
             'older_articles': older_articles,
             'weighted_score': round(weighted_score, 2),
             'momentum_multiplier': momentum_multiplier,
             'deescalation_count': deescalation_count,
+            'adaptive_multiplier': 0.8,
             'time_decay_applied': True,
             'source_weighting_applied': True,
-            'time_window_days': days_analyzed,
-            'adaptive_multiplier': score_multiplier,
-            'formula': f'base(25) + adjustment + (weighted_score * {score_multiplier})'
+            'formula': 'base(25) + adjustment + (weighted_score * 0.8)'
         },
         'top_contributors': sorted(article_details, 
                                    key=lambda x: abs(x['contribution']), 
                                    reverse=True)[:15]
     }
-
-# ========================================
-# REDDIT CONFIGURATION
-# ========================================
-REDDIT_USER_AGENT = "AsifahAnalytics/2.4.0 (OSINT monitoring tool)"
-REDDIT_SUBREDDITS = {
-    "hezbollah": ["ForbiddenBromance", "Israel", "Lebanon"],
-    "iran": ["Iran", "Israel", "geopolitics"],
-    "houthis": ["Yemen", "Israel", "geopolitics"],
-    "syria": ["syriancivilwar", "Syria", "geopolitics"]
-}
-
-# ========================================
-# KEYWORDS & ESCALATION INDICATORS
-# ========================================
-ESCALATION_KEYWORDS = [
-    'strike', 'attack', 'bombing', 'airstrike', 'missile', 'rocket',
-    'military operation', 'offensive', 'retaliate', 'retaliation',
-    'response', 'counterattack', 'invasion', 'incursion',
-    'threatens', 'warned', 'vowed', 'promised to strike',
-    'will respond', 'severe response', 'consequences',
-    'mobilization', 'troops deployed', 'forces gathering',
-    'military buildup', 'reserves called up',
-    'killed', 'dead', 'casualties', 'wounded', 'injured',
-    'death toll', 'fatalities',
-    'flight cancellations', 'cancelled flights', 'suspend flights', 'suspended flights',
-    'airline suspends', 'suspended service to', 'halted flights', 'halt flights',
-    'grounded flights', 'airspace closed', 'no-fly zone', 'travel advisory',
-    'do not travel', 'avoid all travel', 'reconsider travel',
-    'emirates suspend', 'emirates cancel', 'emirates halt',
-    'turkish airlines suspend', 'turkish airlines cancel', 'turkish airlines halt',
-    'lufthansa suspend', 'lufthansa cancel',
-    'air france suspend', 'air france cancel',
-    'british airways suspend', 'british airways cancel',
-    'qatar airways suspend', 'qatar airways cancel',
-    'etihad suspend', 'etihad cancel',
-    'klm suspend', 'klm cancel'
-]
-
-TARGET_KEYWORDS = {
-    'hezbollah': {
-        'keywords': ['hezbollah', 'hizbollah', 'hizballah', 'lebanon', 'lebanese', 'nasrallah'],
-        'reddit_keywords': ['Hezbollah', 'Lebanon', 'Israel', 'IDF', 'Lebanese', 'border', 'missile', 'strike']
-    },
-    'iran': {
-        'keywords': ['iran', 'iranian', 'tehran', 'irgc', 'revolutionary guard', 'khamenei'],
-        'reddit_keywords': ['Iran', 'Israel', 'IRGC', 'nuclear', 'Tehran', 'strike', 'sanctions']
-    },
-    'houthis': {
-        'keywords': ['houthi', 'houthis', 'yemen', 'yemeni', 'ansarallah', 'ansar allah', 'sanaa'],
-        'reddit_keywords': ['Houthi', 'Yemen', 'Red Sea', 'shipping', 'missile', 'drone', 'Ansar Allah']
-    },
-    'syria': {
-        'keywords': [
-            'syria', 'syrian', 'damascus', 'aleppo', 'idlib', 'homs', 
-            'isis', 'isil', 'islamic state', 'daesh',
-            'al qaeda', 'al-qaeda', 'alqaeda', 'jabhat al-nusra', 'nusra',
-            'hts', 'hayat tahrir al-sham', 'tahrir al-sham',
-            'sdf', 'syrian democratic forces', 'kurdish forces', 'kurds', 'ypg', 'ypj',
-            'druze', 'druze community', 'golan', 'golan heights',
-            'assad regime', 'post-assad', 'syria transition'
-        ],
-        'reddit_keywords': [
-            'Syria', 'Syrian', 'Damascus', 'Aleppo', 'Idlib',
-            'ISIS', 'ISIL', 'Islamic State', 'Daesh',
-            'Al Qaeda', 'HTS', 'Nusra',
-            'SDF', 'Kurds', 'Kurdish', 'YPG',
-            'Druze', 'Golan', 'Israel', 'IDF',
-            'Assad', 'civil war', 'rebels'
-        ]
-    }
-}
 
 # ========================================
 # RATE LIMITING
@@ -593,7 +424,6 @@ def get_rate_limit_info():
 def fetch_newsapi_articles(query, days=7):
     """Fetch articles from NewsAPI"""
     if not NEWSAPI_KEY:
-        print("[v2.3.1] NewsAPI: No API key configured")
         return []
     
     from_date = (datetime.now() - timedelta(days=days)).strftime('%Y-%m-%d')
@@ -615,13 +445,9 @@ def fetch_newsapi_articles(query, days=7):
             articles = data.get('articles', [])
             for article in articles:
                 article['language'] = 'en'
-            
-            print(f"[v2.3.1] NewsAPI: Fetched {len(articles)} articles")
             return articles
-        print(f"[v2.3.1] NewsAPI: HTTP {response.status_code}")
         return []
-    except Exception as e:
-        print(f"[v2.3.1] NewsAPI error: {e}")
+    except Exception:
         return []
 
 def fetch_gdelt_articles(query, days=7, language='eng'):
@@ -658,19 +484,14 @@ def fetch_gdelt_articles(query, days=7, language='eng'):
                     'language': lang_code
                 })
             
-            print(f"[v2.3.1] GDELT {language}: Fetched {len(standardized)} articles")
             return standardized
         
-        print(f"[v2.3.1] GDELT {language}: HTTP {response.status_code}")
         return []
-    except Exception as e:
-        print(f"[v2.3.1] GDELT {language} error: {e}")
+    except Exception:
         return []
 
 def fetch_reddit_posts(target, keywords, days=7):
     """Fetch Reddit posts from relevant subreddits"""
-    print(f"[v2.3.1] Reddit: Starting fetch for {target}")
-    
     subreddits = REDDIT_SUBREDDITS.get(target, [])
     if not subreddits:
         return []
@@ -699,9 +520,7 @@ def fetch_reddit_posts(target, keywords, days=7):
                 "limit": 25
             }
             
-            headers = {
-                "User-Agent": REDDIT_USER_AGENT
-            }
+            headers = {"User-Agent": REDDIT_USER_AGENT}
             
             time.sleep(2)
             
@@ -730,20 +549,15 @@ def fetch_reddit_posts(target, keywords, days=7):
                         }
                         
                         all_posts.append(normalized_post)
-                    
-                    print(f"[v2.3.1] Reddit r/{subreddit}: Found {len(posts)} posts")
             
-        except Exception as e:
-            print(f"[v2.3.1] Reddit r/{subreddit} error: {str(e)}")
+        except Exception:
             continue
     
-    print(f"[v2.3.1] Reddit: Total {len(all_posts)} posts")
     return all_posts
 
 def fetch_iranwire_rss():
     """Fetch articles from Iran Wire RSS feeds"""
     import xml.etree.ElementTree as ET
-    from datetime import datetime, timezone
     
     articles = []
     
@@ -754,24 +568,17 @@ def fetch_iranwire_rss():
     
     for lang, feed_url in feeds.items():
         try:
-            print(f"[v2.3.1] Iran Wire {lang}: Fetching RSS...")
             response = requests.get(feed_url, timeout=15)
             
             if response.status_code != 200:
-                print(f"[v2.3.1] Iran Wire {lang}: HTTP {response.status_code}")
                 continue
             
             try:
                 root = ET.fromstring(response.content)
-            except ET.ParseError as e:
-                print(f"[v2.3.1] Iran Wire {lang}: XML parse error: {e}")
+            except ET.ParseError:
                 continue
             
-            items_before = len(articles)
-            
             items = root.findall('.//item')
-            if not items:
-                items = root.findall('.//{http://www.w3.org/2005/Atom}entry')
             
             for item in items[:15]:
                 title_elem = item.find('title')
@@ -799,197 +606,462 @@ def fetch_iranwire_rss():
                         'language': lang
                     })
             
-            items_added = len(articles) - items_before
-            print(f"[v2.3.1] Iran Wire {lang}: ✓ Fetched {items_added} articles")
-            
-        except requests.Timeout:
-            print(f"[v2.3.1] Iran Wire {lang}: Timeout after 15s")
-        except requests.ConnectionError:
-            print(f"[v2.3.1] Iran Wire {lang}: Connection error")
-        except Exception as e:
-            print(f"[v2.3.1] Iran Wire {lang}: Error: {str(e)[:100]}")
+        except Exception:
+            continue
     
-    print(f"[v2.3.1] Iran Wire: Total {len(articles)} articles")
     return articles
 
 def fetch_hrana_rss():
-    """Fetch articles from HRANA RSS feed via RSS2JSON proxy"""
-    import re
+    """Fetch articles from HRANA RSS feed"""
+    import xml.etree.ElementTree as ET
     
     articles = []
-    
-    # Use RSS2JSON as a proxy to bypass 403 blocking from HRANA's servers
-    feed_url = 'https://api.rss2json.com/v1/api.json?rss_url=https%3A%2F%2Fen-hrana.org%2Ffeed%2F'
+    feed_url = 'https://en-hrana.org/feed/'
     
     try:
-        print(f"[v2.3.1] HRANA: Fetching via RSS2JSON proxy...")
-        
         headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Accept': 'application/rss+xml, application/xml, text/xml, */*'
         }
         
         response = requests.get(feed_url, headers=headers, timeout=20)
         
-        print(f"[v2.3.1] HRANA: Proxy response status = {response.status_code}")
-        
         if response.status_code != 200:
-            print(f"[v2.3.1] HRANA: Proxy HTTP {response.status_code}")
             return []
         
-        data = response.json()
-        
-        if data.get('status') != 'ok':
-            print(f"[v2.3.1] HRANA: RSS2JSON error - {data.get('message', 'unknown')}")
+        try:
+            root = ET.fromstring(response.content)
+        except ET.ParseError:
             return []
         
-        # Parse JSON response from RSS2JSON
-        items = data.get('items', [])
-        print(f"[v2.3.1] HRANA: RSS2JSON returned {len(items)} items")
+        items = root.findall('.//item')
         
-        for item in items[:10]:  # Get latest 10 articles
-            try:
-                # Extract content - RSS2JSON provides both description and full content
-                content = item.get('content', '') or item.get('description', '')
+        for item in items[:15]:
+            title_elem = item.find('title')
+            link_elem = item.find('link')
+            pubDate_elem = item.find('pubDate')
+            description_elem = item.find('description')
+            content_elem = item.find('{http://purl.org/rss/1.0/modules/content/}encoded')
+            
+            if title_elem is not None and link_elem is not None:
+                pub_date = pubDate_elem.text if pubDate_elem is not None else datetime.now(timezone.utc).isoformat()
                 
-                # Strip HTML tags and get plain text
-                plain_text = re.sub('<[^<]+?>', '', content)
-                plain_text = plain_text.strip()
+                description = ''
+                if description_elem is not None and description_elem.text:
+                    description = description_elem.text[:500]
+                elif content_elem is not None and content_elem.text:
+                    description = content_elem.text[:500]
                 
-                # Create preview (first 500 chars)
-                preview = plain_text[:500] + '...' if len(plain_text) > 500 else plain_text
-                
-                article = {
-                    'title': item.get('title', 'No title'),
-                    'url': item.get('link', ''),
-                    'publishedAt': item.get('pubDate', ''),
-                    'content': plain_text,  # Full content for pattern matching
-                    'description': preview,  # Preview for display
-                    'source': {'name': 'HRANA'}
-                }
-                articles.append(article)
-                
-            except Exception as e:
-                print(f"[v2.3.1] HRANA: Error parsing item: {e}")
-                continue
+                articles.append({
+                    'title': title_elem.text or '',
+                    'description': description,
+                    'url': link_elem.text or '',
+                    'publishedAt': pub_date,
+                    'source': {'name': 'HRANA'},
+                    'content': description,
+                    'language': 'en'
+                })
         
-        print(f"[v2.3.1] HRANA: ✓ Fetched {len(articles)} articles via RSS2JSON")
         return articles
         
-    except requests.Timeout:
-        print(f"[v2.3.1] HRANA: Timeout after 20s")
-        return []
-    except requests.ConnectionError as e:
-        print(f"[v2.3.1] HRANA: Connection error - {e}")
-        return []
-    except Exception as e:
-        print(f"[v2.3.1] HRANA: Error: {str(e)[:200]}")
+    except Exception:
         return []
 
+# ========================================
+# SYRIA-SPECIFIC RSS FEEDS
+# ========================================
+def fetch_syria_direct_rss():
+    """Fetch articles from Syria Direct RSS feed"""
+    import xml.etree.ElementTree as ET
+    
+    articles = []
+    feed_url = 'https://syriadirect.org/feed/'
+    
+    try:
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Accept': 'application/rss+xml, application/xml, text/xml, */*'
+        }
+        
+        response = requests.get(feed_url, headers=headers, timeout=20)
+        
+        if response.status_code != 200:
+            return []
+        
+        try:
+            root = ET.fromstring(response.content)
+        except ET.ParseError:
+            return []
+        
+        items = root.findall('.//item')
+        
+        for item in items[:20]:
+            title_elem = item.find('title')
+            link_elem = item.find('link')
+            pubDate_elem = item.find('pubDate')
+            description_elem = item.find('description')
+            content_elem = item.find('{http://purl.org/rss/1.0/modules/content/}encoded')
+            
+            if title_elem is not None and link_elem is not None:
+                pub_date = pubDate_elem.text if pubDate_elem is not None else datetime.now(timezone.utc).isoformat()
+                
+                description = ''
+                if description_elem is not None and description_elem.text:
+                    description = description_elem.text[:500]
+                elif content_elem is not None and content_elem.text:
+                    description = content_elem.text[:500]
+                
+                articles.append({
+                    'title': title_elem.text or '',
+                    'description': description,
+                    'url': link_elem.text or '',
+                    'publishedAt': pub_date,
+                    'source': {'name': 'Syria Direct'},
+                    'content': description,
+                    'language': 'en'
+                })
+        
+        return articles
+        
+    except Exception:
+        return []
+
+def fetch_sohr_rss():
+    """Fetch articles from SOHR (Syrian Observatory for Human Rights) RSS feed"""
+    import xml.etree.ElementTree as ET
+    
+    articles = []
+    feed_url = 'https://www.syriahr.com/en/feed/'
+    
+    try:
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Accept': 'application/rss+xml, application/xml, text/xml, */*'
+        }
+        
+        response = requests.get(feed_url, headers=headers, timeout=20)
+        
+        if response.status_code != 200:
+            return []
+        
+        try:
+            root = ET.fromstring(response.content)
+        except ET.ParseError:
+            return []
+        
+        items = root.findall('.//item')
+        
+        for item in items[:20]:
+            title_elem = item.find('title')
+            link_elem = item.find('link')
+            pubDate_elem = item.find('pubDate')
+            description_elem = item.find('description')
+            content_elem = item.find('{http://purl.org/rss/1.0/modules/content/}encoded')
+            
+            if title_elem is not None and link_elem is not None:
+                pub_date = pubDate_elem.text if pubDate_elem is not None else datetime.now(timezone.utc).isoformat()
+                
+                description = ''
+                if description_elem is not None and description_elem.text:
+                    description = description_elem.text[:500]
+                elif content_elem is not None and content_elem.text:
+                    description = content_elem.text[:500]
+                
+                articles.append({
+                    'title': title_elem.text or '',
+                    'description': description,
+                    'url': link_elem.text or '',
+                    'publishedAt': pub_date,
+                    'source': {'name': 'SOHR'},
+                    'content': description,
+                    'language': 'en'
+                })
+        
+        return articles
+        
+    except Exception:
+        return []
+
+# ========================================
+# SYRIA CONFLICT DATA EXTRACTION
+# ========================================
+def extract_syria_conflict_data(articles):
+    """Extract conflict data from Syria articles"""
+    
+    conflict_data = {
+        'deaths': 0,
+        'displaced': 0,
+        'factional_clashes': 0,
+        'active_factions': set(),
+        'clash_locations': {},
+        'sources': set(),
+        'details': []
+    }
+    
+    # Faction keywords
+    FACTIONS = {
+        'HTS': ['hts', 'hayat tahrir al-sham', 'tahrir al-sham'],
+        'SDF': ['sdf', 'syrian democratic forces', 'kurdish forces'],
+        'ISIS': ['isis', 'isil', 'islamic state', 'daesh'],
+        'Druze': ['druze'],
+        'FSA': ['free syrian army', 'fsa', 'turkey-backed'],
+        'Al Qaeda': ['al qaeda', 'al-qaeda', 'alqaeda']
+    }
+    
+    # Syrian cities
+    CITIES = [
+        'damascus', 'aleppo', 'idlib', 'homs', 'deir ez-zor', 'deir ezzor',
+        'raqqa', 'daraa', 'sweida', 'latakia', 'tartus', 'hama', 'qamishli'
+    ]
+    
+    # Casualty patterns
+    death_patterns = [
+        r'(\d+)\s+(?:people\s+)?(?:were\s+)?killed',
+        r'killed\s+(\d+)',
+        r'(\d+)\s+dead',
+        r'death\s+toll\s+(?:of\s+)?(\d+)',
+        r'(\d+)\s+(?:civilians?\s+)?died'
+    ]
+    
+    displaced_patterns = [
+        r'(\d+(?:,\d{3})*)\s+(?:people\s+)?displaced',
+        r'(\d+(?:,\d{3})*)\s+(?:people\s+)?fled',
+        r'(\d+(?:,\d{3})*)\s+refugees?',
+        r'displaced\s+(\d+(?:,\d{3})*)'
+    ]
+    
+    clash_patterns = [
+        r'clash(?:es)?',
+        r'fighting',
+        r'battle',
+        r'combat',
+        r'attack',
+        r'offensive',
+        r'strike'
+    ]
+    
+    for article in articles:
+        title = article.get('title', '').lower()
+        description = article.get('description', '').lower()
+        content = article.get('content', '').lower()
+        text = f"{title} {description} {content}"
+        
+        source = article.get('source', {}).get('name', 'Unknown')
+        url = article.get('url', '')
+        
+        # Extract deaths
+        for pattern in death_patterns:
+            matches = re.findall(pattern, text, re.IGNORECASE)
+            for match in matches:
+                try:
+                    num = int(match.replace(',', ''))
+                    if num > conflict_data['deaths']:
+                        conflict_data['deaths'] = num
+                        conflict_data['sources'].add(source)
+                        conflict_data['details'].append({
+                            'type': 'deaths',
+                            'count': num,
+                            'source': source,
+                            'url': url
+                        })
+                except:
+                    pass
+        
+        # Extract displaced
+        for pattern in displaced_patterns:
+            matches = re.findall(pattern, text, re.IGNORECASE)
+            for match in matches:
+                try:
+                    num = int(match.replace(',', ''))
+                    if num > conflict_data['displaced']:
+                        conflict_data['displaced'] = num
+                        conflict_data['sources'].add(source)
+                        conflict_data['details'].append({
+                            'type': 'displaced',
+                            'count': num,
+                            'source': source,
+                            'url': url
+                        })
+                except:
+                    pass
+        
+        # Count clashes
+        for pattern in clash_patterns:
+            if re.search(pattern, text, re.IGNORECASE):
+                conflict_data['factional_clashes'] += 1
+                break
+        
+        # Detect factions
+        for faction_name, keywords in FACTIONS.items():
+            for keyword in keywords:
+                if keyword in text:
+                    conflict_data['active_factions'].add(faction_name)
+                    break
+        
+        # Detect locations
+        for city in CITIES:
+            if city in text:
+                if city not in conflict_data['clash_locations']:
+                    conflict_data['clash_locations'][city] = 0
+                conflict_data['clash_locations'][city] += 1
+    
+    # Convert sets to lists
+    conflict_data['active_factions'] = list(conflict_data['active_factions'])
+    conflict_data['sources'] = list(conflict_data['sources'])
+    
+    # Sort locations by frequency
+    conflict_data['clash_locations'] = dict(
+        sorted(conflict_data['clash_locations'].items(), 
+               key=lambda x: x[1], 
+               reverse=True)[:10]
+    )
+    
+    return conflict_data
+
+# ========================================
+# IRAN PROTESTS DATA EXTRACTION
+# ========================================
+def parse_number_word(num_str):
+    """Convert number words to integers"""
+    num_str = num_str.lower().strip()
+    
+    try:
+        return int(num_str)
+    except:
+        pass
+    
+    if ',' in num_str:
+        try:
+            return int(num_str.replace(',', ''))
+        except:
+            pass
+    
+    if 'hundred' in num_str or 'hundreds' in num_str:
+        if any(word in num_str for word in ['several', 'few', 'many']):
+            return 200
+        return 100
+    elif 'thousand' in num_str or 'thousands' in num_str:
+        match = re.search(r'(\d+)\s*thousand', num_str)
+        if match:
+            return int(match.group(1)) * 1000
+        return 1000
+    elif 'dozen' in num_str or 'dozens' in num_str:
+        if 'several' in num_str:
+            return 24
+        return 12
+    
+    return 0
+
+CASUALTY_KEYWORDS = {
+    'deaths': [
+        'killed', 'dead', 'died', 'death toll', 'fatalities', 'deaths',
+        'shot dead', 'gunned down', 'killed by', 'killed in'
+    ],
+    'injuries': [
+        'injured', 'wounded', 'hurt', 'injuries', 'casualties',
+        'hospitalized', 'critical condition', 'serious injuries'
+    ],
+    'arrests': [
+        'arrested', 'detained', 'detention', 'arrest', 'arrests',
+        'taken into custody', 'custody', 'apprehended'
+    ]
+}
+
+def extract_casualty_data(articles):
+    """Extract verified casualty numbers from articles"""
+    casualties = {
+        'deaths': 0,
+        'injuries': 0,
+        'arrests': 0,
+        'sources': set(),
+        'details': [],
+        'articles_without_numbers': []
+    }
+    
+    number_patterns = [
+        r'(\d+(?:,\d{3})*)\s+(?:people\s+)?.{0,20}?',
+        r'(?:more than|over|at least)\s+(\d+(?:,\d{3})*)',
+    ]
+    
+    for article in articles:
+        title = article.get('title') or ''
+        description = article.get('description') or ''
+        content = article.get('content') or ''
+        text = (title + ' ' + description + ' ' + content).lower()
+        
+        source = article.get('source', {}).get('name', 'Unknown')
+        url = article.get('url', '')
+        
+        for casualty_type in ['deaths', 'injuries', 'arrests']:
+            for keyword in CASUALTY_KEYWORDS[casualty_type]:
+                if keyword in text:
+                    casualties['sources'].add(source)
+                    
+                    for pattern in number_patterns:
+                        match = re.search(pattern + re.escape(keyword), text, re.IGNORECASE)
+                        if match:
+                            num_str = match.group(1).replace(',', '')
+                            try:
+                                num = int(num_str)
+                                if num > casualties[casualty_type]:
+                                    casualties[casualty_type] = num
+                                    casualties['details'].append({
+                                        'type': casualty_type,
+                                        'count': num,
+                                        'source': source,
+                                        'url': url
+                                    })
+                            except:
+                                pass
+                            break
+                    break
+    
+    casualties['sources'] = list(casualties['sources'])
+    return casualties
+
 def extract_hrana_structured_data(articles):
-    """Extract structured protest statistics from HRANA articles
-    
-    HRANA publishes daily summary articles with structured statistics like:
-    - Confirmed deaths: 4,519
-    - Deaths under investigation: 9,049
-    - Seriously injured: 5,811
-    - Total arrests: 26,314
-    - Cities affected: 188
-    - Provinces: 31
-    
-    This function looks for these patterns and extracts the numbers.
-    """
+    """Extract structured protest statistics from HRANA articles"""
     
     structured_data = {
         'confirmed_deaths': 0,
         'deaths_under_investigation': 0,
         'seriously_injured': 0,
         'total_arrests': 0,
-        'cities_affected': 0,
-        'provinces_affected': 0,
-        'protest_gatherings': 0,
-        'source_article': None,
-        'last_updated': None,
         'is_hrana_verified': False
     }
     
-    # HRANA patterns for structured statistics
     patterns = {
         'confirmed_deaths': [
             r'confirmed\s+deaths?\s*:?\s*(\d{1,3}(?:,\d{3})*)',
-            r'confirmed\s+fatalities\s*:?\s*(\d{1,3}(?:,\d{3})*)',
-            r'number\s+of\s+confirmed\s+deaths?\s*:?\s*(\d{1,3}(?:,\d{3})*)'
-        ],
-        'deaths_under_investigation': [
-            r'deaths?\s+under\s+(?:review|investigation)\s*:?\s*(\d{1,3}(?:,\d{3})*)',
-            r'fatalities\s+under\s+(?:review|investigation)\s*:?\s*(\d{1,3}(?:,\d{3})*)'
         ],
         'seriously_injured': [
             r'seriously?\s+injured\s*:?\s*(\d{1,3}(?:,\d{3})*)',
-            r'severe\s+injuries\s*:?\s*(\d{1,3}(?:,\d{3})*)',
-            r'(?:at\s+least\s+)?(\d{1,3}(?:,\d{3})*)\s+people\s+have\s+sustained\s+serious\s+injuries'
         ],
         'total_arrests': [
             r'total\s+arrests?\s*:?\s*(\d{1,3}(?:,\d{3})*)',
-            r'number\s+of\s+arrests?\s*:?\s*(\d{1,3}(?:,\d{3})*)',
-            r'total\s+number\s+of\s+arrests?\s*(?:has\s+risen\s+to)?\s*(\d{1,3}(?:,\d{3})*)'
-        ],
-        'cities_affected': [
-            r'(\d{1,3})\s+cities\s+(?:affected|involved)',
-            r'number\s+of\s+cities\s+involved.*?:\s*(\d{1,3})'
-        ],
-        'provinces_affected': [
-            r'(?:all\s+)?(\d{1,2})\s+provinces',
-            r'number\s+of\s+provinces\s+involved.*?:\s*(\d{1,2})'
-        ],
-        'protest_gatherings': [
-            r'(\d{1,3}(?:,\d{3})*)\s+protest\s+gatherings?',
-            r'number\s+of\s+recorded\s+(?:protest\s+)?gatherings?\s*:?\s*(\d{1,3}(?:,\d{3})*)'
         ]
     }
     
-    # Look through HRANA articles for structured data
-    # Prioritize articles with "Day [Number]" in title (daily summaries)
     hrana_articles = [a for a in articles if a.get('source', {}).get('name') == 'HRANA']
     
     for article in hrana_articles:
-        title = (article.get('title') or '').lower()
-        content = (article.get('content') or '').lower()
+        content = article.get('content', '').lower()
         
-        # Check if this is a daily summary article
-        is_summary = 'day ' in title and ('protest' in title or 'aggregated data' in content)
-        
-        if is_summary or 'aggregated data' in content:
-            # This article likely has structured data
-            full_text = content
-            
-            for key, pattern_list in patterns.items():
-                for pattern in pattern_list:
-                    match = re.search(pattern, full_text, re.IGNORECASE)
-                    if match:
-                        number_str = match.group(1).replace(',', '')
-                        try:
-                            number = int(number_str)
-                            # Only update if we found a higher number
-                            if number > structured_data[key]:
-                                structured_data[key] = number
-                                structured_data['source_article'] = article.get('url')
-                                structured_data['last_updated'] = article.get('publishedAt')
-                                structured_data['is_hrana_verified'] = True
-                        except:
-                            pass
-    
-    if structured_data['is_hrana_verified']:
-        print(f"[v2.3.1] HRANA Structured Data Found:")
-        print(f"  Confirmed deaths: {structured_data['confirmed_deaths']}")
-        print(f"  Seriously injured: {structured_data['seriously_injured']}")
-        print(f"  Total arrests: {structured_data['total_arrests']}")
-        print(f"  Cities: {structured_data['cities_affected']}")
-        print(f"  Source: {structured_data['source_article']}")
-    else:
-        print(f"[v2.3.1] HRANA: No structured data found in recent articles")
+        for key, pattern_list in patterns.items():
+            for pattern in pattern_list:
+                match = re.search(pattern, content, re.IGNORECASE)
+                if match:
+                    number_str = match.group(1).replace(',', '')
+                    try:
+                        number = int(number_str)
+                        if number > structured_data[key]:
+                            structured_data[key] = number
+                            structured_data['is_hrana_verified'] = True
+                    except:
+                        pass
     
     return structured_data
-    
+
 # ========================================
 # API ENDPOINTS
 # ========================================
@@ -1002,17 +1074,15 @@ def api_threat(target):
         if not check_rate_limit():
             return jsonify({
                 'success': False,
-                'error': 'Hourly limit of 10 requests reached. Try again in 54 minutes.',
+                'error': 'Rate limit reached',
                 'probability': 0,
-                'timeline': 'Rate limited',
-                'confidence': 'Low',
                 'rate_limited': True
             }), 200
         
         if target not in TARGET_KEYWORDS:
             return jsonify({
                 'success': False,
-                'error': f"Invalid target. Must be one of: {', '.join(TARGET_KEYWORDS.keys())}"
+                'error': f"Invalid target"
             }), 400
         
         query = ' OR '.join(TARGET_KEYWORDS[target]['keywords'])
@@ -1041,21 +1111,13 @@ def api_threat(target):
         breakdown = scoring_result['breakdown']
         
         if probability < 30:
-            timeline = "180+ Days (Low priority)"
+            timeline = "180+ Days"
         elif probability < 50:
             timeline = "91-180 Days"
         elif probability < 70:
             timeline = "31-90 Days"
         else:
-            timeline = "0-30 Days (Elevated threat)"
-        
-        if momentum == 'increasing' and probability > 50:
-            timeline = "0-30 Days (Elevated threat)"
-        elif momentum == 'decreasing' and probability < 70:
-            if "31-90" in timeline:
-                timeline = "91-180 Days"
-            elif "91-180" in timeline:
-                timeline = "180+ Days (Low priority)"
+            timeline = "0-30 Days"
         
         unique_sources = len(set(a.get('source', {}).get('name', 'Unknown') for a in all_articles))
         if len(all_articles) >= 20 and unique_sources >= 8:
@@ -1105,519 +1167,159 @@ def api_threat(target):
             'escalation_keywords': ESCALATION_KEYWORDS,
             'target_keywords': TARGET_KEYWORDS[target]['keywords'],
             'cached': False,
-            'version': '2.4.0'
+            'version': '2.5.0'
         })
         
     except Exception as e:
-        print(f"Error in /api/threat/{target}: {e}")
-        import traceback
-        traceback.print_exc()
         return jsonify({
             'success': False,
             'error': str(e),
-            'probability': 0,
-            'timeline': 'Unknown',
-            'confidence': 'Low'
+            'probability': 0
         }), 500
 
-# ========================================
-# CASUALTY TRACKING
-# ========================================
-CASUALTY_KEYWORDS = {
-    'deaths': [
-        'killed', 'dead', 'died', 'death toll', 'fatalities', 'deaths',
-        'shot dead', 'gunned down', 'killed by', 'killed in',
-        'people have died', 'people have been killed', 'protesters killed',
-        'کشته', 'مرگ', 'قتل'
-    ],
-    'injuries': [
-        'injured', 'wounded', 'hurt', 'injuries', 'casualties',
-        'hospitalized', 'critical condition', 'serious injuries',
-        'overwhelmed by injured', 'injured protesters', 'gunshot wounds',
-        'مجروح', 'زخمی', 'آسیب'
-    ],
-    'arrests': [
-        'arrested', 'detained', 'detention', 'arrest', 'arrests',
-        'taken into custody', 'custody', 'apprehended', 'rounded up',
-        'imprisoned', 'people have been arrested',
-        'بازداشت', 'دستگیر', 'زندان'
-    ]
-}
-
-def parse_number_word(num_str):
-    """Convert number words to integers"""
-    num_str = num_str.lower().strip()
-    
-    try:
-        return int(num_str)
-    except:
-        pass
-    
-    if ',' in num_str:
-        try:
-            return int(num_str.replace(',', ''))
-        except:
-            pass
-    
-    if 'hundred' in num_str or 'hundreds' in num_str:
-        if any(word in num_str for word in ['several', 'few', 'many']):
-            return 200
-        if 'over' in num_str or 'more than' in num_str:
-            return 150
-        return 100
-    
-    elif 'thousand' in num_str or 'thousands' in num_str:
-        match = re.search(r'(\d+)\s*thousand', num_str)
-        if match:
-            return int(match.group(1)) * 1000
-        
-        if any(word in num_str for word in ['several', 'few', 'many']):
-            return 2000
-        if 'over' in num_str or 'more than' in num_str:
-            return 1500
-        return 1000
-    
-    elif 'dozen' in num_str or 'dozens' in num_str:
-        if 'several' in num_str:
-            return 24
-        return 12
-    
-    elif num_str == 'many':
-        return 50
-    
-    return 0
-
-def extract_casualty_data(articles):
-    """Extract verified casualty numbers from articles"""
-    casualties = {
-        'deaths': 0,
-        'injuries': 0,
-        'arrests': 0,
-        'sources': set(),
-        'details': [],
-        'articles_without_numbers': []
-    }
-    
-    number_patterns = [
-        r'(\d+(?:,\d{3})*)\s+(?:people\s+)?.{0,20}?',
-        r'(?:more than|over|at least)\s+(\d+(?:,\d{3})*)\s+(?:people\s+)?.{0,30}?',
-        r'(\d+(?:,\d{3})*)\s+people\s+(?:have been|had been|have)\s+.{0,20}?',
-        r'(?:\d+)\s*(?:to|-)\s*(\d+(?:,\d{3})*)\s+.{0,20}?',
-        r'(?:roughly|approximately|around)\s+(\d+(?:,\d{3})*)\s+.{0,20}?',
-        r'(hundreds?|thousands?|dozens?|several\s+(?:hundred|thousand|dozen)|many)\s+(?:people\s+)?.{0,20}?',
-        r'(\d+)\s+thousand\s*.{0,20}?',
-    ]
-    
-    for article in articles:
-        title = article.get('title') or ''
-        description = article.get('description') or ''
-        content = article.get('content') or ''
-        text = (title + ' ' + description + ' ' + content).lower()
-        
-        source = article.get('source', {}).get('name', 'Unknown')
-        url = article.get('url', '')
-        
-        sentences = re.split(r'[.!?]\s+', text)
-        
-        article_mentions = {'deaths': False, 'injuries': False, 'arrests': False}
-        article_has_numbers = {'deaths': False, 'injuries': False, 'arrests': False}
-        
-        for sentence in sentences:
-            for keyword in CASUALTY_KEYWORDS['deaths']:
-                if keyword in sentence:
-                    casualties['sources'].add(source)
-                    article_mentions['deaths'] = True
-                    
-                    for pattern in number_patterns:
-                        match = re.search(pattern + re.escape(keyword), sentence, re.IGNORECASE)
-                        if match:
-                            num_str = match.group(1)
-                            num = parse_number_word(num_str)
-                            
-                            if num > casualties['deaths']:
-                                casualties['deaths'] = num
-                                casualties['details'].append({
-                                    'type': 'deaths',
-                                    'count': num,
-                                    'source': source,
-                                    'url': url
-                                })
-                            article_has_numbers['deaths'] = True
-                            break
-                    break
-        
-        for sentence in sentences:
-            for keyword in CASUALTY_KEYWORDS['injuries']:
-                if keyword in sentence:
-                    casualties['sources'].add(source)
-                    article_mentions['injuries'] = True
-                    
-                    for pattern in number_patterns:
-                        match = re.search(pattern + re.escape(keyword), sentence, re.IGNORECASE)
-                        if match:
-                            num_str = match.group(1)
-                            num = parse_number_word(num_str)
-                            
-                            if num > 0:
-                                if num > casualties['injuries']:
-                                    casualties['injuries'] = num
-                                casualties['details'].append({
-                                    'type': 'injuries',
-                                    'count': num,
-                                    'source': source,
-                                    'url': url
-                                })
-                            article_has_numbers['injuries'] = True
-                            break
-                    break
-        
-        for sentence in sentences:
-            for keyword in CASUALTY_KEYWORDS['arrests']:
-                if keyword in sentence:
-                    casualties['sources'].add(source)
-                    article_mentions['arrests'] = True
-                    
-                    for pattern in number_patterns:
-                        match = re.search(pattern + re.escape(keyword), sentence, re.IGNORECASE)
-                        if match:
-                            num_str = match.group(1)
-                            num = parse_number_word(num_str)
-                            
-                            if num > casualties['arrests']:
-                                casualties['arrests'] = num
-                                casualties['details'].append({
-                                    'type': 'arrests',
-                                    'count': num,
-                                    'source': source,
-                                    'url': url
-                                })
-                            article_has_numbers['arrests'] = True
-                            break
-                    break
-        
-        for casualty_type in ['deaths', 'injuries', 'arrests']:
-            if article_mentions[casualty_type] and not article_has_numbers[casualty_type]:
-                casualties['articles_without_numbers'].append({
-                    'type': casualty_type,
-                    'source': source,
-                    'url': url,
-                    'title': title,
-                    'note': 'Casualties mentioned but no specific numbers found'
-                })
-    
-    casualties['sources'] = list(casualties['sources'])
-    
-    print(f"[v2.3.1] ✓ Deaths: {casualties['deaths']} detected")
-    print(f"[v2.3.1] ✓ Injuries: {casualties['injuries']} detected")
-    print(f"[v2.3.1] ✓ Arrests: {casualties['arrests']} detected")
-    print(f"[v2.3.1] ✓ Articles without numbers: {len(casualties['articles_without_numbers'])}")
-    
-    return casualties
-
-# ========================================
-# IRAN PROTESTS ENDPOINT
-# ========================================
 @app.route('/scan-iran-protests', methods=['GET'])
 def scan_iran_protests():
-    """Iran protests endpoint with casualty tracking and HRANA integration"""
+    """Iran protests endpoint"""
     try:
         if not check_rate_limit():
-            return jsonify({
-                'error': 'Rate limit exceeded',
-                'rate_limit': get_rate_limit_info()
-            }), 429
+            return jsonify({'error': 'Rate limit exceeded'}), 429
         
         days = int(request.args.get('days', 7))
         
-        # Fetch articles from various sources
-        try:
-            newsapi_articles = fetch_newsapi_articles('Iran protests', days)
-        except Exception as e:
-            print(f"NewsAPI error: {e}")
-            newsapi_articles = []
-        
-        # GDELT query for Iran protests
-        gdelt_query = 'iran OR persia OR protest OR protests OR demonstration'
-        try:
-            gdelt_en = fetch_gdelt_articles(gdelt_query, days, 'eng')
-        except Exception as e:
-            print(f"GDELT EN error: {e}")
-            gdelt_en = []
-            
-        try:
-            gdelt_ar = fetch_gdelt_articles(gdelt_query, days, 'ara')
-        except Exception as e:
-            print(f"GDELT AR error: {e}")
-            gdelt_ar = []
-            
-        try:
-            gdelt_fa = fetch_gdelt_articles(gdelt_query, days, 'fas')
-        except Exception as e:
-            print(f"GDELT FA error: {e}")
-            gdelt_fa = []
-            
-        try:
-            gdelt_he = fetch_gdelt_articles(gdelt_query, days, 'heb')
-        except Exception as e:
-            print(f"GDELT HE error: {e}")
-            gdelt_he = []
-        
-        # Reddit posts
-        try:
-            reddit_posts = fetch_reddit_posts(
-                'iran',
-                ['Iran', 'protest', 'protests', 'demonstration', 'Tehran'],
-                days
-            )
-        except Exception as e:
-            print(f"Reddit error: {e}")
-            reddit_posts = []
-        
-        # Iran Wire RSS
-        try:
-            iranwire_articles = fetch_iranwire_rss()
-        except Exception as e:
-            print(f"Iran Wire error: {e}")
-            iranwire_articles = []
-        
-        # HRANA RSS (most authoritative source)
-        try:
-            hrana_articles = fetch_hrana_rss()
-        except Exception as e:
-            print(f"HRANA error: {e}")
-            hrana_articles = []
+        newsapi_articles = fetch_newsapi_articles('Iran protests', days)
+        gdelt_query = 'iran OR protest'
+        gdelt_en = fetch_gdelt_articles(gdelt_query, days, 'eng')
+        gdelt_ar = fetch_gdelt_articles(gdelt_query, days, 'ara')
+        gdelt_fa = fetch_gdelt_articles(gdelt_query, days, 'fas')
+        gdelt_he = fetch_gdelt_articles(gdelt_query, days, 'heb')
+        reddit_posts = fetch_reddit_posts('iran', ['Iran', 'protest'], days)
+        iranwire_articles = fetch_iranwire_rss()
+        hrana_articles = fetch_hrana_rss()
         
         all_articles = (newsapi_articles + gdelt_en + gdelt_ar + gdelt_fa + 
                        gdelt_he + reddit_posts + iranwire_articles + hrana_articles)
         
-        print(f"Total articles fetched: {len(all_articles)}")
+        hrana_data = extract_hrana_structured_data(hrana_articles)
+        casualties_regex = extract_casualty_data(all_articles)
         
-        # Extract HRANA structured data (PRIORITY)
-        try:
-            hrana_data = extract_hrana_structured_data(hrana_articles)
-        except Exception as e:
-            print(f"HRANA structured data extraction error: {e}")
-            hrana_data = {'is_hrana_verified': False}
-        
-        # Extract casualty data using regex (FALLBACK)
-        try:
-            casualties_regex = extract_casualty_data(all_articles)
-        except Exception as e:
-            print(f"Casualty extraction error: {e}")
-            casualties_regex = {
-                'deaths': 0,
-                'injuries': 0,
-                'arrests': 0,
-                'sources': [],
-                'details': [],
-                'articles_without_numbers': []
-            }
-        
-        # MERGE DATA: HRANA takes priority over regex extraction
         if hrana_data['is_hrana_verified']:
             casualties = {
                 'deaths': max(hrana_data['confirmed_deaths'], casualties_regex['deaths']),
-                'deaths_under_investigation': hrana_data['deaths_under_investigation'],
                 'injuries': max(hrana_data['seriously_injured'], casualties_regex['injuries']),
                 'arrests': max(hrana_data['total_arrests'], casualties_regex['arrests']),
-                'sources': list(set(['HRANA (verified)'] + casualties_regex['sources'])),
+                'sources': list(set(['HRANA'] + casualties_regex['sources'])),
                 'details': casualties_regex['details'],
-                'articles_without_numbers': casualties_regex['articles_without_numbers'],
-                'hrana_verified': True,
-                'hrana_source': hrana_data['source_article'],
-                'hrana_updated': hrana_data['last_updated']
+                'hrana_verified': True
             }
-            num_cities = hrana_data['cities_affected'] or 5
         else:
             casualties = casualties_regex
             casualties['hrana_verified'] = False
-            num_cities = 5  # Fallback
         
         articles_per_day = len(all_articles) / days if days > 0 else 0
-        
-        # Simple city extraction (could be enhanced)
-        cities = [
-            {'name': 'Tehran', 'mentions': 10},
-            {'name': 'Isfahan', 'mentions': 5},
-            {'name': 'Shiraz', 'mentions': 3}
-        ]
-        
-        # Calculate intensity
-        intensity_score = min(
-            articles_per_day * 2 + 
-            num_cities * 4 + 
-            casualties['deaths'] * 0.5 + 
-            casualties['injuries'] * 0.2 + 
-            casualties['arrests'] * 0.1,
-            100
-        )
-        
+        intensity_score = min(articles_per_day * 2 + casualties['deaths'] * 0.5, 100)
         stability_score = 100 - intensity_score
         
         return jsonify({
             'success': True,
-            'timestamp': datetime.now(timezone.utc).isoformat(),
             'days_analyzed': days,
             'total_articles': len(all_articles),
             'intensity': int(intensity_score),
             'stability': int(stability_score),
-            
-            'casualties': {
-                'deaths': casualties['deaths'],
-                'deaths_under_investigation': casualties.get('deaths_under_investigation', 0),
-                'injuries': casualties['injuries'],
-                'arrests': casualties['arrests'],
-                'verified_sources': casualties['sources'],
-                'details': casualties.get('details', []),
-                'articles_without_numbers': casualties.get('articles_without_numbers', []),
-                'hrana_verified': casualties.get('hrana_verified', False),
-                'hrana_source': casualties.get('hrana_source'),
-                'hrana_updated': casualties.get('hrana_updated')
-            },
-            
-            'cities': cities,
-            'num_cities_affected': num_cities,
-            
+            'casualties': casualties,
+            'cities': [],
+            'num_cities_affected': 5,
             'articles_en': [a for a in all_articles if a.get('language') == 'en'][:20],
             'articles_fa': [a for a in all_articles if a.get('language') == 'fa'][:20],
             'articles_ar': [a for a in all_articles if a.get('language') == 'ar'][:20],
             'articles_he': [a for a in all_articles if a.get('language') == 'he'][:20],
-            'articles_reddit': [a for a in all_articles if a.get('source', {}).get('name', '').startswith('r/')][:20],
+            'articles_reddit': reddit_posts[:20],
             'articles_iranwire': iranwire_articles[:20],
             'articles_hrana': hrana_articles[:20],
-            
-            'cached': False,
-            'version': '2.3.1-HRANA'
+            'version': '2.5.0'
         })
         
     except Exception as e:
-        print(f"Error in /scan-iran-protests: {e}")
-        import traceback
-        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/syria-conflicts', methods=['GET'])
+def api_syria_conflicts():
+    """Syria conflicts endpoint"""
+    try:
+        if not check_rate_limit():
+            return jsonify({'error': 'Rate limit exceeded'}), 429
+        
+        days = int(request.args.get('days', 7))
+        
+        syria_direct_articles = fetch_syria_direct_rss()
+        sohr_articles = fetch_sohr_rss()
+        newsapi_articles = fetch_newsapi_articles('Syria conflict', days)
+        
+        gdelt_query = 'syria OR damascus OR conflict'
+        gdelt_en = fetch_gdelt_articles(gdelt_query, days, 'eng')
+        gdelt_ar = fetch_gdelt_articles(gdelt_query, days, 'ara')
+        gdelt_he = fetch_gdelt_articles(gdelt_query, days, 'heb')
+        gdelt_fa = fetch_gdelt_articles(gdelt_query, days, 'fas')
+        
+        reddit_posts = fetch_reddit_posts('syria', ['Syria', 'Damascus', 'conflict'], days)
+        
+        all_articles = (syria_direct_articles + sohr_articles + newsapi_articles + 
+                       gdelt_en + gdelt_ar + gdelt_he + gdelt_fa + reddit_posts)
+        
+        conflict_data = extract_syria_conflict_data(all_articles)
+        
         return jsonify({
-            'success': False,
-            'error': str(e),
-            'intensity': 0,
-            'stability': 100,
-            'casualties': {
-                'deaths': 0, 
-                'injuries': 0, 
-                'arrests': 0, 
-                'sources': [], 
-                'details': [],
-                'articles_without_numbers': [],
-                'hrana_verified': False
+            'success': True,
+            'days_analyzed': days,
+            'total_articles': len(all_articles),
+            'conflict_data': {
+                'deaths': conflict_data['deaths'],
+                'displaced': conflict_data['displaced'],
+                'factional_clashes': conflict_data['factional_clashes'],
+                'active_factions': conflict_data['active_factions'],
+                'num_factions': len(conflict_data['active_factions']),
+                'clash_locations': conflict_data['clash_locations'],
+                'verified_sources': conflict_data['sources'],
+                'details': conflict_data['details']
             },
-            'cities': [],
-            'num_cities_affected': 0,
-            'articles_en': [],
-            'articles_fa': [],
-            'articles_ar': [],
-            'articles_he': [],
-            'articles_reddit': [],
-            'articles_iranwire': [],
-            'articles_hrana': [],
-            'total_articles': 0
-        }), 500
-
-# ========================================
-# ADDITIONAL ENDPOINTS
-# ========================================
-@app.route('/polymarket-data', methods=['GET'])
-def polymarket_data():
-    """Get Polymarket prediction markets data"""
-    print(f"[v2.3.1] Polymarket: Using fallback data")
-    
-    fallback_data = {
-        'markets': [
-            {
-                'question': 'Will Israel strike Iran before March 2026?',
-                'probability': 42,
-                'url': 'https://polymarket.com'
-            },
-            {
-                'question': 'Will there be a Hezbollah ceasefire by February 2026?',
-                'probability': 68,
-                'url': 'https://polymarket.com'
-            },
-            {
-                'question': 'Will Israel-Iran escalate to full-scale war in 2026?',
-                'probability': 28,
-                'url': 'https://polymarket.com'
-            }
-        ],
-        'last_updated': datetime.now(timezone.utc).isoformat(),
-        'using_fallback': True
-    }
-    
-    return jsonify(fallback_data)
-
-@app.route('/rate-limit', methods=['GET'])
-def rate_limit_endpoint():
-    """Get current rate limit status"""
-    return jsonify(get_rate_limit_info())
-
-@app.route('/flight-cancellations', methods=['GET'])
-def flight_cancellations():
-    """Get flight cancellations and travel advisories"""
-    data = {
-        'cancellations': [
-            {
-                'airline': 'KLM',
-                'route': 'Amsterdam-Tel Aviv',
-                'status': 'Suspended',
-                'date': '2026-01-23',
-                'reason': 'Security concerns'
-            },
-            {
-                'airline': 'Air France',
-                'route': 'Paris-Tel Aviv',
-                'status': 'Suspended',
-                'date': '2026-01-23',
-                'reason': 'Regional tensions'
-            }
-        ],
-        'advisories': [
-            {
-                'country': 'Lebanon',
-                'level': 'Do Not Travel',
-                'updated': '2026-01-20'
-            },
-            {
-                'country': 'Iran',
-                'level': 'Do Not Travel',
-                'updated': '2026-01-15'
-            }
-        ],
-        'last_updated': datetime.now(timezone.utc).isoformat()
-    }
-    
-    return jsonify(data)
+            'articles_syria_direct': syria_direct_articles[:20],
+            'articles_sohr': sohr_articles[:20],
+            'articles_en': [a for a in all_articles if a.get('language') == 'en'][:20],
+            'articles_he': [a for a in all_articles if a.get('language') == 'he'][:20],
+            'articles_ar': [a for a in all_articles if a.get('language') == 'ar'][:20],
+            'articles_fa': [a for a in all_articles if a.get('language') == 'fa'][:20],
+            'articles_reddit': reddit_posts[:20],
+            'version': '2.5.0-Syria'
+        })
+        
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/', methods=['GET'])
 def home():
     """Root endpoint"""
     return jsonify({
         'status': 'Backend is running',
-        'message': 'Asifah Analytics API',
-        'version': '2.4.0',
-        'copyright': '© 2025 RCGG. All Rights Reserved.',
+        'version': '2.5.0',
         'endpoints': {
-            '/api/threat/<target>': 'Get threat assessment for iran, hezbollah, houthis, or syria',
-            '/scan-iran-protests': 'Get Iran protests data with casualties',
-            '/polymarket-data': 'Get Polymarket prediction data',
-            '/rate-limit': 'Get rate limit status',
-            '/flight-cancellations': 'Get flight cancellations',
+            '/api/threat/<target>': 'Threat assessment for hezbollah, iran, houthis, or syria',
+            '/scan-iran-protests': 'Iran protests data',
+            '/api/syria-conflicts': 'Syria conflicts tracker',
+            '/rate-limit': 'Rate limit status',
             '/health': 'Health check'
         }
     })
 
+@app.route('/rate-limit', methods=['GET'])
+def rate_limit_endpoint():
+    """Rate limit status"""
+    return jsonify(get_rate_limit_info())
+
 @app.route('/health', methods=['GET'])
 def health():
-    """Health check endpoint"""
+    """Health check"""
     return jsonify({
         'status': 'healthy',
-        'version': '2.4.0-Syria',
+        'version': '2.5.0-Syria',
         'timestamp': datetime.now(timezone.utc).isoformat()
     })
 
