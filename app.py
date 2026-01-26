@@ -1386,6 +1386,11 @@ REDDIT_SUBREDDITS = {
 }
 
 # ========================================
+# SYRIA CONFLICTS ENDPOINT (CLEANED - NO DUPLICATES)
+# Replace lines ~1625-1850 in your app.py with this
+# ========================================
+
+# ========================================
 # IRAN PROTESTS DATA EXTRACTION
 # ========================================
 def parse_number_word(num_str):
@@ -1708,6 +1713,9 @@ def scan_iran_protests():
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
+# ========================================
+# SYRIA CONFLICTS ENDPOINT (KEEP ONLY THIS ONE!)
+# ========================================
 @app.route('/api/syria-conflicts', methods=['GET'])
 def api_syria_conflicts():
     """Syria conflicts endpoint"""
@@ -1768,7 +1776,7 @@ def home():
         'status': 'Backend is running',
         'version': '2.5.0',
         'endpoints': {
-            '/api/threat/<target>': 'Threat assessment for hezbollah, iran, houthis, or syria',
+            '/api/threat/<target>': 'Threat assessment for hezbollah, iran, houthis',
             '/scan-iran-protests': 'Iran protests data',
             '/api/syria-conflicts': 'Syria conflicts tracker',
             '/rate-limit': 'Rate limit status',
