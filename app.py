@@ -43,6 +43,7 @@ CORS(app)
 # ========================================
 NEWSAPI_KEY = os.environ.get('NEWSAPI_KEY')
 EODHD_API_KEY = os.environ.get('EODHD_API_KEY', '697925068da530.81277377')
+ALPHA_VANTAGE_KEY = os.environ.get('ALPHA_VANTAGE_KEY', '6V1C73D5FYVIDWM5')
 GDELT_BASE_URL = "http://api.gdeltproject.org/api/v2/doc/doc"
 
 # Rate limiting
@@ -1012,8 +1013,8 @@ def extract_syria_conflict_data(articles):
 def fetch_oil_alpha_vantage():
     """Try Alpha Vantage API (750 requests/month = 25/day)"""
     try:
-        # Alpha Vantage - Free tier with demo key
-        url = "https://www.alphavantage.co/query?function=BRENT&interval=daily&apikey=demo"
+        # Alpha Vantage - Free tier with real API key
+        url = f"https://www.alphavantage.co/query?function=BRENT&interval=daily&apikey={ALPHA_VANTAGE_KEY}"
         
         response = requests.get(url, timeout=10)
         
@@ -1024,12 +1025,13 @@ def fetch_oil_alpha_vantage():
         
         # Check for rate limit error
         if 'Note' in data or 'Information' in data:
-            print("[Oil Price] Alpha Vantage rate limit hit")
+            print(f"[Oil Price] Alpha Vantage rate limit: {data.get('Note', data.get('Information'))}")
             return None
         
         # Extract latest price from time series
         time_series = data.get('data', [])
         if not time_series or len(time_series) == 0:
+            print(f"[Oil Price] Alpha Vantage returned no data: {list(data.keys())}")
             return None
         
         latest = time_series[0]
