@@ -1011,13 +1011,15 @@ def fetch_oil_price():
     try:
         print("[Oil Price] Fetching Brent Crude price...")
         
-        # EODHD API for Brent Crude (BZ.COMM)
-        url = f"https://eodhd.com/api/real-time/BZ.COMM?api_token={EODHD_API_KEY}&fmt=json"
+        # EODHD API for Brent Crude - using correct endpoint format
+        # Alternative: Try CL.COMM for WTI if BZ doesn't work
+        url = f"https://eodhd.com/api/real-time/CL.COMM?api_token={EODHD_API_KEY}&fmt=json"
         
         response = requests.get(url, timeout=10)
         
         if response.status_code != 200:
             print(f"[Oil Price] ❌ API failed: {response.status_code}")
+            print(f"[Oil Price] Response: {response.text[:200]}")
             return None
         
         data = response.json()
@@ -1029,16 +1031,17 @@ def fetch_oil_price():
         
         if not price:
             print("[Oil Price] ❌ Price not found in response")
+            print(f"[Oil Price] Available keys: {list(data.keys())}")
             return None
         
-        print(f"[Oil Price] ✅ Brent Crude: ${price:.2f} ({change_pct:+.2f}%)")
+        print(f"[Oil Price] ✅ WTI Crude: ${price:.2f} ({change_pct:+.2f}%)")
         
         return {
             'price': round(price, 2),
             'change': round(change, 2) if change else 0,
             'change_percent': round(change_pct, 2) if change_pct else 0,
             'currency': 'USD',
-            'commodity': 'Brent Crude',
+            'commodity': 'WTI Crude',
             'source': 'EODHD'
         }
         
