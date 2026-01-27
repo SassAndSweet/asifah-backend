@@ -1,15 +1,16 @@
 """
-Asifah Analytics Backend v2.5.0
-January 24, 2026
+Asifah Analytics Backend v2.5.1
+January 26, 2026
 
-Changes from v2.4.0:
-- ADDED: Syria Conflicts Tracker endpoint (/api/syria-conflicts)
-- ADDED: Syria Direct RSS feed integration
-- ADDED: SOHR (Syrian Observatory for Human Rights) RSS feed
-- ADDED: Faction detection (HTS, SDF, ISIS, Druze, FSA, Al Qaeda)
-- ADDED: Geographic location tracking for clashes
-- ADDED: Displaced persons counting
-- Syria now has both threat monitoring AND conflict tracking
+CLEANED VERSION - Removed all duplicate function definitions
+- Syria Direct RSS
+- SOHR RSS  
+- Syria conflict data extraction
+
+All endpoints working:
+- /api/threat/<target> (hezbollah, iran, houthis, syria)
+- /scan-iran-protests
+- /api/syria-conflicts  ← WORKING NOW
 """
 
 from flask import Flask, jsonify, request
@@ -199,6 +200,56 @@ TARGET_KEYWORDS = {
             'Kurds', 'Druze', 'Golan', 'Israel', 'Assad', 'civil war'
         ]
     }
+}
+
+# ========================================
+# SYRIA CONFLICT KEYWORDS
+# ========================================
+SYRIA_CONFLICT_KEYWORDS = {
+    'deaths': [
+        'killed', 'dead', 'died', 'death toll', 'fatalities', 'deaths',
+        'killed in clashes', 'killed in fighting', 'civilians killed',
+        'fighters killed', 'combatants killed'
+    ],
+    'displaced': [
+        'displaced', 'fled', 'refugees', 'internally displaced',
+        'evacuated', 'forced to leave', 'abandoned homes'
+    ],
+    'clashes': [
+        'clashes', 'fighting', 'battles', 'combat', 'confrontation',
+        'armed conflict', 'skirmishes', 'firefight', 'engagement'
+    ]
+}
+
+SYRIA_FACTIONS = [
+    'SDF', 'Syrian Democratic Forces',
+    'HTS', "Hay'at Tahrir al-Sham", 'Tahrir al-Sham',
+    'SNA', 'Syrian National Army',
+    'FSA', 'Free Syrian Army',
+    'ISIS', 'Islamic State', 'ISIL',
+    'PKK', 'YPG', 'Kurdish forces',
+    'Turkish forces', 'Turkey',
+    'Russian forces', 'Russia',
+    'Iranian forces', 'Iran',
+    'Hezbollah'
+]
+
+# ========================================
+# CASUALTY KEYWORDS (for Iran protests)
+# ========================================
+CASUALTY_KEYWORDS = {
+    'deaths': [
+        'killed', 'dead', 'died', 'death toll', 'fatalities', 'deaths',
+        'shot dead', 'gunned down', 'killed by', 'killed in'
+    ],
+    'injuries': [
+        'injured', 'wounded', 'hurt', 'injuries', 'casualties',
+        'hospitalized', 'critical condition', 'serious injuries'
+    ],
+    'arrests': [
+        'arrested', 'detained', 'detention', 'arrest', 'arrests',
+        'taken into custody', 'custody', 'apprehended'
+    ]
 }
 
 # ========================================
@@ -668,7 +719,7 @@ def fetch_hrana_rss():
         return []
 
 # ========================================
-# SYRIA-SPECIFIC RSS FEEDS
+# SYRIA-SPECIFIC RSS FEEDS (NO DUPLICATES)
 # ========================================
 def fetch_syria_direct_rss():
     """Fetch articles from Syria Direct RSS feed"""
@@ -678,6 +729,8 @@ def fetch_syria_direct_rss():
     feed_url = 'https://syriadirect.org/feed/'
     
     try:
+        print(f"[Syria Direct] Fetching RSS...")
+        
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
             'Accept': 'application/rss+xml, application/xml, text/xml, */*'
@@ -686,11 +739,13 @@ def fetch_syria_direct_rss():
         response = requests.get(feed_url, headers=headers, timeout=20)
         
         if response.status_code != 200:
+            print(f"[Syria Direct] HTTP {response.status_code}")
             return []
         
         try:
             root = ET.fromstring(response.content)
-        except ET.ParseError:
+        except ET.ParseError as e:
+            print(f"[Syria Direct] XML parse error: {e}")
             return []
         
         items = root.findall('.//item')
@@ -721,19 +776,23 @@ def fetch_syria_direct_rss():
                     'language': 'en'
                 })
         
+        print(f"[Syria Direct] ✓ Fetched {len(articles)} articles")
         return articles
         
-    except Exception:
+    except Exception as e:
+        print(f"[Syria Direct] Error: {str(e)[:100]}")
         return []
 
 def fetch_sohr_rss():
-    """Fetch articles from SOHR (Syrian Observatory for Human Rights) RSS feed"""
+    """Fetch articles from SOHR RSS feed"""
     import xml.etree.ElementTree as ET
     
     articles = []
     feed_url = 'https://www.syriahr.com/en/feed/'
     
     try:
+        print(f"[SOHR] Fetching RSS...")
+        
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
             'Accept': 'application/rss+xml, application/xml, text/xml, */*'
@@ -742,11 +801,13 @@ def fetch_sohr_rss():
         response = requests.get(feed_url, headers=headers, timeout=20)
         
         if response.status_code != 200:
+            print(f"[SOHR] HTTP {response.status_code}")
             return []
         
         try:
             root = ET.fromstring(response.content)
-        except ET.ParseError:
+        except ET.ParseError as e:
+            print(f"[SOHR] XML parse error: {e}")
             return []
         
         items = root.findall('.//item')
@@ -777,329 +838,16 @@ def fetch_sohr_rss():
                     'language': 'en'
                 })
         
+        print(f"[SOHR] ✓ Fetched {len(articles)} articles")
         return articles
         
-    except Exception:
-        return []
-
-# ========================================
-# SYRIA CONFLICT DATA EXTRACTION
-# ========================================
-def extract_syria_conflict_data(articles):
-    """Extract conflict data from Syria articles"""
-    
-    conflict_data = {
-        'deaths': 0,
-        'displaced': 0,
-        'factional_clashes': 0,
-        'active_factions': set(),
-        'clash_locations': {},
-        'sources': set(),
-        'details': []
-    }
-    
-    # Faction keywords
-    FACTIONS = {
-        'HTS': ['hts', 'hayat tahrir al-sham', 'tahrir al-sham'],
-        'SDF': ['sdf', 'syrian democratic forces', 'kurdish forces'],
-        'ISIS': ['isis', 'isil', 'islamic state', 'daesh'],
-        'Druze': ['druze'],
-        'FSA': ['free syrian army', 'fsa', 'turkey-backed'],
-        'Al Qaeda': ['al qaeda', 'al-qaeda', 'alqaeda']
-    }
-    
-    # Syrian cities
-    CITIES = [
-        'damascus', 'aleppo', 'idlib', 'homs', 'deir ez-zor', 'deir ezzor',
-        'raqqa', 'daraa', 'sweida', 'latakia', 'tartus', 'hama', 'qamishli'
-    ]
-    
-    # Casualty patterns
-    death_patterns = [
-        r'(\d+)\s+(?:people\s+)?(?:were\s+)?killed',
-        r'killed\s+(\d+)',
-        r'(\d+)\s+dead',
-        r'death\s+toll\s+(?:of\s+)?(\d+)',
-        r'(\d+)\s+(?:civilians?\s+)?died'
-    ]
-    
-    displaced_patterns = [
-        r'(\d+(?:,\d{3})*)\s+(?:people\s+)?displaced',
-        r'(\d+(?:,\d{3})*)\s+(?:people\s+)?fled',
-        r'(\d+(?:,\d{3})*)\s+refugees?',
-        r'displaced\s+(\d+(?:,\d{3})*)'
-    ]
-    
-    clash_patterns = [
-        r'clash(?:es)?',
-        r'fighting',
-        r'battle',
-        r'combat',
-        r'attack',
-        r'offensive',
-        r'strike'
-    ]
-    
-    for article in articles:
-        title = article.get('title', '').lower()
-        description = article.get('description', '').lower()
-        content = article.get('content', '').lower()
-        text = f"{title} {description} {content}"
-        
-        source = article.get('source', {}).get('name', 'Unknown')
-        url = article.get('url', '')
-        
-        # Extract deaths
-        for pattern in death_patterns:
-            matches = re.findall(pattern, text, re.IGNORECASE)
-            for match in matches:
-                try:
-                    num = int(match.replace(',', ''))
-                    if num > conflict_data['deaths']:
-                        conflict_data['deaths'] = num
-                        conflict_data['sources'].add(source)
-                        conflict_data['details'].append({
-                            'type': 'deaths',
-                            'count': num,
-                            'source': source,
-                            'url': url
-                        })
-                except:
-                    pass
-        
-        # Extract displaced
-        for pattern in displaced_patterns:
-            matches = re.findall(pattern, text, re.IGNORECASE)
-            for match in matches:
-                try:
-                    num = int(match.replace(',', ''))
-                    if num > conflict_data['displaced']:
-                        conflict_data['displaced'] = num
-                        conflict_data['sources'].add(source)
-                        conflict_data['details'].append({
-                            'type': 'displaced',
-                            'count': num,
-                            'source': source,
-                            'url': url
-                        })
-                except:
-                    pass
-        
-        # Count clashes
-        for pattern in clash_patterns:
-            if re.search(pattern, text, re.IGNORECASE):
-                conflict_data['factional_clashes'] += 1
-                break
-        
-        # Detect factions
-        for faction_name, keywords in FACTIONS.items():
-            for keyword in keywords:
-                if keyword in text:
-                    conflict_data['active_factions'].add(faction_name)
-                    break
-        
-        # Detect locations
-        for city in CITIES:
-            if city in text:
-                if city not in conflict_data['clash_locations']:
-                    conflict_data['clash_locations'][city] = 0
-                conflict_data['clash_locations'][city] += 1
-    
-    # Convert sets to lists
-    conflict_data['active_factions'] = list(conflict_data['active_factions'])
-    conflict_data['sources'] = list(conflict_data['sources'])
-    
-    # Sort locations by frequency
-    conflict_data['clash_locations'] = dict(
-        sorted(conflict_data['clash_locations'].items(), 
-               key=lambda x: x[1], 
-               reverse=True)[:10]
-    )
-    
-    return conflict_data
-
-# ========================================
-# SYRIA CONFLICTS ENDPOINT
-# Add this to app.py
-# ========================================
-
-# First, add Syria RSS feed fetchers
-
-def fetch_syria_direct_rss():
-    """Fetch articles from Syria Direct RSS feed"""
-    import xml.etree.ElementTree as ET
-    
-    articles = []
-    feed_url = 'https://syriadirect.org/feed/'
-    
-    try:
-        print(f"[v2.5.0] Syria Direct: Fetching RSS...")
-        
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Accept': 'application/rss+xml, application/xml, text/xml, */*',
-            'Accept-Language': 'en-US,en;q=0.9'
-        }
-        
-        response = requests.get(feed_url, headers=headers, timeout=20)
-        
-        if response.status_code != 200:
-            print(f"[v2.5.0] Syria Direct: HTTP {response.status_code}")
-            return []
-        
-        try:
-            root = ET.fromstring(response.content)
-        except ET.ParseError as e:
-            print(f"[v2.5.0] Syria Direct: XML parse error: {e}")
-            return []
-        
-        items = root.findall('.//item')
-        if not items:
-            items = root.findall('.//{http://www.w3.org/2005/Atom}entry')
-        
-        for item in items[:20]:
-            title_elem = item.find('title')
-            link_elem = item.find('link')
-            pubDate_elem = item.find('pubDate')
-            description_elem = item.find('description')
-            content_elem = item.find('{http://purl.org/rss/1.0/modules/content/}encoded')
-            
-            if title_elem is not None and link_elem is not None:
-                pub_date = pubDate_elem.text if pubDate_elem is not None else datetime.now(timezone.utc).isoformat()
-                
-                description = ''
-                if description_elem is not None and description_elem.text:
-                    description = description_elem.text[:500]
-                elif content_elem is not None and content_elem.text:
-                    description = content_elem.text[:500]
-                
-                articles.append({
-                    'title': title_elem.text or '',
-                    'description': description,
-                    'url': link_elem.text or '',
-                    'publishedAt': pub_date,
-                    'source': {'name': 'Syria Direct'},
-                    'content': description,
-                    'language': 'en'
-                })
-        
-        print(f"[v2.5.0] Syria Direct: ✓ Fetched {len(articles)} articles")
-        return articles
-        
-    except requests.Timeout:
-        print(f"[v2.5.0] Syria Direct: Timeout after 20s")
-        return []
-    except requests.ConnectionError:
-        print(f"[v2.5.0] Syria Direct: Connection error")
-        return []
     except Exception as e:
-        print(f"[v2.5.0] Syria Direct: Error: {str(e)[:100]}")
+        print(f"[SOHR] Error: {str(e)[:100]}")
         return []
 
-
-def fetch_sohr_rss():
-    """Fetch articles from Syrian Observatory for Human Rights RSS feed"""
-    import xml.etree.ElementTree as ET
-    
-    articles = []
-    feed_url = 'https://www.syriahr.com/en/feed/'
-    
-    try:
-        print(f"[v2.5.0] SOHR: Fetching RSS...")
-        
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Accept': 'application/rss+xml, application/xml, text/xml, */*',
-            'Accept-Language': 'en-US,en;q=0.9'
-        }
-        
-        response = requests.get(feed_url, headers=headers, timeout=20)
-        
-        if response.status_code != 200:
-            print(f"[v2.5.0] SOHR: HTTP {response.status_code}")
-            return []
-        
-        try:
-            root = ET.fromstring(response.content)
-        except ET.ParseError as e:
-            print(f"[v2.5.0] SOHR: XML parse error: {e}")
-            return []
-        
-        items = root.findall('.//item')
-        if not items:
-            items = root.findall('.//{http://www.w3.org/2005/Atom}entry')
-        
-        for item in items[:20]:
-            title_elem = item.find('title')
-            link_elem = item.find('link')
-            pubDate_elem = item.find('pubDate')
-            description_elem = item.find('description')
-            content_elem = item.find('{http://purl.org/rss/1.0/modules/content/}encoded')
-            
-            if title_elem is not None and link_elem is not None:
-                pub_date = pubDate_elem.text if pubDate_elem is not None else datetime.now(timezone.utc).isoformat()
-                
-                description = ''
-                if description_elem is not None and description_elem.text:
-                    description = description_elem.text[:500]
-                elif content_elem is not None and content_elem.text:
-                    description = content_elem.text[:500]
-                
-                articles.append({
-                    'title': title_elem.text or '',
-                    'description': description,
-                    'url': link_elem.text or '',
-                    'publishedAt': pub_date,
-                    'source': {'name': 'SOHR'},
-                    'content': description,
-                    'language': 'en'
-                })
-        
-        print(f"[v2.5.0] SOHR: ✓ Fetched {len(articles)} articles")
-        return articles
-        
-    except requests.Timeout:
-        print(f"[v2.5.0] SOHR: Timeout after 20s")
-        return []
-    except requests.ConnectionError:
-        print(f"[v2.5.0] SOHR: Connection error")
-        return []
-    except Exception as e:
-        print(f"[v2.5.0] SOHR: Error: {str(e)[:100]}")
-        return []
-
-
-# Syria-specific casualty/conflict extraction keywords
-SYRIA_CONFLICT_KEYWORDS = {
-    'deaths': [
-        'killed', 'dead', 'died', 'death toll', 'fatalities', 'deaths',
-        'killed in clashes', 'killed in fighting', 'civilians killed',
-        'fighters killed', 'combatants killed'
-    ],
-    'displaced': [
-        'displaced', 'fled', 'refugees', 'internally displaced',
-        'evacuated', 'forced to leave', 'abandoned homes'
-    ],
-    'clashes': [
-        'clashes', 'fighting', 'battles', 'combat', 'confrontation',
-        'armed conflict', 'skirmishes', 'firefight', 'engagement'
-    ]
-}
-
-SYRIA_FACTIONS = [
-    'SDF', 'Syrian Democratic Forces',
-    'HTS', "Hay'at Tahrir al-Sham", 'Tahrir al-Sham',
-    'SNA', 'Syrian National Army',
-    'FSA', 'Free Syrian Army',
-    'ISIS', 'Islamic State', 'ISIL',
-    'PKK', 'YPG', 'Kurdish forces',
-    'Turkish forces', 'Turkey',
-    'Russian forces', 'Russia',
-    'Iranian forces', 'Iran',
-    'Hezbollah'
-]
-
-
+# ========================================
+# SYRIA CONFLICT DATA EXTRACTION (NO DUPLICATES)
+# ========================================
 def extract_syria_conflict_data(articles):
     """Extract conflict statistics from Syria articles"""
     
@@ -1109,10 +857,11 @@ def extract_syria_conflict_data(articles):
         'factional_clashes': 0,
         'clash_locations': {},
         'active_factions': set(),
+        'sources': set(),
         'details': []
     }
     
-    # Number patterns (same as casualty extraction)
+    # Number patterns
     number_patterns = [
         r'(\d+(?:,\d{3})*)\s+(?:people\s+)?',
         r'(?:more than|over|at least)\s+(\d+(?:,\d{3})*)',
@@ -1121,7 +870,7 @@ def extract_syria_conflict_data(articles):
         r'(hundreds?|thousands?|tens of thousands)',
     ]
     
-    # Syrian city patterns
+    # Syrian cities
     syrian_cities = [
         'damascus', 'aleppo', 'homs', 'hama', 'latakia', 'deir ez-zor',
         'raqqa', 'idlib', 'daraa', 'kobani', 'manbij', 'afrin', 'qamishli'
@@ -1156,6 +905,7 @@ def extract_syria_conflict_data(articles):
                             
                             if num > 0:
                                 conflict_data['deaths'] += num
+                                conflict_data['sources'].add(source)
                                 conflict_data['details'].append({
                                     'type': 'deaths',
                                     'count': num,
@@ -1187,6 +937,7 @@ def extract_syria_conflict_data(articles):
                             
                             if num > 0:
                                 conflict_data['displaced'] += num
+                                conflict_data['sources'].add(source)
                                 conflict_data['details'].append({
                                     'type': 'displaced',
                                     'count': num,
@@ -1221,34 +972,12 @@ def extract_syria_conflict_data(articles):
                 conflict_data['clash_locations'][city] = conflict_data['clash_locations'].get(city, 0) + 1
     
     conflict_data['active_factions'] = list(conflict_data['active_factions'])
+    conflict_data['sources'] = list(conflict_data['sources'])
     conflict_data['num_factions'] = len(conflict_data['active_factions'])
     
-    print(f"[v2.5.0] Syria Conflict Data:")
-    print(f"  Deaths: {conflict_data['deaths']}")
-    print(f"  Displaced: {conflict_data['displaced']}")
-    print(f"  Clashes: {conflict_data['factional_clashes']}")
-    print(f"  Active Factions: {conflict_data['num_factions']}")
+    print(f"[Syria Conflict Data] Deaths: {conflict_data['deaths']}, Displaced: {conflict_data['displaced']}, Clashes: {conflict_data['factional_clashes']}")
     
     return conflict_data
-
-
-
-# ========================================
-# UPDATE: Add Syria to REDDIT_SUBREDDITS
-# ========================================
-# Find this section in app.py and UPDATE it:
-
-REDDIT_SUBREDDITS = {
-    "hezbollah": ["ForbiddenBromance", "Israel", "Lebanon"],
-    "iran": ["Iran", "Israel", "geopolitics"],
-    "houthis": ["Yemen", "Israel", "geopolitics"],
-    "syria": ["Syria", "syriancivilwar", "geopolitics"]  # ADD THIS LINE
-}
-
-# ========================================
-# SYRIA CONFLICTS ENDPOINT (CLEANED - NO DUPLICATES)
-# Replace lines ~1625-1850 in your app.py with this
-# ========================================
 
 # ========================================
 # IRAN PROTESTS DATA EXTRACTION
@@ -1283,21 +1012,6 @@ def parse_number_word(num_str):
         return 12
     
     return 0
-
-CASUALTY_KEYWORDS = {
-    'deaths': [
-        'killed', 'dead', 'died', 'death toll', 'fatalities', 'deaths',
-        'shot dead', 'gunned down', 'killed by', 'killed in'
-    ],
-    'injuries': [
-        'injured', 'wounded', 'hurt', 'injuries', 'casualties',
-        'hospitalized', 'critical condition', 'serious injuries'
-    ],
-    'arrests': [
-        'arrested', 'detained', 'detention', 'arrest', 'arrests',
-        'taken into custody', 'custody', 'apprehended'
-    ]
-}
 
 def extract_casualty_data(articles):
     """Extract verified casualty numbers from articles"""
@@ -1499,7 +1213,7 @@ def api_threat(target):
             'escalation_keywords': ESCALATION_KEYWORDS,
             'target_keywords': TARGET_KEYWORDS[target]['keywords'],
             'cached': False,
-            'version': '2.5.0'
+            'version': '2.5.1'
         })
         
     except Exception as e:
@@ -1567,39 +1281,50 @@ def scan_iran_protests():
             'articles_reddit': reddit_posts[:20],
             'articles_iranwire': iranwire_articles[:20],
             'articles_hrana': hrana_articles[:20],
-            'version': '2.5.0'
+            'version': '2.5.1'
         })
         
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
 # ========================================
-# SYRIA CONFLICTS ENDPOINT (KEEP ONLY THIS ONE!)
+# SYRIA CONFLICTS ENDPOINT ✅
 # ========================================
 @app.route('/api/syria-conflicts', methods=['GET'])
 def api_syria_conflicts():
-    """Syria conflicts endpoint"""
+    """Syria conflicts tracker endpoint"""
     try:
         if not check_rate_limit():
             return jsonify({'error': 'Rate limit exceeded'}), 429
         
         days = int(request.args.get('days', 7))
         
+        print(f"[Syria Conflicts] Fetching data for {days} days...")
+        
+        # Fetch from specialized Syria sources
         syria_direct_articles = fetch_syria_direct_rss()
         sohr_articles = fetch_sohr_rss()
+        
+        # Fetch from NewsAPI
         newsapi_articles = fetch_newsapi_articles('Syria conflict', days)
         
+        # Fetch from GDELT in multiple languages
         gdelt_query = 'syria OR damascus OR conflict'
         gdelt_en = fetch_gdelt_articles(gdelt_query, days, 'eng')
         gdelt_ar = fetch_gdelt_articles(gdelt_query, days, 'ara')
         gdelt_he = fetch_gdelt_articles(gdelt_query, days, 'heb')
         gdelt_fa = fetch_gdelt_articles(gdelt_query, days, 'fas')
         
+        # Fetch from Reddit
         reddit_posts = fetch_reddit_posts('syria', ['Syria', 'Damascus', 'conflict'], days)
         
+        # Combine all articles
         all_articles = (syria_direct_articles + sohr_articles + newsapi_articles + 
                        gdelt_en + gdelt_ar + gdelt_he + gdelt_fa + reddit_posts)
         
+        print(f"[Syria Conflicts] Total articles: {len(all_articles)}")
+        
+        # Extract conflict data
         conflict_data = extract_syria_conflict_data(all_articles)
         
         return jsonify({
@@ -1614,7 +1339,7 @@ def api_syria_conflicts():
                 'num_factions': len(conflict_data['active_factions']),
                 'clash_locations': conflict_data['clash_locations'],
                 'verified_sources': conflict_data['sources'],
-                'details': conflict_data['details']
+                'details': conflict_data['details'][:20]  # Limit details
             },
             'articles_syria_direct': syria_direct_articles[:20],
             'articles_sohr': sohr_articles[:20],
@@ -1623,22 +1348,26 @@ def api_syria_conflicts():
             'articles_ar': [a for a in all_articles if a.get('language') == 'ar'][:20],
             'articles_fa': [a for a in all_articles if a.get('language') == 'fa'][:20],
             'articles_reddit': reddit_posts[:20],
-            'version': '2.5.0-Syria'
+            'version': '2.5.1-Syria'
         })
         
     except Exception as e:
+        print(f"[Syria Conflicts] ERROR: {str(e)}")
         return jsonify({'success': False, 'error': str(e)}), 500
 
+# ========================================
+# UTILITY ENDPOINTS
+# ========================================
 @app.route('/', methods=['GET'])
 def home():
     """Root endpoint"""
     return jsonify({
         'status': 'Backend is running',
-        'version': '2.5.0',
+        'version': '2.5.1',
         'endpoints': {
-            '/api/threat/<target>': 'Threat assessment for hezbollah, iran, houthis',
+            '/api/threat/<target>': 'Threat assessment for hezbollah, iran, houthis, syria',
             '/scan-iran-protests': 'Iran protests data',
-            '/api/syria-conflicts': 'Syria conflicts tracker',
+            '/api/syria-conflicts': 'Syria conflicts tracker ✅',
             '/rate-limit': 'Rate limit status',
             '/health': 'Health check'
         }
@@ -1654,7 +1383,7 @@ def health():
     """Health check"""
     return jsonify({
         'status': 'healthy',
-        'version': '2.5.0-Syria',
+        'version': '2.5.1-Cleaned',
         'timestamp': datetime.now(timezone.utc).isoformat()
     })
 
