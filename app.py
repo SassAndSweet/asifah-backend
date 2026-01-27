@@ -1,13 +1,18 @@
 """
-Asifah Analytics Backend v2.6.1
+Asifah Analytics Backend v2.6.2
 January 27, 2026
+
+Changes from v2.6.1:
+- NEW: Oil price integration via EODHD API (Brent Crude)
+- Oil prices now factor into Regime Stability calculation (±5 points)
+- Higher oil = more Iran revenue = higher stability (despite sanctions)
+- Baseline: $75/barrel, $10 deviation = ±0.5 stability points
 
 Changes from v2.6.0:
 - FIXED: Regime Stability formula now includes +30 military strength baseline
 - Accounts for IRGC operational effectiveness preventing immediate collapse
 - Reweighted economic factors (×0.3 instead of ×1.5) to be less catastrophic
 - Realistic scores: ~30-35 (High Risk) instead of 0 (Critical)
-- Added military_strength_baseline to breakdown for transparency
 
 Changes from v2.5.2:
 - NEW: Iran Regime Stability Index powered by USD/IRR exchange rate + protest data
@@ -37,6 +42,7 @@ CORS(app)
 # CONFIGURATION
 # ========================================
 NEWSAPI_KEY = os.environ.get('NEWSAPI_KEY')
+EODHD_API_KEY = os.environ.get('EODHD_API_KEY', '697925068da530.81277377')
 GDELT_BASE_URL = "http://api.gdeltproject.org/api/v2/doc/doc"
 
 # Rate limiting
@@ -1000,6 +1006,46 @@ def extract_syria_conflict_data(articles):
 # ========================================
 # IRAN REGIME STABILITY TRACKER
 # ========================================
+def fetch_oil_price():
+    """Fetch Brent Crude oil price from EODHD API"""
+    try:
+        print("[Oil Price] Fetching Brent Crude price...")
+        
+        # EODHD API for Brent Crude (BZ.COMM)
+        url = f"https://eodhd.com/api/real-time/BZ.COMM?api_token={EODHD_API_KEY}&fmt=json"
+        
+        response = requests.get(url, timeout=10)
+        
+        if response.status_code != 200:
+            print(f"[Oil Price] ❌ API failed: {response.status_code}")
+            return None
+        
+        data = response.json()
+        
+        # Extract price and change
+        price = data.get('close')  # Current/last close price
+        change = data.get('change')  # Price change
+        change_pct = data.get('change_p')  # Percentage change
+        
+        if not price:
+            print("[Oil Price] ❌ Price not found in response")
+            return None
+        
+        print(f"[Oil Price] ✅ Brent Crude: ${price:.2f} ({change_pct:+.2f}%)")
+        
+        return {
+            'price': round(price, 2),
+            'change': round(change, 2) if change else 0,
+            'change_percent': round(change_pct, 2) if change_pct else 0,
+            'currency': 'USD',
+            'commodity': 'Brent Crude',
+            'source': 'EODHD'
+        }
+        
+    except Exception as e:
+        print(f"[Oil Price] ❌ Error: {str(e)[:200]}")
+        return None
+
 def fetch_iran_exchange_rate():
     """Fetch USD/IRR exchange rate from ExchangeRate-API (free, no auth)"""
     try:
@@ -1035,7 +1081,7 @@ def fetch_iran_exchange_rate():
         print(f"[Regime Stability] ❌ Error: {str(e)[:200]}")
         return None
 
-def calculate_regime_stability(exchange_data, protest_data):
+def calculate_regime_stability(exchange_data, protest_data, oil_data=None):
     """
     Calculate Iran regime stability score (0-100)
     
@@ -1045,10 +1091,11 @@ def calculate_regime_stability(exchange_data, protest_data):
                 - (Rial Devaluation Impact × 3)
                 - (Protest Intensity × 3)
                 - (Arrest Rate Impact × 2)
+                + (Oil Price Impact ±5)
                 + (Time Decay Bonus)
     
-    Key Change: Added +30 military strength baseline to account for IRGC/security apparatus
-    This prevents purely economic factors from indicating imminent collapse
+    Key Change: Added oil price impact (±5 points) based on Brent Crude prices
+    High oil prices help Iran despite sanctions (black market sales to China)
     
     Lower scores = Higher instability/regime stress
     """
@@ -1067,6 +1114,31 @@ def calculate_regime_stability(exchange_data, protest_data):
     military_strength_baseline = 30
     
     print(f"[Regime Stability] Military strength baseline: +{military_strength_baseline}")
+    
+    # ========================================
+    # OIL PRICE IMPACT (±5 points)
+    # ========================================
+    # Baseline: $75/barrel (historical average)
+    # Despite sanctions, Iran sells oil to China/black market
+    # Higher prices = more revenue = regime can fund IRGC/subsidies
+    
+    oil_price_impact = 0
+    
+    if oil_data:
+        oil_price = oil_data.get('price', 75)
+        baseline_oil = 75
+        
+        # Calculate deviation from baseline
+        oil_deviation = oil_price - baseline_oil
+        
+        # Each $10 above baseline = +0.5 stability points
+        # Each $10 below baseline = -0.5 stability points
+        oil_price_impact = (oil_deviation / 10) * 0.5
+        
+        # Cap at ±5 points
+        oil_price_impact = max(-5, min(5, oil_price_impact))
+        
+        print(f"[Regime Stability] Oil price: ${oil_price:.2f} (baseline: ${baseline_oil}) → Impact: {oil_price_impact:+.1f}")
     
     # ========================================
     # CURRENCY DEVALUATION IMPACT (REWEIGHTED)
@@ -1129,7 +1201,7 @@ def calculate_regime_stability(exchange_data, protest_data):
     # ========================================
     # FINAL SCORE CALCULATION
     # ========================================
-    stability_score = (base_score + military_strength_baseline - 
+    stability_score = (base_score + military_strength_baseline + oil_price_impact - 
                       rial_devaluation_impact - protest_intensity_impact - 
                       arrest_rate_impact + time_decay_bonus)
     
@@ -1178,11 +1250,12 @@ def calculate_regime_stability(exchange_data, protest_data):
         'breakdown': {
             'base_score': base_score,
             'military_strength_baseline': military_strength_baseline,
+            'oil_price_impact': round(oil_price_impact, 2),
             'rial_devaluation_impact': round(-rial_devaluation_impact, 2),
             'protest_intensity_impact': round(-protest_intensity_impact, 2),
             'arrest_rate_impact': round(-arrest_rate_impact, 2),
             'time_decay_bonus': round(time_decay_bonus, 2),
-            'formula': 'Base(50) + Military(+30) - Rial_Impact - Protest_Impact - Arrest_Impact + Time_Bonus'
+            'formula': 'Base(50) + Military(+30) + Oil(±5) - Rial - Protest - Arrest + Time'
         }
     }
 
@@ -1420,7 +1493,7 @@ def api_threat(target):
             'escalation_keywords': ESCALATION_KEYWORDS,
             'target_keywords': TARGET_KEYWORDS[target]['keywords'],
             'cached': False,
-            'version': '2.6.1'
+            'version': '2.6.2'
         })
         
     except Exception as e:
@@ -1475,6 +1548,9 @@ def scan_iran_protests():
         # NEW: Fetch exchange rate data
         exchange_data = fetch_iran_exchange_rate()
         
+        # NEW: Fetch oil price data
+        oil_data = fetch_oil_price()
+        
         # NEW: Calculate regime stability using both protest data and exchange rate
         protest_summary = {
             'intensity': int(intensity_score),
@@ -1484,7 +1560,7 @@ def scan_iran_protests():
             'total_articles': len(all_articles)
         }
         
-        regime_stability = calculate_regime_stability(exchange_data, protest_summary)
+        regime_stability = calculate_regime_stability(exchange_data, protest_summary, oil_data)
         
         return jsonify({
             'success': True,
@@ -1503,8 +1579,9 @@ def scan_iran_protests():
             'articles_iranwire': iranwire_articles[:20],
             'articles_hrana': hrana_articles[:20],
             'exchange_rate': exchange_data,  # NEW
+            'oil_price': oil_data,  # NEW
             'regime_stability': regime_stability,  # NEW
-            'version': '2.6.1'
+            'version': '2.6.2'
         })
         
     except Exception as e:
@@ -1586,7 +1663,7 @@ def home():
     """Root endpoint"""
     return jsonify({
         'status': 'Backend is running',
-        'version': '2.6.1',
+        'version': '2.6.2',
         'endpoints': {
             '/api/threat/<target>': 'Threat assessment for hezbollah, iran, houthis, syria',
             '/scan-iran-protests': 'Iran protests data + Regime Stability Index ✅',
