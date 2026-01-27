@@ -1006,48 +1006,171 @@ def extract_syria_conflict_data(articles):
 # ========================================
 # IRAN REGIME STABILITY TRACKER
 # ========================================
-def fetch_oil_price():
-    """Fetch Brent Crude oil price from EODHD API"""
+# ========================================
+# OIL PRICE FETCHING - CASCADING FALLBACK SYSTEM
+# ========================================
+def fetch_oil_alpha_vantage():
+    """Try Alpha Vantage API (750 requests/month = 25/day)"""
     try:
-        print("[Oil Price] Fetching Brent Crude price...")
-        
-        # EODHD API for Brent Crude - using correct endpoint format
-        # Alternative: Try CL.COMM for WTI if BZ doesn't work
-        url = f"https://eodhd.com/api/real-time/CL.COMM?api_token={EODHD_API_KEY}&fmt=json"
+        # Alpha Vantage - Free tier with demo key
+        url = "https://www.alphavantage.co/query?function=BRENT&interval=daily&apikey=demo"
         
         response = requests.get(url, timeout=10)
         
         if response.status_code != 200:
-            print(f"[Oil Price] ❌ API failed: {response.status_code}")
-            print(f"[Oil Price] Response: {response.text[:200]}")
             return None
         
         data = response.json()
         
-        # Extract price and change
-        price = data.get('close')  # Current/last close price
-        change = data.get('change')  # Price change
-        change_pct = data.get('change_p')  # Percentage change
-        
-        if not price:
-            print("[Oil Price] ❌ Price not found in response")
-            print(f"[Oil Price] Available keys: {list(data.keys())}")
+        # Check for rate limit error
+        if 'Note' in data or 'Information' in data:
+            print("[Oil Price] Alpha Vantage rate limit hit")
             return None
         
-        print(f"[Oil Price] ✅ WTI Crude: ${price:.2f} ({change_pct:+.2f}%)")
+        # Extract latest price from time series
+        time_series = data.get('data', [])
+        if not time_series or len(time_series) == 0:
+            return None
+        
+        latest = time_series[0]
+        price = float(latest.get('value', 0))
+        
+        if price == 0:
+            return None
+        
+        print(f"[Oil Price] ✅ Alpha Vantage: Brent ${price:.2f}")
         
         return {
             'price': round(price, 2),
-            'change': round(change, 2) if change else 0,
-            'change_percent': round(change_pct, 2) if change_pct else 0,
+            'change': 0,
+            'change_percent': 0,
             'currency': 'USD',
-            'commodity': 'WTI Crude',
-            'source': 'EODHD'
+            'commodity': 'Brent Crude',
+            'source': 'Alpha Vantage'
         }
         
     except Exception as e:
-        print(f"[Oil Price] ❌ Error: {str(e)[:200]}")
+        print(f"[Oil Price] Alpha Vantage failed: {str(e)[:100]}")
         return None
+
+
+def fetch_oil_commodities_api():
+    """Try Commodities-API.com (100 requests/month)"""
+    try:
+        # Commodities-API - Free tier, no key required
+        # Gets latest Brent Crude price
+        url = "https://commodities-api.com/api/latest?access_key=&symbols=BRENTOIL"
+        
+        response = requests.get(url, timeout=10)
+        
+        if response.status_code != 200:
+            return None
+        
+        data = response.json()
+        
+        # Check for success
+        if not data.get('success', False):
+            return None
+        
+        # Extract Brent oil price
+        rates = data.get('data', {}).get('rates', {})
+        brent_rate = rates.get('BRENTOIL')
+        
+        if not brent_rate:
+            return None
+        
+        # Commodities-API returns inverse rate (USD per barrel)
+        price = 1 / float(brent_rate) if brent_rate else 0
+        
+        if price == 0:
+            return None
+        
+        print(f"[Oil Price] ✅ Commodities-API: Brent ${price:.2f}")
+        
+        return {
+            'price': round(price, 2),
+            'change': 0,
+            'change_percent': 0,
+            'currency': 'USD',
+            'commodity': 'Brent Crude',
+            'source': 'Commodities-API'
+        }
+        
+    except Exception as e:
+        print(f"[Oil Price] Commodities-API failed: {str(e)[:100]}")
+        return None
+
+
+def fetch_oil_oilpriceapi():
+    """Try Oilpriceapi.com (100 requests/month)"""
+    try:
+        # Oilpriceapi - Free tier, no key required
+        url = "https://api.oilpriceapi.com/v1/prices/latest"
+        
+        response = requests.get(url, timeout=10)
+        
+        if response.status_code != 200:
+            return None
+        
+        data = response.json()
+        
+        # Extract Brent price
+        price = data.get('data', {}).get('price')
+        
+        if not price:
+            return None
+        
+        print(f"[Oil Price] ✅ OilPriceAPI: Brent ${price:.2f}")
+        
+        return {
+            'price': round(float(price), 2),
+            'change': 0,
+            'change_percent': 0,
+            'currency': 'USD',
+            'commodity': 'Brent Crude',
+            'source': 'OilPriceAPI'
+        }
+        
+    except Exception as e:
+        print(f"[Oil Price] OilPriceAPI failed: {str(e)[:100]}")
+        return None
+
+
+def fetch_oil_price():
+    """
+    Fetch Brent Crude oil price using cascading fallback system
+    
+    Tries 3 free APIs in order of monthly limit:
+    1. Alpha Vantage (750/month = 25/day) 
+    2. Commodities-API (100/month)
+    3. OilPriceAPI (100/month)
+    
+    Total: 950 free requests/month
+    """
+    print("[Oil Price] Starting cascading API fetch...")
+    
+    # Try Alpha Vantage first (highest limit)
+    result = fetch_oil_alpha_vantage()
+    if result:
+        return result
+    
+    print("[Oil Price] Trying fallback: Commodities-API...")
+    
+    # Try Commodities-API second
+    result = fetch_oil_commodities_api()
+    if result:
+        return result
+    
+    print("[Oil Price] Trying fallback: OilPriceAPI...")
+    
+    # Try OilPriceAPI last
+    result = fetch_oil_oilpriceapi()
+    if result:
+        return result
+    
+    # All APIs failed
+    print("[Oil Price] ❌ All APIs failed")
+    return None
 
 def fetch_iran_exchange_rate():
     """Fetch USD/IRR exchange rate from ExchangeRate-API (free, no auth)"""
