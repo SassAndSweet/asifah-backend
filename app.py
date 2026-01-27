@@ -1,6 +1,13 @@
 """
-Asifah Analytics Backend v2.6.0
+Asifah Analytics Backend v2.6.1
 January 27, 2026
+
+Changes from v2.6.0:
+- FIXED: Regime Stability formula now includes +30 military strength baseline
+- Accounts for IRGC operational effectiveness preventing immediate collapse
+- Reweighted economic factors (×0.3 instead of ×1.5) to be less catastrophic
+- Realistic scores: ~30-35 (High Risk) instead of 0 (Critical)
+- Added military_strength_baseline to breakdown for transparency
 
 Changes from v2.5.2:
 - NEW: Iran Regime Stability Index powered by USD/IRR exchange rate + protest data
@@ -1032,12 +1039,16 @@ def calculate_regime_stability(exchange_data, protest_data):
     """
     Calculate Iran regime stability score (0-100)
     
-    Formula:
+    Updated Formula v2.6.1:
     Stability = Base(50)
-                - (Rial Devaluation Impact × 15)
-                - (Protest Intensity × 5)
-                - (Arrest Rate Impact × 3)
+                + Military Strength Baseline(+30)
+                - (Rial Devaluation Impact × 3)
+                - (Protest Intensity × 3)
+                - (Arrest Rate Impact × 2)
                 + (Time Decay Bonus)
+    
+    Key Change: Added +30 military strength baseline to account for IRGC/security apparatus
+    This prevents purely economic factors from indicating imminent collapse
     
     Lower scores = Higher instability/regime stress
     """
@@ -1046,10 +1057,22 @@ def calculate_regime_stability(exchange_data, protest_data):
     base_score = 50
     
     # ========================================
-    # CURRENCY DEVALUATION IMPACT
+    # MILITARY STRENGTH BASELINE (+30)
+    # ========================================
+    # IRGC remains at full operational strength
+    # Security apparatus (Basij, police) effective at suppression
+    # Regional proxy network (Hezbollah, Iraqi militias) intact
+    # This baseline only drops if military defections/mutinies occur
+    
+    military_strength_baseline = 30
+    
+    print(f"[Regime Stability] Military strength baseline: +{military_strength_baseline}")
+    
+    # ========================================
+    # CURRENCY DEVALUATION IMPACT (REWEIGHTED)
     # ========================================
     # Historical baseline: ~42,000 IRR/USD (pre-2024)
-    # As of Jan 2026, rate is much higher due to sanctions/instability
+    # Reduced weight: economic stress doesn't immediately = regime collapse
     
     rial_devaluation_impact = 0
     
@@ -1060,13 +1083,13 @@ def calculate_regime_stability(exchange_data, protest_data):
         # Calculate % devaluation from baseline
         devaluation_pct = ((current_rate - baseline_rate) / baseline_rate) * 100
         
-        # Each 10% devaluation = -1.5 stability points
-        rial_devaluation_impact = (devaluation_pct / 10) * 1.5
+        # Each 10% devaluation = -0.3 stability points (REDUCED from -1.5)
+        rial_devaluation_impact = (devaluation_pct / 10) * 0.3
         
         print(f"[Regime Stability] Rial devaluation: {devaluation_pct:.1f}% → Impact: -{rial_devaluation_impact:.1f}")
     
     # ========================================
-    # PROTEST INTENSITY IMPACT
+    # PROTEST INTENSITY IMPACT (REWEIGHTED)
     # ========================================
     protest_intensity_impact = 0
     arrest_rate_impact = 0
@@ -1075,14 +1098,14 @@ def calculate_regime_stability(exchange_data, protest_data):
         # Protest intensity score (0-100) from iran-protests endpoint
         intensity = protest_data.get('intensity', 0)
         
-        # Each 10 points of intensity = -0.5 stability points
-        protest_intensity_impact = (intensity / 10) * 0.5
+        # Each 10 points of intensity = -0.3 stability points (REDUCED from -0.5)
+        protest_intensity_impact = (intensity / 10) * 0.3
         
         # High arrest rates indicate regime under pressure
         arrests = protest_data.get('casualties', {}).get('arrests', 0)
         
-        # Each 100 arrests = -0.3 stability points
-        arrest_rate_impact = (arrests / 100) * 0.3
+        # Each 100 arrests = -0.2 stability points (REDUCED from -0.3)
+        arrest_rate_impact = (arrests / 100) * 0.2
         
         print(f"[Regime Stability] Protest intensity: {intensity}/100 → Impact: -{protest_intensity_impact:.1f}")
         print(f"[Regime Stability] Arrests: {arrests} → Impact: -{arrest_rate_impact:.1f}")
@@ -1090,7 +1113,6 @@ def calculate_regime_stability(exchange_data, protest_data):
     # ========================================
     # TIME DECAY BONUS (Stability improves over time without protests)
     # ========================================
-    # If no recent major protests, regime stabilizes slowly
     time_decay_bonus = 0
     
     if protest_data:
@@ -1107,7 +1129,9 @@ def calculate_regime_stability(exchange_data, protest_data):
     # ========================================
     # FINAL SCORE CALCULATION
     # ========================================
-    stability_score = base_score - rial_devaluation_impact - protest_intensity_impact - arrest_rate_impact + time_decay_bonus
+    stability_score = (base_score + military_strength_baseline - 
+                      rial_devaluation_impact - protest_intensity_impact - 
+                      arrest_rate_impact + time_decay_bonus)
     
     # Clamp to 0-100
     stability_score = max(0, min(100, stability_score))
@@ -1153,11 +1177,12 @@ def calculate_regime_stability(exchange_data, protest_data):
         'risk_color': risk_color,
         'breakdown': {
             'base_score': base_score,
+            'military_strength_baseline': military_strength_baseline,
             'rial_devaluation_impact': round(-rial_devaluation_impact, 2),
             'protest_intensity_impact': round(-protest_intensity_impact, 2),
             'arrest_rate_impact': round(-arrest_rate_impact, 2),
             'time_decay_bonus': round(time_decay_bonus, 2),
-            'formula': 'Base(50) - Rial_Impact - Protest_Impact - Arrest_Impact + Time_Bonus'
+            'formula': 'Base(50) + Military(+30) - Rial_Impact - Protest_Impact - Arrest_Impact + Time_Bonus'
         }
     }
 
@@ -1395,7 +1420,7 @@ def api_threat(target):
             'escalation_keywords': ESCALATION_KEYWORDS,
             'target_keywords': TARGET_KEYWORDS[target]['keywords'],
             'cached': False,
-            'version': '2.6.0'
+            'version': '2.6.1'
         })
         
     except Exception as e:
@@ -1479,7 +1504,7 @@ def scan_iran_protests():
             'articles_hrana': hrana_articles[:20],
             'exchange_rate': exchange_data,  # NEW
             'regime_stability': regime_stability,  # NEW
-            'version': '2.6.0'
+            'version': '2.6.1'
         })
         
     except Exception as e:
@@ -1561,7 +1586,7 @@ def home():
     """Root endpoint"""
     return jsonify({
         'status': 'Backend is running',
-        'version': '2.6.0',
+        'version': '2.6.1',
         'endpoints': {
             '/api/threat/<target>': 'Threat assessment for hezbollah, iran, houthis, syria',
             '/scan-iran-protests': 'Iran protests data + Regime Stability Index ✅',
