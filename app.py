@@ -1,16 +1,15 @@
 """
-Asifah Analytics Backend v2.5.1
-January 26, 2026
+Asifah Analytics Backend v2.5.2
+January 27, 2026
 
-CLEANED VERSION - Removed all duplicate function definitions
-- Syria Direct RSS
-- SOHR RSS  
-- Syria conflict data extraction
+Changes from v2.5.1:
+- FIXED: HRANA RSS feed now uses RSS2JSON proxy (free, 10k req/day)
+- HRANA was blocked by cloud hosting IPs, now accessible via proxy
 
 All endpoints working:
 - /api/threat/<target> (hezbollah, iran, houthis, syria)
-- /scan-iran-protests
-- /api/syria-conflicts  ← WORKING NOW
+- /scan-iran-protests (with HRANA data! ✅)
+- /api/syria-conflicts
 """
 
 from flask import Flask, jsonify, request
@@ -663,59 +662,69 @@ def fetch_iranwire_rss():
     return articles
 
 def fetch_hrana_rss():
-    """Fetch articles from HRANA RSS feed"""
-    import xml.etree.ElementTree as ET
+    """Fetch articles from HRANA RSS feed via RSS2JSON proxy"""
     
     articles = []
+    # HRANA feed is blocked by cloud hosting IPs, so we use RSS2JSON as a free proxy
     feed_url = 'https://en-hrana.org/feed/'
     
     try:
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-            'Accept': 'application/rss+xml, application/xml, text/xml, */*'
-        }
+        print(f"[HRANA] Fetching RSS via RSS2JSON proxy...")
         
-        response = requests.get(feed_url, headers=headers, timeout=20)
+        # RSS2JSON free API - no auth required, 10k requests/day
+        rss2json_url = f'https://api.rss2json.com/v1/api.json?rss_url={feed_url}'
+        
+        response = requests.get(rss2json_url, timeout=20)
+        
+        print(f"[HRANA] RSS2JSON Response status: {response.status_code}")
         
         if response.status_code != 200:
+            print(f"[HRANA] ❌ RSS2JSON failed with status {response.status_code}")
             return []
         
-        try:
-            root = ET.fromstring(response.content)
-        except ET.ParseError:
+        data = response.json()
+        
+        # Check if RSS2JSON successfully fetched the feed
+        if data.get('status') != 'ok':
+            print(f"[HRANA] ❌ RSS2JSON returned status: {data.get('status')}")
+            print(f"[HRANA] Message: {data.get('message', 'No message')}")
             return []
         
-        items = root.findall('.//item')
+        items = data.get('items', [])
+        print(f"[HRANA] Found {len(items)} items in feed")
         
         for item in items[:15]:
-            title_elem = item.find('title')
-            link_elem = item.find('link')
-            pubDate_elem = item.find('pubDate')
-            description_elem = item.find('description')
-            content_elem = item.find('{http://purl.org/rss/1.0/modules/content/}encoded')
+            title = item.get('title', '')
+            link = item.get('link', '')
+            pub_date = item.get('pubDate', '')
+            description = item.get('description', '')
+            content = item.get('content', '')
             
-            if title_elem is not None and link_elem is not None:
-                pub_date = pubDate_elem.text if pubDate_elem is not None else datetime.now(timezone.utc).isoformat()
-                
-                description = ''
-                if description_elem is not None and description_elem.text:
-                    description = description_elem.text[:500]
-                elif content_elem is not None and content_elem.text:
-                    description = content_elem.text[:500]
+            if title and link:
+                # Use description or content, whichever is longer
+                text_content = content if len(content) > len(description) else description
                 
                 articles.append({
-                    'title': title_elem.text or '',
-                    'description': description,
-                    'url': link_elem.text or '',
-                    'publishedAt': pub_date,
+                    'title': title,
+                    'description': text_content[:500],
+                    'url': link,
+                    'publishedAt': pub_date if pub_date else datetime.now(timezone.utc).isoformat(),
                     'source': {'name': 'HRANA'},
-                    'content': description,
+                    'content': text_content[:500],
                     'language': 'en'
                 })
         
+        print(f"[HRANA] ✅ Successfully fetched {len(articles)} articles via RSS2JSON")
         return articles
         
-    except Exception:
+    except requests.Timeout:
+        print(f"[HRANA] ❌ Request timeout after 20s")
+        return []
+    except requests.ConnectionError as e:
+        print(f"[HRANA] ❌ Connection error: {str(e)[:200]}")
+        return []
+    except Exception as e:
+        print(f"[HRANA] ❌ Unexpected error: {str(e)[:200]}")
         return []
 
 # ========================================
@@ -1213,7 +1222,7 @@ def api_threat(target):
             'escalation_keywords': ESCALATION_KEYWORDS,
             'target_keywords': TARGET_KEYWORDS[target]['keywords'],
             'cached': False,
-            'version': '2.5.1'
+            'version': '2.5.2'
         })
         
     except Exception as e:
@@ -1281,7 +1290,7 @@ def scan_iran_protests():
             'articles_reddit': reddit_posts[:20],
             'articles_iranwire': iranwire_articles[:20],
             'articles_hrana': hrana_articles[:20],
-            'version': '2.5.1'
+            'version': '2.5.2'
         })
         
     except Exception as e:
@@ -1363,7 +1372,7 @@ def home():
     """Root endpoint"""
     return jsonify({
         'status': 'Backend is running',
-        'version': '2.5.1',
+        'version': '2.5.2',
         'endpoints': {
             '/api/threat/<target>': 'Threat assessment for hezbollah, iran, houthis, syria',
             '/scan-iran-protests': 'Iran protests data',
