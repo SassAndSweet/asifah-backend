@@ -1778,6 +1778,115 @@ def health():
         'timestamp': datetime.now(timezone.utc).isoformat()
     })
 
+@app.route('/api/polymarket', methods=['GET'])
+def polymarket_proxy():
+    """
+    Proxy Polymarket API to fetch geopolitical markets
+    Filters by keywords: Iran, Syria, Lebanon, Israel, Yemen, Hezbollah, Houthis, strikes
+    """
+    try:
+        # Try multiple Polymarket API endpoints
+        endpoints = [
+            'https://gamma-api.polymarket.com/events?active=true&limit=100',
+            'https://gamma-api.polymarket.com/markets?limit=100&active=true',
+            'https://strapi-matic.poly.market/markets?_limit=100&closed=false'
+        ]
+        
+        markets_data = None
+        
+        for endpoint in endpoints:
+            try:
+                print(f"[Polymarket] Trying endpoint: {endpoint}")
+                response = requests.get(endpoint, timeout=10, headers={
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                    'Accept': 'application/json'
+                })
+                
+                if response.status_code == 200 and response.text.strip():
+                    markets_data = response.json()
+                    print(f"[Polymarket] ✅ Success with {endpoint}")
+                    break
+            except Exception as e:
+                print(f"[Polymarket] Failed {endpoint}: {str(e)[:100]}")
+                continue
+        
+        if not markets_data:
+            print("[Polymarket] ❌ All endpoints failed")
+            return jsonify({
+                'success': False,
+                'markets': [],
+                'message': 'Polymarket API unavailable'
+            })
+        
+        # Keywords to filter for (case-insensitive)
+        keywords = [
+            'iran', 'iranian', 'tehran', 'khamenei',
+            'syria', 'syrian', 'damascus', 'assad',
+            'lebanon', 'lebanese', 'beirut',
+            'israel', 'israeli', 'idf',
+            'yemen', 'yemeni', 'sanaa',
+            'hezbollah', 'hizballah', 'hizbollah',
+            'houthi', 'houthis', 'ansarallah',
+            'strike', 'strikes', 'attack', 'war',
+            'gaza', 'hamas', 'palestinian'
+        ]
+        
+        relevant_markets = []
+        
+        # Handle different API response structures
+        events = markets_data if isinstance(markets_data, list) else markets_data.get('data', [])
+        
+        for event in events:
+            # Extract title and description
+            title = event.get('title', event.get('question', ''))
+            description = event.get('description', '')
+            slug = event.get('slug', event.get('id', ''))
+            
+            # Combine text for keyword matching
+            text = (title + ' ' + description).lower()
+            
+            # Check if any keyword matches
+            if not any(keyword in text for keyword in keywords):
+                continue
+            
+            # Extract probability
+            prob = None
+            
+            # Try different probability field names
+            if 'outcomePrices' in event and isinstance(event['outcomePrices'], list):
+                prob = float(event['outcomePrices'][0])
+            elif 'outcome_prices' in event and isinstance(event['outcome_prices'], list):
+                prob = float(event['outcome_prices'][0])
+            elif 'probability' in event:
+                prob = float(event['probability'])
+            elif 'price' in event:
+                prob = float(event['price'])
+            
+            if prob is None or not (0 <= prob <= 1):
+                continue
+            
+            relevant_markets.append({
+                'question': title[:100],  # Truncate long titles
+                'probability': round(prob, 3),
+                'url': f"https://polymarket.com/event/{slug}"
+            })
+        
+        print(f"[Polymarket] Found {len(relevant_markets)} relevant markets")
+        
+        return jsonify({
+            'success': True,
+            'markets': relevant_markets[:15],  # Limit to top 15
+            'count': len(relevant_markets)
+        })
+        
+    except Exception as e:
+        print(f"[Polymarket] ❌ Error: {str(e)[:200]}")
+        return jsonify({
+            'success': False,
+            'markets': [],
+            'error': str(e)[:200]
+        }), 500
+
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port, debug=False)
