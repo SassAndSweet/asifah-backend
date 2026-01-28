@@ -1,6 +1,13 @@
 """
-Asifah Analytics Backend v2.6.3
-January 27, 2026
+Asifah Analytics Backend v2.6.4
+January 28, 2026
+
+Changes from v2.6.3:
+- NEW: Flight Cancellations Monitor (/flight-cancellations)
+- Automated Google News scraping for airline disruptions
+- Tracks Israel, Lebanon, Syria, Iran, Yemen destinations
+- Returns airline, route, date, duration, status, source link
+- 30-day rolling window with auto-deduplication
 
 Changes from v2.6.2:
 - FIXED: Alpha Vantage oil price parsing bug
@@ -1754,11 +1761,13 @@ def home():
     """Root endpoint"""
     return jsonify({
         'status': 'Backend is running',
-        'version': '2.6.3',
+        'version': '2.6.4',
         'endpoints': {
             '/api/threat/<target>': 'Threat assessment for hezbollah, iran, houthis, syria',
             '/scan-iran-protests': 'Iran protests data + Regime Stability Index ✅',
             '/api/syria-conflicts': 'Syria conflicts tracker ✅',
+            '/flight-cancellations': 'Flight disruptions monitor (Israel, Lebanon, Syria, Iran, Yemen) ✅',
+            '/api/polymarket': 'Polymarket prediction markets proxy',
             '/rate-limit': 'Rate limit status',
             '/health': 'Health check'
         }
@@ -1774,9 +1783,269 @@ def health():
     """Health check"""
     return jsonify({
         'status': 'healthy',
-        'version': '2.6.3',
+        'version': '2.6.4',
         'timestamp': datetime.now(timezone.utc).isoformat()
     })
+
+@app.route('/flight-cancellations', methods=['GET'])
+def flight_cancellations():
+    """
+    Flight cancellations monitor for Middle East destinations
+    Scrapes Google News for airline suspensions/cancellations to:
+    - Israel (Tel Aviv, Haifa, Eilat)
+    - Lebanon (Beirut)
+    - Syria (Damascus)
+    - Iran (Tehran)
+    - Yemen (Sanaa)
+    
+    Returns last 30 days of disruptions with:
+    - Airline name
+    - Route (origin → destination)
+    - Date announced
+    - Duration
+    - Status (Suspended/Cancelled/Resumed)
+    - Source article link
+    """
+    try:
+        print("[Flight Cancellations] Starting scan...")
+        
+        # Search queries for Google News
+        destinations = [
+            'Tel Aviv', 'Israel', 'Haifa', 'Eilat',
+            'Beirut', 'Lebanon',
+            'Damascus', 'Syria',
+            'Tehran', 'Iran',
+            'Sanaa', 'Yemen'
+        ]
+        
+        keywords = [
+            'airline suspended flights',
+            'airline cancelled flights',
+            'flight cancellation',
+            'suspend service',
+            'resume flights',
+            'flights suspended until'
+        ]
+        
+        all_cancellations = []
+        seen_urls = set()
+        
+        # Search for each destination
+        for destination in destinations:
+            for keyword in keywords[:2]:  # Limit to 2 keywords per destination to avoid rate limits
+                query = f'{keyword} {destination}'
+                
+                # Use Google News RSS (free, no API key needed)
+                try:
+                    url = f"https://news.google.com/rss/search?q={query.replace(' ', '+')}&hl=en&gl=US&ceid=US:en"
+                    
+                    response = requests.get(url, timeout=10, headers={
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                    })
+                    
+                    if response.status_code != 200:
+                        continue
+                    
+                    # Parse RSS feed
+                    import xml.etree.ElementTree as ET
+                    
+                    try:
+                        root = ET.fromstring(response.content)
+                    except ET.ParseError:
+                        continue
+                    
+                    items = root.findall('.//item')
+                    
+                    for item in items[:5]:  # Top 5 results per query
+                        title_elem = item.find('title')
+                        link_elem = item.find('link')
+                        pubDate_elem = item.find('pubDate')
+                        
+                        if title_elem is None or link_elem is None:
+                            continue
+                        
+                        title = title_elem.text or ''
+                        link = link_elem.text or ''
+                        pub_date = pubDate_elem.text if pubDate_elem is not None else ''
+                        
+                        # Skip if already seen
+                        if link in seen_urls:
+                            continue
+                        
+                        seen_urls.add(link)
+                        
+                        # Parse cancellation data from title
+                        cancellation = parse_flight_cancellation(title, link, pub_date, destination)
+                        
+                        if cancellation:
+                            all_cancellations.append(cancellation)
+                
+                except Exception as e:
+                    print(f"[Flight Cancellations] Error searching {destination}: {str(e)[:100]}")
+                    continue
+        
+        # Filter to last 30 days
+        thirty_days_ago = datetime.now(timezone.utc) - timedelta(days=30)
+        recent_cancellations = []
+        
+        for cancel in all_cancellations:
+            try:
+                cancel_date = datetime.fromisoformat(cancel['date'].replace('Z', '+00:00'))
+                if cancel_date >= thirty_days_ago:
+                    recent_cancellations.append(cancel)
+            except:
+                recent_cancellations.append(cancel)  # Include if date parsing fails
+        
+        # Sort by date (newest first)
+        recent_cancellations.sort(key=lambda x: x.get('date', ''), reverse=True)
+        
+        # Remove duplicates by airline + destination
+        unique_cancellations = []
+        seen_combos = set()
+        
+        for cancel in recent_cancellations:
+            combo = f"{cancel['airline']}_{cancel['destination']}"
+            if combo not in seen_combos:
+                seen_combos.add(combo)
+                unique_cancellations.append(cancel)
+        
+        print(f"[Flight Cancellations] Found {len(unique_cancellations)} unique disruptions")
+        
+        return jsonify({
+            'success': True,
+            'cancellations': unique_cancellations[:20],  # Limit to top 20
+            'count': len(unique_cancellations),
+            'last_updated': datetime.now(timezone.utc).isoformat()
+        })
+        
+    except Exception as e:
+        print(f"[Flight Cancellations] ERROR: {str(e)}")
+        return jsonify({
+            'success': False,
+            'cancellations': [],
+            'error': str(e)[:200]
+        }), 500
+
+
+def parse_flight_cancellation(title, link, pub_date, destination):
+    """
+    Parse flight cancellation details from news headline
+    
+    Example headlines:
+    - "Lufthansa suspends Tel Aviv flights until March"
+    - "Air France cancels Beirut service indefinitely"
+    - "British Airways resumes Tehran flights"
+    """
+    title_lower = title.lower()
+    
+    # Detect status
+    status = 'Suspended'
+    if 'resume' in title_lower or 'restart' in title_lower or 'return' in title_lower:
+        status = 'Resumed'
+    elif 'cancel' in title_lower:
+        status = 'Cancelled'
+    elif 'suspend' in title_lower or 'halt' in title_lower or 'stop' in title_lower:
+        status = 'Suspended'
+    else:
+        return None  # Not a cancellation/resumption article
+    
+    # Extract airline name
+    airlines = [
+        'Lufthansa', 'Air France', 'British Airways', 'Delta', 'United',
+        'American Airlines', 'Emirates', 'Etihad', 'Qatar Airways',
+        'Turkish Airlines', 'Swiss', 'Austrian Airlines', 'LOT Polish',
+        'KLM', 'Iberia', 'Alitalia', 'Wizz Air', 'Ryanair', 'EasyJet',
+        'El Al', 'Arkia', 'Israir', 'Middle East Airlines', 'MEA',
+        'Air India', 'Singapore Airlines', 'Cathay Pacific', 'JAL', 'ANA'
+    ]
+    
+    airline_found = None
+    for airline in airlines:
+        if airline.lower() in title_lower:
+            airline_found = airline
+            break
+    
+    if not airline_found:
+        # Try to extract airline from title (first capitalized word before "suspend"/"cancel")
+        words = title.split()
+        for i, word in enumerate(words):
+            if word[0].isupper() and len(word) > 3:
+                if i < len(words) - 1:
+                    next_word = words[i + 1].lower()
+                    if next_word in ['suspend', 'suspends', 'cancel', 'cancels', 'halt', 'halts']:
+                        airline_found = word
+                        break
+    
+    if not airline_found:
+        airline_found = "Unknown Airline"
+    
+    # Extract duration
+    duration = "Indefinite"
+    
+    # Look for "until [date]"
+    until_match = re.search(r'until\s+([A-Za-z]+\s+\d{1,2}(?:,\s+\d{4})?)', title, re.IGNORECASE)
+    if until_match:
+        duration = f"Until {until_match.group(1)}"
+    
+    # Look for specific months
+    months = ['January', 'February', 'March', 'April', 'May', 'June', 
+              'July', 'August', 'September', 'October', 'November', 'December']
+    for month in months:
+        if month.lower() in title_lower:
+            year_match = re.search(r'\b(202[4-9])\b', title)
+            if year_match:
+                duration = f"Until {month} {year_match.group(1)}"
+            else:
+                duration = f"Until {month}"
+            break
+    
+    # Look for "for X days/weeks/months"
+    for_match = re.search(r'for\s+(\d+)\s+(day|week|month)s?', title, re.IGNORECASE)
+    if for_match:
+        num = for_match.group(1)
+        unit = for_match.group(2)
+        duration = f"For {num} {unit}{'s' if int(num) > 1 else ''}"
+    
+    # Parse date
+    try:
+        if pub_date:
+            # Try to parse RFC 2822 format (RSS standard)
+            from email.utils import parsedate_to_datetime
+            date_obj = parsedate_to_datetime(pub_date)
+            date_str = date_obj.isoformat()
+        else:
+            date_str = datetime.now(timezone.utc).isoformat()
+    except:
+        date_str = datetime.now(timezone.utc).isoformat()
+    
+    # Build route (origin → destination)
+    # Try to extract origin from title
+    origin = "Various"
+    major_cities = [
+        'Frankfurt', 'Paris', 'London', 'New York', 'Dubai', 'Istanbul',
+        'Munich', 'Vienna', 'Warsaw', 'Amsterdam', 'Madrid', 'Rome',
+        'Zurich', 'Geneva', 'Delhi', 'Mumbai', 'Singapore', 'Hong Kong'
+    ]
+    
+    for city in major_cities:
+        if city.lower() in title_lower:
+            origin = city
+            break
+    
+    route = f"{origin} → {destination}"
+    
+    return {
+        'airline': airline_found,
+        'route': route,
+        'origin': origin,
+        'destination': destination,
+        'date': date_str,
+        'duration': duration,
+        'status': status,
+        'source_url': link,
+        'headline': title[:150]  # Truncate long headlines
+    }
+
 
 @app.route('/api/polymarket', methods=['GET'])
 def polymarket_proxy():
