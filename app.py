@@ -1,6 +1,13 @@
 """
-Asifah Analytics Backend v2.6.6
-January 28, 2026
+Asifah Analytics Backend v2.6.7
+January 30, 2026
+
+Changes from v2.6.6:
+- REBALANCED: Regime Stability formula - reduced Rial devaluation weight
+  * Changed from 0.3 to 0.15 multiplier
+  * Reflects that regime has survived extreme currency collapse
+  * Should show ~33/100 instead of 0/100 for current conditions
+  * More realistic "Critical Risk" vs "Imminent Collapse" distinction
 
 Changes from v2.6.5:
 - FIXED: Oil price cascade with 4 reliable FREE APIs!
@@ -1318,16 +1325,19 @@ def calculate_regime_stability(exchange_data, protest_data, oil_data=None):
     """
     Calculate Iran regime stability score (0-100)
     
-    Formula v2.6.1:
+    Formula v2.6.7:
     Stability = Base(50)
                 + Military Strength Baseline(+30)
-                - (Rial Devaluation Impact × 3)
+                - (Rial Devaluation Impact × 1.5)  [Rebalanced from ×3 in v2.6.1]
                 - (Protest Intensity × 3)
                 - (Arrest Rate Impact × 2)
                 + (Oil Price Impact ±5)
                 + (Time Decay Bonus)
     
     Lower scores = Higher instability/regime stress
+    
+    Note: Rial weight reduced to 0.15 (from 0.3) to reflect that regime has survived
+    extreme currency devaluation - currency collapse is critical but not immediately fatal.
     """
     
     base_score = 50
@@ -1360,7 +1370,7 @@ def calculate_regime_stability(exchange_data, protest_data, oil_data=None):
         baseline_rate = 42000
         
         devaluation_pct = ((current_rate - baseline_rate) / baseline_rate) * 100
-        rial_devaluation_impact = (devaluation_pct / 10) * 0.3
+        rial_devaluation_impact = (devaluation_pct / 10) * 0.15  # Reduced from 0.3 to 0.15 (v2.6.7)
         
         print(f"[Regime Stability] Rial devaluation: {devaluation_pct:.1f}% → Impact: -{rial_devaluation_impact:.1f}")
     
@@ -1845,7 +1855,7 @@ def home():
     """Root endpoint"""
     return jsonify({
         'status': 'Backend is running',
-        'version': '2.6.6',
+        'version': '2.6.7',
         'endpoints': {
             '/api/threat/<target>': 'Threat assessment for hezbollah, iran, houthis, syria',
             '/scan-iran-protests': 'Iran protests data + Regime Stability Index ✅',
@@ -1867,7 +1877,7 @@ def health():
     """Health check"""
     return jsonify({
         'status': 'healthy',
-        'version': '2.6.6',
+        'version': '2.6.7',
         'timestamp': datetime.now(timezone.utc).isoformat()
     })
 
