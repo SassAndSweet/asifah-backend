@@ -1,6 +1,14 @@
 """
-Asifah Analytics Backend v2.6.5
+Asifah Analytics Backend v2.6.6
 January 28, 2026
+
+Changes from v2.6.5:
+- FIXED: Oil price cascade with 4 reliable FREE APIs!
+  * US EIA (Energy Information Administration) - No key required
+  * OilPriceAPI Demo - 20 requests/hour, no auth
+  * FRED (Federal Reserve) - CSV download, no key
+  * Alpha Vantage - Backup (25/day)
+  * Should fix Regime Stability stuck at 2/100
 
 Changes from v2.6.4:
 - ENHANCED: Flight Cancellations Monitor - Massive upgrade!
@@ -1017,8 +1025,96 @@ def extract_syria_conflict_data(articles):
 # ========================================
 # OIL PRICE FETCHING - CASCADING FALLBACK SYSTEM
 # ========================================
+def fetch_oil_eia():
+    """
+    Try US EIA (Energy Information Administration) - FREE, NO KEY REQUIRED!
+    Most reliable government source
+    """
+    try:
+        # EIA provides free Brent crude data via their open data API
+        url = "https://api.eia.gov/v2/petroleum/pri/spt/data/?frequency=daily&data[0]=value&facets[series][]=RBRTE&sort[0][column]=period&sort[0][direction]=desc&offset=0&length=1"
+        
+        response = requests.get(url, timeout=10)
+        
+        if response.status_code != 200:
+            print(f"[Oil Price] EIA HTTP error: {response.status_code}")
+            return None
+        
+        data = response.json()
+        
+        # Navigate the EIA response structure
+        if 'response' in data and 'data' in data['response']:
+            records = data['response']['data']
+            
+            if records and len(records) > 0:
+                latest = records[0]
+                price = float(latest.get('value', 0))
+                
+                if price > 0:
+                    print(f"[Oil Price] ✅ EIA: Brent ${price:.2f}")
+                    
+                    return {
+                        'price': round(price, 2),
+                        'change': 0,
+                        'change_percent': 0,
+                        'currency': 'USD',
+                        'commodity': 'Brent Crude',
+                        'source': 'US EIA'
+                    }
+        
+        print(f"[Oil Price] EIA: No valid data in response")
+        return None
+        
+    except Exception as e:
+        print(f"[Oil Price] EIA failed: {str(e)[:100]}")
+        return None
+
+
+def fetch_oil_demo_api():
+    """
+    Try OilPriceAPI demo endpoint - FREE, NO AUTH, 20 req/hour
+    """
+    try:
+        url = "https://api.oilpriceapi.com/v1/demo/prices"
+        
+        response = requests.get(url, timeout=10, headers={
+            'Content-Type': 'application/json'
+        })
+        
+        if response.status_code != 200:
+            print(f"[Oil Price] OilPriceAPI Demo HTTP error: {response.status_code}")
+            return None
+        
+        data = response.json()
+        
+        if data.get('status') == 'success' and 'data' in data:
+            price_data = data['data']
+            
+            # Demo endpoint gives WTI, we need to approximate Brent (usually ~$5 higher)
+            if 'price' in price_data:
+                wti_price = float(price_data['price'])
+                brent_approx = wti_price + 5  # Typical Brent premium over WTI
+                
+                print(f"[Oil Price] ✅ OilPriceAPI Demo: WTI ${wti_price:.2f} → Brent ~${brent_approx:.2f}")
+                
+                return {
+                    'price': round(brent_approx, 2),
+                    'change': 0,
+                    'change_percent': 0,
+                    'currency': 'USD',
+                    'commodity': 'Brent Crude (approx)',
+                    'source': 'OilPriceAPI Demo'
+                }
+        
+        return None
+        
+    except Exception as e:
+        print(f"[Oil Price] OilPriceAPI Demo failed: {str(e)[:100]}")
+        return None
+
+
 def fetch_oil_alpha_vantage():
-    """Try Alpha Vantage API (750 requests/month = 25/day) - FIXED v2.6.3"""
+    """Try Alpha Vantage API (750 requests/month = 25/day)"""
     try:
         url = f"https://www.alphavantage.co/query?function=BRENT&interval=daily&apikey={ALPHA_VANTAGE_KEY}"
         
@@ -1090,111 +1186,91 @@ def fetch_oil_alpha_vantage():
         return None
 
 
-def fetch_oil_commodities_api():
-    """Try Commodities-API.com (100 requests/month)"""
+def fetch_oil_fred():
+    """
+    Try FRED (Federal Reserve Economic Data) - FREE, NO KEY REQUIRED!
+    Reliable government source, updates daily
+    """
     try:
-        url = "https://commodities-api.com/api/latest?access_key=&symbols=BRENTOIL"
+        # FRED doesn't have a public API without key, but they have CSV download
+        # This is a fallback option
+        url = "https://fred.stlouisfed.org/graph/fredgraph.csv?id=DCOILBRENTEU"
         
         response = requests.get(url, timeout=10)
         
         if response.status_code != 200:
+            print(f"[Oil Price] FRED HTTP error: {response.status_code}")
             return None
         
-        data = response.json()
-        
-        if not data.get('success', False):
+        # Parse CSV (last line has latest price)
+        lines = response.text.strip().split('\n')
+        if len(lines) < 2:
             return None
         
-        rates = data.get('data', {}).get('rates', {})
-        brent_rate = rates.get('BRENTOIL')
+        last_line = lines[-1]
+        parts = last_line.split(',')
         
-        if not brent_rate:
-            return None
+        if len(parts) >= 2:
+            price_str = parts[1].strip()
+            if price_str and price_str != '.':
+                price = float(price_str)
+                
+                if price > 0:
+                    print(f"[Oil Price] ✅ FRED: Brent ${price:.2f}")
+                    
+                    return {
+                        'price': round(price, 2),
+                        'change': 0,
+                        'change_percent': 0,
+                        'currency': 'USD',
+                        'commodity': 'Brent Crude',
+                        'source': 'FRED'
+                    }
         
-        # Commodities-API returns inverse rate
-        price = 1 / float(brent_rate) if brent_rate else 0
-        
-        if price == 0:
-            return None
-        
-        print(f"[Oil Price] ✅ Commodities-API: Brent ${price:.2f}")
-        
-        return {
-            'price': round(price, 2),
-            'change': 0,
-            'change_percent': 0,
-            'currency': 'USD',
-            'commodity': 'Brent Crude',
-            'source': 'Commodities-API'
-        }
-        
-    except Exception as e:
-        print(f"[Oil Price] Commodities-API failed: {str(e)[:100]}")
         return None
-
-
-def fetch_oil_oilpriceapi():
-    """Try Oilpriceapi.com (100 requests/month)"""
-    try:
-        url = "https://api.oilpriceapi.com/v1/prices/latest"
-        
-        response = requests.get(url, timeout=10)
-        
-        if response.status_code != 200:
-            return None
-        
-        data = response.json()
-        
-        price = data.get('data', {}).get('price')
-        
-        if not price:
-            return None
-        
-        print(f"[Oil Price] ✅ OilPriceAPI: Brent ${price:.2f}")
-        
-        return {
-            'price': round(float(price), 2),
-            'change': 0,
-            'change_percent': 0,
-            'currency': 'USD',
-            'commodity': 'Brent Crude',
-            'source': 'OilPriceAPI'
-        }
         
     except Exception as e:
-        print(f"[Oil Price] OilPriceAPI failed: {str(e)[:100]}")
+        print(f"[Oil Price] FRED failed: {str(e)[:100]}")
         return None
 
 
 def fetch_oil_price():
     """
-    Fetch Brent Crude oil price using cascading fallback system
+    Fetch Brent Crude oil price using IMPROVED cascading fallback system
     
-    Tries 3 free APIs in order of monthly limit:
-    1. Alpha Vantage (750/month = 25/day) 
-    2. Commodities-API (100/month)
-    3. OilPriceAPI (100/month)
+    Tries 4 free APIs in order of reliability:
+    1. US EIA (Energy Information Administration) - Government, FREE, no key
+    2. OilPriceAPI Demo - FREE, 20 req/hour
+    3. FRED (Federal Reserve) - Government, FREE CSV
+    4. Alpha Vantage - 750/month = 25/day (backup)
     
-    Total: 950 free requests/month
+    All completely free with high limits!
     """
-    print("[Oil Price] Starting cascading API fetch...")
+    print("[Oil Price] Starting improved cascade...")
     
-    # Try Alpha Vantage first (highest limit)
+    # Try EIA first (most reliable government source)
+    result = fetch_oil_eia()
+    if result:
+        return result
+    
+    print("[Oil Price] Trying fallback: OilPriceAPI Demo...")
+    
+    # Try OilPriceAPI demo (free, no auth)
+    result = fetch_oil_demo_api()
+    if result:
+        return result
+    
+    print("[Oil Price] Trying fallback: FRED...")
+    
+    # Try FRED CSV download
+    result = fetch_oil_fred()
+    if result:
+        return result
+    
+    print("[Oil Price] Trying fallback: Alpha Vantage...")
+    
+    # Try Alpha Vantage last (rate limited but reliable)
     result = fetch_oil_alpha_vantage()
-    if result:
-        return result
-    
-    print("[Oil Price] Trying fallback: Commodities-API...")
-    
-    # Try Commodities-API second
-    result = fetch_oil_commodities_api()
-    if result:
-        return result
-    
-    print("[Oil Price] Trying fallback: OilPriceAPI...")
-    
-    # Try OilPriceAPI last
-    result = fetch_oil_oilpriceapi()
     if result:
         return result
     
@@ -1769,7 +1845,7 @@ def home():
     """Root endpoint"""
     return jsonify({
         'status': 'Backend is running',
-        'version': '2.6.5',
+        'version': '2.6.6',
         'endpoints': {
             '/api/threat/<target>': 'Threat assessment for hezbollah, iran, houthis, syria',
             '/scan-iran-protests': 'Iran protests data + Regime Stability Index ✅',
@@ -1791,7 +1867,7 @@ def health():
     """Health check"""
     return jsonify({
         'status': 'healthy',
-        'version': '2.6.5',
+        'version': '2.6.6',
         'timestamp': datetime.now(timezone.utc).isoformat()
     })
 
