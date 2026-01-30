@@ -1288,6 +1288,58 @@ def fetch_oil_price():
 # ========================================
 # IRAN REGIME STABILITY TRACKER
 # ========================================
+
+def extract_iran_cities(articles):
+    """
+    Extract Iranian cities mentioned in protest articles with source links
+    
+    Returns list of cities with counts and source URLs
+    """
+    # List of major Iranian cities to look for
+    iranian_cities = [
+        'Tehran', 'Mashhad', 'Isfahan', 'Karaj', 'Shiraz', 'Tabriz',
+        'Qom', 'Ahvaz', 'Kermanshah', 'Urmia', 'Rasht', 'Kerman',
+        'Zahedan', 'Hamadan', 'Yazd', 'Ardabil', 'Bandar Abbas', 'Arak',
+        'Eslamshahr', 'Zanjan', 'Sanandaj', 'Qazvin', 'Khorramabad', 'Gorgan',
+        'Sari', 'Dezful', 'Najafabad', 'Sabzevar', 'Khomeini Shahr', 'Neyshabur',
+        'Babol', 'Amol', 'Birjand', 'Bojnurd', 'Ilam', 'Yasuj', 'Maragheh'
+    ]
+    
+    city_data = {}
+    
+    for article in articles:
+        title = article.get('title', '')
+        description = article.get('description', '')
+        url = article.get('url', article.get('link', ''))
+        
+        text = f"{title} {description}".lower()
+        
+        for city in iranian_cities:
+            if city.lower() in text:
+                if city not in city_data:
+                    city_data[city] = {
+                        'name': city,
+                        'count': 0,
+                        'sources': []
+                    }
+                
+                city_data[city]['count'] += 1
+                
+                # Add source URL (limit to 3 per city)
+                if url and len(city_data[city]['sources']) < 3:
+                    if url not in city_data[city]['sources']:
+                        city_data[city]['sources'].append(url)
+    
+    # Sort by count descending
+    sorted_cities = sorted(city_data.values(), key=lambda x: x['count'], reverse=True)
+    
+    print(f"[Iran Cities] Found {len(sorted_cities)} cities mentioned in articles")
+    for city in sorted_cities[:5]:
+        print(f"[Iran Cities]   {city['name']}: {city['count']} mentions")
+    
+    return sorted_cities
+
+
 def fetch_iran_exchange_rate():
     """Fetch USD/IRR exchange rate from ExchangeRate-API (free, no auth)"""
     try:
@@ -1764,6 +1816,15 @@ def scan_iran_protests():
         
         regime_stability = calculate_regime_stability(exchange_data, protest_summary, oil_data)
         
+        # Extract cities from all articles
+        cities = extract_iran_cities(all_articles)
+        num_cities = len(cities)
+        
+        # If no cities found, show zero not hardcoded number
+        if num_cities == 0:
+            cities = []
+            num_cities = 0
+        
         return jsonify({
             'success': True,
             'days_analyzed': days,
@@ -1771,8 +1832,8 @@ def scan_iran_protests():
             'intensity': int(intensity_score),
             'stability': int(stability_score),
             'casualties': casualties,
-            'cities': [],
-            'num_cities_affected': 5,
+            'cities': cities,  # Now includes actual city data with sources
+            'num_cities_affected': num_cities,  # Real count, not hardcoded
             'articles_en': [a for a in all_articles if a.get('language') == 'en'][:20],
             'articles_fa': [a for a in all_articles if a.get('language') == 'fa'][:20],
             'articles_ar': [a for a in all_articles if a.get('language') == 'ar'][:20],
@@ -1783,7 +1844,7 @@ def scan_iran_protests():
             'exchange_rate': exchange_data,
             'oil_price': oil_data,
             'regime_stability': regime_stability,
-            'version': '2.6.3'
+            'version': '2.6.7'
         })
         
     except Exception as e:
