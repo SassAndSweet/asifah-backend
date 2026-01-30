@@ -1293,8 +1293,11 @@ def extract_iran_cities(articles):
     """
     Extract Iranian cities mentioned in protest articles with source links
     
-    Returns list of cities with counts and source URLs
+    Only includes articles from the last 7 days to keep data fresh
+    Returns list of cities with counts, source URLs, and source names
     """
+    from datetime import datetime, timedelta, timezone
+    
     # List of major Iranian cities to look for
     iranian_cities = [
         'Tehran', 'Mashhad', 'Isfahan', 'Karaj', 'Shiraz', 'Tabriz',
@@ -1306,11 +1309,55 @@ def extract_iran_cities(articles):
     ]
     
     city_data = {}
+    cutoff_date = datetime.now(timezone.utc) - timedelta(days=7)
     
     for article in articles:
+        # Filter by recency (last 7 days only)
+        pub_date = article.get('publishedAt') or article.get('published_date') or article.get('date')
+        
+        if pub_date:
+            try:
+                if isinstance(pub_date, str):
+                    # Try parsing ISO format
+                    try:
+                        article_date = datetime.fromisoformat(pub_date.replace('Z', '+00:00'))
+                    except:
+                        # Try RFC 2822 format (from RSS)
+                        from email.utils import parsedate_to_datetime
+                        article_date = parsedate_to_datetime(pub_date)
+                    
+                    # Skip articles older than 7 days
+                    if article_date < cutoff_date:
+                        continue
+            except:
+                pass  # If date parsing fails, include the article anyway
+        
         title = article.get('title', '')
         description = article.get('description', '')
         url = article.get('url', article.get('link', ''))
+        
+        # Extract source name from domain or source field
+        source_name = article.get('source', {})
+        if isinstance(source_name, dict):
+            source_name = source_name.get('name', '')
+        
+        if not source_name:
+            # Extract from URL domain
+            try:
+                from urllib.parse import urlparse
+                domain = urlparse(url).netloc
+                # Clean up domain
+                source_name = domain.replace('www.', '').split('.')[0].title()
+            except:
+                source_name = 'Unknown'
+        
+        # Handle special sources
+        if 'hrana' in url.lower():
+            source_name = 'HRANA'
+        elif 'iranwire' in url.lower():
+            source_name = 'IranWire'
+        elif 'reddit' in url.lower():
+            source_name = 'Reddit'
         
         text = f"{title} {description}".lower()
         
@@ -1325,15 +1372,21 @@ def extract_iran_cities(articles):
                 
                 city_data[city]['count'] += 1
                 
-                # Add source URL (limit to 3 per city)
+                # Add source with name and URL (limit to 3 per city)
                 if url and len(city_data[city]['sources']) < 3:
-                    if url not in city_data[city]['sources']:
-                        city_data[city]['sources'].append(url)
+                    source_obj = {
+                        'url': url,
+                        'name': source_name
+                    }
+                    
+                    # Avoid duplicate URLs
+                    if not any(s['url'] == url for s in city_data[city]['sources']):
+                        city_data[city]['sources'].append(source_obj)
     
     # Sort by count descending
     sorted_cities = sorted(city_data.values(), key=lambda x: x['count'], reverse=True)
     
-    print(f"[Iran Cities] Found {len(sorted_cities)} cities mentioned in articles")
+    print(f"[Iran Cities] Found {len(sorted_cities)} cities mentioned in recent articles (7-day window)")
     for city in sorted_cities[:5]:
         print(f"[Iran Cities]   {city['name']}: {city['count']} mentions")
     
