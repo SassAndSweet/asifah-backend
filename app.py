@@ -1769,7 +1769,7 @@ def calculate_lebanon_stability(currency_data, bond_data, hezbollah_data):
                 - Currency Collapse Impact (-10 to -30)
                 - Bond Yield Stress (-5 to -25)
                 - Hezbollah Activity (-0 to -20)
-                - Presidential Vacancy (-15 fixed)
+                + Presidential Leadership (+10) [Joseph Aoun elected Jan 9, 2025]
                 + Election Proximity Bonus (+5 if within 90 days)
     
     Lower scores = Higher instability
@@ -1832,13 +1832,15 @@ def calculate_lebanon_stability(currency_data, bond_data, hezbollah_data):
         print(f"[Lebanon Stability] Hezbollah activity: {activity_score}/100 → Impact: -{hezbollah_impact:.1f}")
     
     # ========================================
-    # PRESIDENTIAL VACANCY
+    # PRESIDENTIAL LEADERSHIP BONUS
     # ========================================
-    # Lebanon has been without president since Oct 31, 2022
-    # This is a major constitutional crisis
-    presidential_vacancy_penalty = 15
+    # Joseph Aoun elected president on January 9, 2025
+    # This is a POSITIVE development after 2+ years of vacancy
+    presidential_bonus = 10
+    president_elected_date = datetime(2025, 1, 9, tzinfo=timezone.utc)
+    days_with_president = (datetime.now(timezone.utc) - president_elected_date).days
     
-    print(f"[Lebanon Stability] Presidential vacancy (since Oct 2022) → Impact: -{presidential_vacancy_penalty}")
+    print(f"[Lebanon Stability] President Joseph Aoun ({days_with_president} days in office) → Bonus: +{presidential_bonus}")
     
     # ========================================
     # ELECTION PROXIMITY BONUS
@@ -1857,7 +1859,7 @@ def calculate_lebanon_stability(currency_data, bond_data, hezbollah_data):
     # FINAL SCORE CALCULATION
     # ========================================
     stability_score = (base_score - currency_impact - bond_impact - 
-                      hezbollah_impact - presidential_vacancy_penalty + election_bonus)
+                      hezbollah_impact + presidential_bonus + election_bonus)
     
     stability_score = max(0, min(100, stability_score))
     stability_score = int(stability_score)
@@ -1888,8 +1890,10 @@ def calculate_lebanon_stability(currency_data, bond_data, hezbollah_data):
     
     if hezbollah_data and hezbollah_data.get('activity_score', 0) > 50:
         trend = "worsening"
+    elif days_with_president < 60:
+        trend = "improving"  # New president is positive
     elif days_until_election < 60:
-        trend = "improving"  # Elections might bring stability
+        trend = "improving"  # Elections approaching
     
     return {
         'score': stability_score,
@@ -1901,11 +1905,11 @@ def calculate_lebanon_stability(currency_data, bond_data, hezbollah_data):
             'currency_impact': -currency_impact,
             'bond_impact': -bond_impact,
             'hezbollah_impact': -hezbollah_impact,
-            'presidential_vacancy': -presidential_vacancy_penalty,
+            'presidential_bonus': presidential_bonus,
             'election_bonus': election_bonus
         },
         'days_until_election': days_until_election if days_until_election > 0 else 0,
-        'days_without_president': (datetime.now(timezone.utc) - datetime(2022, 10, 31, tzinfo=timezone.utc)).days
+        'days_with_president': days_with_president
     }
 
 
@@ -2274,9 +2278,10 @@ def scan_lebanon_stability():
             'bonds': bond_data,
             'hezbollah': hezbollah_data,
             'government': {
-                'has_president': False,
-                'days_without_president': stability.get('days_without_president', 0),
-                'caretaker_pm': 'Najib Mikati',
+                'has_president': True,
+                'president': 'Joseph Aoun',
+                'days_with_president': stability.get('days_with_president', 0),
+                'president_elected_date': '2025-01-09',
                 'parliamentary_election_date': '2026-05-03',
                 'days_until_election': stability.get('days_until_election', 0)
             },
