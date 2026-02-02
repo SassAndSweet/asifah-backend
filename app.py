@@ -1,6 +1,16 @@
 """
-Asifah Analytics Backend v2.6.7
-January 30, 2026
+Asifah Analytics Backend v2.7.0
+February 3, 2026
+
+Changes from v2.6.7:
+- NEW: Lebanon Stability Index (/scan-lebanon-stability) 🇱🇧
+  * Multi-factor stability scoring (Political, Economic, Security, Hezbollah)
+  * Eurobond yield scraping (Trading Economics)
+  * LBP/USD black market rate tracking
+  * Hezbollah rearmament indicators
+  * Parliamentary elections countdown (May 3, 2026)
+  * Presidential vacancy tracking (since Oct 2022)
+  * Color-coded risk levels (Green/Yellow/Orange/Red)
 
 Changes from v2.6.6:
 - REBALANCED: Regime Stability formula - reduced Rial devaluation weight
@@ -1571,6 +1581,335 @@ def calculate_regime_stability(exchange_data, protest_data, oil_data=None):
     }
 
 # ========================================
+# LEBANON STABILITY TRACKER
+# ========================================
+
+def scrape_lebanon_bonds():
+    """
+    Scrape Lebanon 10Y Eurobond yield from Trading Economics
+    High yields = economic stress/default risk
+    """
+    try:
+        print("[Lebanon Bonds] Scraping Trading Economics...")
+        
+        url = "https://tradingeconomics.com/lebanon/government-bond-yield"
+        
+        response = requests.get(url, timeout=10, headers={
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        })
+        
+        if response.status_code != 200:
+            print(f"[Lebanon Bonds] HTTP error: {response.status_code}")
+            return None
+        
+        from bs4 import BeautifulSoup
+        soup = BeautifulSoup(response.content, 'html.parser')
+        
+        # Try multiple selectors for the yield value
+        # Trading Economics typically shows current value prominently
+        value_elem = (soup.find('div', {'id': 'p'}) or 
+                     soup.find('span', {'id': 'p'}) or
+                     soup.find('div', class_='col-md-4'))
+        
+        if value_elem:
+            text = value_elem.get_text().strip()
+            # Extract number from text like "45.2%" or "45.2"
+            import re
+            match = re.search(r'(\d+\.?\d*)', text)
+            if match:
+                yield_pct = float(match.group(1))
+                print(f"[Lebanon Bonds] ✅ 10Y yield: {yield_pct}%")
+                
+                return {
+                    'yield': yield_pct,
+                    'source': 'Trading Economics',
+                    'date': datetime.now(timezone.utc).isoformat()
+                }
+        
+        print("[Lebanon Bonds] Could not extract yield from page")
+        return None
+        
+    except Exception as e:
+        print(f"[Lebanon Bonds] Error: {str(e)[:100]}")
+        return None
+
+
+def fetch_lebanon_currency():
+    """
+    Fetch LBP/USD black market rate
+    Official rate ~1,500, black market rate ~90,000+ (massive collapse)
+    """
+    try:
+        print("[Lebanon Currency] Fetching LBP/USD black market rate...")
+        
+        # Try ExchangeRate-API first (may have LBP)
+        url = "https://open.exchangerate-api.com/v6/latest/USD"
+        
+        response = requests.get(url, timeout=10)
+        
+        if response.status_code == 200:
+            data = response.json()
+            
+            lbp_rate = data.get('rates', {}).get('LBP')
+            
+            if lbp_rate:
+                print(f"[Lebanon Currency] ✅ USD/LBP: {lbp_rate:,.0f}")
+                
+                return {
+                    'usd_to_lbp': lbp_rate,
+                    'official_rate': 1500,  # Pegged rate (not realistic)
+                    'devaluation_pct': ((lbp_rate - 1500) / 1500) * 100,
+                    'last_updated': data.get('time_last_update_utc', ''),
+                    'source': 'ExchangeRate-API'
+                }
+        
+        # Fallback: estimate based on known collapse (90,000+ LBP/USD)
+        print("[Lebanon Currency] Using estimated black market rate")
+        return {
+            'usd_to_lbp': 90000,  # Approximate black market rate
+            'official_rate': 1500,
+            'devaluation_pct': ((90000 - 1500) / 1500) * 100,
+            'source': 'Estimated',
+            'last_updated': datetime.now(timezone.utc).isoformat()
+        }
+        
+    except Exception as e:
+        print(f"[Lebanon Currency] ❌ Error: {str(e)[:200]}")
+        return None
+
+
+def track_hezbollah_activity(days=7):
+    """
+    Track Hezbollah rearmament and activity indicators
+    
+    Looks for:
+    - Rearmament mentions
+    - Israeli strikes on Hezbollah
+    - UNIFIL reports
+    - Iranian weapons shipments
+    """
+    try:
+        print("[Hezbollah] Scanning news for activity indicators...")
+        
+        # Search multiple keywords
+        keywords = [
+            'Hezbollah rearmament',
+            'Hezbollah weapons',
+            'Israeli strike Lebanon',
+            'UNIFIL Lebanon',
+            'Iran weapons Lebanon'
+        ]
+        
+        all_articles = []
+        
+        for keyword in keywords:
+            try:
+                # Google News RSS
+                query = keyword.replace(' ', '+')
+                url = f"https://news.google.com/rss/search?q={query}&hl=en&gl=US&ceid=US:en"
+                
+                response = requests.get(url, timeout=10, headers={
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                })
+                
+                if response.status_code == 200:
+                    import xml.etree.ElementTree as ET
+                    
+                    root = ET.fromstring(response.content)
+                    items = root.findall('.//item')
+                    
+                    for item in items[:5]:  # Top 5 per keyword
+                        title_elem = item.find('title')
+                        link_elem = item.find('link')
+                        pubDate_elem = item.find('pubDate')
+                        
+                        if title_elem is not None:
+                            all_articles.append({
+                                'title': title_elem.text or '',
+                                'url': link_elem.text if link_elem is not None else '',
+                                'published': pubDate_elem.text if pubDate_elem is not None else '',
+                                'keyword': keyword
+                            })
+            except:
+                continue
+        
+        # Count indicators
+        rearmament_count = sum(1 for a in all_articles if 'rearm' in a['title'].lower())
+        strike_count = sum(1 for a in all_articles if 'strike' in a['title'].lower() or 'attack' in a['title'].lower())
+        
+        activity_score = min((rearmament_count * 5 + strike_count * 3), 100)
+        
+        print(f"[Hezbollah] Found {len(all_articles)} articles, activity score: {activity_score}/100")
+        
+        return {
+            'articles': all_articles[:20],  # Top 20
+            'total_articles': len(all_articles),
+            'rearmament_mentions': rearmament_count,
+            'strike_mentions': strike_count,
+            'activity_score': activity_score
+        }
+        
+    except Exception as e:
+        print(f"[Hezbollah] ❌ Error: {str(e)[:200]}")
+        return {
+            'articles': [],
+            'total_articles': 0,
+            'rearmament_mentions': 0,
+            'strike_mentions': 0,
+            'activity_score': 0
+        }
+
+
+def calculate_lebanon_stability(currency_data, bond_data, hezbollah_data):
+    """
+    Calculate Lebanon stability score (0-100)
+    
+    Formula v2.7.0:
+    Stability = Base(50)
+                - Currency Collapse Impact (-10 to -30)
+                - Bond Yield Stress (-5 to -25)
+                - Hezbollah Activity (-0 to -20)
+                - Presidential Vacancy (-15 fixed)
+                + Election Proximity Bonus (+5 if within 90 days)
+    
+    Lower scores = Higher instability
+    
+    Color codes:
+    - 70-100: Stable (Green)
+    - 40-69: Moderate Risk (Yellow)
+    - 20-39: High Risk (Orange)  
+    - 0-19: Critical (Red)
+    """
+    
+    base_score = 50
+    
+    print("[Lebanon Stability] Calculating overall stability score...")
+    
+    # ========================================
+    # CURRENCY COLLAPSE IMPACT
+    # ========================================
+    currency_impact = 0
+    
+    if currency_data:
+        current_rate = currency_data.get('usd_to_lbp', 90000)
+        official_rate = 1500
+        
+        # Massive devaluation (90,000/1500 = 60x collapse)
+        devaluation_pct = ((current_rate - official_rate) / official_rate) * 100
+        
+        # Scale: 0-3000% devaluation → 0-30 points penalty
+        currency_impact = min((devaluation_pct / 100), 30)
+        
+        print(f"[Lebanon Stability] Currency: {current_rate:,.0f} LBP/USD ({devaluation_pct:.0f}% devaluation) → Impact: -{currency_impact:.1f}")
+    
+    # ========================================
+    # BOND YIELD STRESS
+    # ========================================
+    bond_impact = 0
+    
+    if bond_data:
+        bond_yield = bond_data.get('yield', 0)
+        
+        # Lebanon defaulted in 2020, yields are extremely high
+        # Normal bonds: 2-5%, Lebanon: 30-50%+
+        # Scale: 0-50% yield → 0-25 points penalty
+        bond_impact = min((bond_yield / 2), 25)
+        
+        print(f"[Lebanon Stability] Bond yield: {bond_yield}% → Impact: -{bond_impact:.1f}")
+    
+    # ========================================
+    # HEZBOLLAH ACTIVITY IMPACT
+    # ========================================
+    hezbollah_impact = 0
+    
+    if hezbollah_data:
+        activity_score = hezbollah_data.get('activity_score', 0)
+        
+        # High activity = instability
+        # 0-100 activity → 0-20 points penalty
+        hezbollah_impact = (activity_score / 100) * 20
+        
+        print(f"[Lebanon Stability] Hezbollah activity: {activity_score}/100 → Impact: -{hezbollah_impact:.1f}")
+    
+    # ========================================
+    # PRESIDENTIAL VACANCY
+    # ========================================
+    # Lebanon has been without president since Oct 31, 2022
+    # This is a major constitutional crisis
+    presidential_vacancy_penalty = 15
+    
+    print(f"[Lebanon Stability] Presidential vacancy (since Oct 2022) → Impact: -{presidential_vacancy_penalty}")
+    
+    # ========================================
+    # ELECTION PROXIMITY BONUS
+    # ========================================
+    election_bonus = 0
+    
+    # Parliamentary elections scheduled for May 3, 2026
+    election_date = datetime(2026, 5, 3, tzinfo=timezone.utc)
+    days_until_election = (election_date - datetime.now(timezone.utc)).days
+    
+    if 0 <= days_until_election <= 90:
+        election_bonus = 5
+        print(f"[Lebanon Stability] Elections in {days_until_election} days → Bonus: +{election_bonus}")
+    
+    # ========================================
+    # FINAL SCORE CALCULATION
+    # ========================================
+    stability_score = (base_score - currency_impact - bond_impact - 
+                      hezbollah_impact - presidential_vacancy_penalty + election_bonus)
+    
+    stability_score = max(0, min(100, stability_score))
+    stability_score = int(stability_score)
+    
+    # ========================================
+    # RISK LEVEL & COLOR
+    # ========================================
+    if stability_score >= 70:
+        risk_level = "Stable"
+        risk_color = "green"
+    elif stability_score >= 40:
+        risk_level = "Moderate Risk"
+        risk_color = "yellow"
+    elif stability_score >= 20:
+        risk_level = "High Risk"
+        risk_color = "orange"
+    else:
+        risk_level = "Critical"
+        risk_color = "red"
+    
+    print(f"[Lebanon Stability] ✅ Final Score: {stability_score}/100 ({risk_level})")
+    
+    # ========================================
+    # TREND CALCULATION
+    # ========================================
+    # Based on recent activity
+    trend = "stable"
+    
+    if hezbollah_data and hezbollah_data.get('activity_score', 0) > 50:
+        trend = "worsening"
+    elif days_until_election < 60:
+        trend = "improving"  # Elections might bring stability
+    
+    return {
+        'score': stability_score,
+        'risk_level': risk_level,
+        'risk_color': risk_color,
+        'trend': trend,
+        'components': {
+            'base': base_score,
+            'currency_impact': -currency_impact,
+            'bond_impact': -bond_impact,
+            'hezbollah_impact': -hezbollah_impact,
+            'presidential_vacancy': -presidential_vacancy_penalty,
+            'election_bonus': election_bonus
+        },
+        'days_until_election': days_until_election if days_until_election > 0 else 0,
+        'days_without_president': (datetime.now(timezone.utc) - datetime(2022, 10, 31, tzinfo=timezone.utc)).days
+    }
+
+
+# ========================================
 # IRAN PROTESTS DATA EXTRACTION
 # ========================================
 def parse_number_word(num_str):
@@ -1897,10 +2236,55 @@ def scan_iran_protests():
             'exchange_rate': exchange_data,
             'oil_price': oil_data,
             'regime_stability': regime_stability,
-            'version': '2.6.7'
+            'version': '2.7.0'
         })
         
     except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/scan-lebanon-stability', methods=['GET'])
+def scan_lebanon_stability():
+    """
+    Lebanon Stability Index endpoint
+    
+    Tracks:
+    - Political stability (government formation, elections)
+    - Economic stress (bond yields, currency collapse)
+    - Hezbollah activity (rearmament, strikes)
+    - Security situation
+    """
+    try:
+        if not check_rate_limit():
+            return jsonify({'error': 'Rate limit exceeded'}), 429
+        
+        print("[Lebanon] Starting stability scan...")
+        
+        # Fetch all data sources
+        currency_data = fetch_lebanon_currency()
+        bond_data = scrape_lebanon_bonds()
+        hezbollah_data = track_hezbollah_activity(days=7)
+        
+        # Calculate overall stability
+        stability = calculate_lebanon_stability(currency_data, bond_data, hezbollah_data)
+        
+        return jsonify({
+            'success': True,
+            'stability': stability,
+            'currency': currency_data,
+            'bonds': bond_data,
+            'hezbollah': hezbollah_data,
+            'government': {
+                'has_president': False,
+                'days_without_president': stability.get('days_without_president', 0),
+                'caretaker_pm': 'Najib Mikati',
+                'parliamentary_election_date': '2026-05-03',
+                'days_until_election': stability.get('days_until_election', 0)
+            },
+            'version': '2.7.0'
+        })
+        
+    except Exception as e:
+        print(f"[Lebanon] ❌ Error: {str(e)}")
         return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/api/syria-conflicts', methods=['GET'])
@@ -1969,12 +2353,13 @@ def home():
     """Root endpoint"""
     return jsonify({
         'status': 'Backend is running',
-        'version': '2.6.7',
+        'version': '2.7.0',
         'endpoints': {
             '/api/threat/<target>': 'Threat assessment for hezbollah, iran, houthis, syria',
             '/scan-iran-protests': 'Iran protests data + Regime Stability Index ✅',
+            '/scan-lebanon-stability': 'Lebanon Stability Index (Political, Economic, Security, Hezbollah) 🇱🇧 NEW!',
             '/api/syria-conflicts': 'Syria conflicts tracker ✅',
-            '/flight-cancellations': 'Flight disruptions monitor (Israel, Lebanon, Syria, Iran, Yemen) ✅',
+            '/flight-cancellations': 'Flight disruptions monitor (15 Middle East countries) ✅',
             '/api/polymarket': 'Polymarket prediction markets proxy',
             '/rate-limit': 'Rate limit status',
             '/health': 'Health check'
@@ -1991,7 +2376,7 @@ def health():
     """Health check"""
     return jsonify({
         'status': 'healthy',
-        'version': '2.6.7',
+        'version': '2.7.0',
         'timestamp': datetime.now(timezone.utc).isoformat()
     })
 
