@@ -1605,51 +1605,109 @@ def calculate_regime_stability(exchange_data, protest_data, oil_data=None):
 
 def scrape_lebanon_bonds():
     """
-    Scrape Lebanon 10Y Eurobond yield from Trading Economics
+    Scrape Lebanon 10Y Eurobond yield from Investing.com
     High yields = economic stress/default risk
+    
+    Note: Lebanon defaulted on sovereign debt in March 2020
+    Eurobonds now trading as distressed debt with very high yields
     """
     try:
-        print("[Lebanon Bonds] Scraping Trading Economics...")
+        print("[Lebanon Bonds] Scraping Investing.com for Lebanon Eurobond data...")
         
-        url = "https://tradingeconomics.com/lebanon/government-bond-yield"
+        # Try primary URL for Lebanon 10Y
+        url = "https://www.investing.com/rates-bonds/lebanon-10-year-bond-yield"
         
-        response = requests.get(url, timeout=10, headers={
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-        })
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.5',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'Connection': 'keep-alive',
+        }
+        
+        response = requests.get(url, timeout=10, headers=headers)
         
         if response.status_code != 200:
-            print(f"[Lebanon Bonds] HTTP error: {response.status_code}")
-            return None
+            print(f"[Lebanon Bonds] HTTP error from Investing.com: {response.status_code}")
+            return scrape_lebanon_bonds_fallback()
         
         from bs4 import BeautifulSoup
         soup = BeautifulSoup(response.content, 'html.parser')
         
-        # Try multiple selectors for the yield value
-        # Trading Economics typically shows current value prominently
-        value_elem = (soup.find('div', {'id': 'p'}) or 
-                     soup.find('span', {'id': 'p'}) or
-                     soup.find('div', class_='col-md-4'))
+        # Investing.com stores the current value in various places
+        # Try multiple selectors
+        
+        # Method 1: Look for data-test attribute (most reliable)
+        value_elem = soup.find('span', {'data-test': 'instrument-price-last'})
+        
+        # Method 2: Look for common class names
+        if not value_elem:
+            value_elem = soup.find('span', class_=lambda x: x and 'text-2xl' in x)
+        
+        # Method 3: Look for any span with large text that's a number
+        if not value_elem:
+            for span in soup.find_all('span'):
+                text = span.get_text().strip()
+                if text and any(char.isdigit() for char in text) and '%' not in text:
+                    import re
+                    if re.match(r'^\d+\.?\d*$', text):
+                        value_elem = span
+                        break
         
         if value_elem:
             text = value_elem.get_text().strip()
-            # Extract number from text like "45.2%" or "45.2"
+            # Extract number
             import re
             match = re.search(r'(\d+\.?\d*)', text)
             if match:
                 yield_pct = float(match.group(1))
-                print(f"[Lebanon Bonds] ✅ 10Y yield: {yield_pct}%")
                 
-                return {
-                    'yield': yield_pct,
-                    'source': 'Trading Economics',
-                    'date': datetime.now(timezone.utc).isoformat()
-                }
+                # Sanity check: Lebanon yields should be 20-100% (distressed debt)
+                if 10 <= yield_pct <= 200:
+                    print(f"[Lebanon Bonds] ✅ Investing.com: 10Y yield: {yield_pct}%")
+                    
+                    return {
+                        'yield': yield_pct,
+                        'source': 'Investing.com',
+                        'date': datetime.now(timezone.utc).isoformat(),
+                        'note': 'Distressed debt (defaulted March 2020)'
+                    }
+                else:
+                    print(f"[Lebanon Bonds] ⚠️ Suspicious yield value: {yield_pct}% (out of expected range)")
         
-        print("[Lebanon Bonds] Could not extract yield from page")
-        return None
+        print("[Lebanon Bonds] Could not extract yield from Investing.com, trying fallback...")
+        return scrape_lebanon_bonds_fallback()
         
     except Exception as e:
-        print(f"[Lebanon Bonds] Error: {str(e)[:100]}")
+        print(f"[Lebanon Bonds] Investing.com error: {str(e)[:150]}")
+        return scrape_lebanon_bonds_fallback()
+
+
+def scrape_lebanon_bonds_fallback():
+    """
+    Fallback bond data using known estimates
+    Lebanon has been in default since March 2020
+    """
+    try:
+        print("[Lebanon Bonds] Using estimated fallback data...")
+        
+        # Lebanon Eurobonds trade as distressed debt
+        # Typical yields: 40-60% (varies by maturity and market conditions)
+        # This is an estimate based on recent market data
+        
+        estimated_yield = 45.0  # Conservative mid-range estimate
+        
+        print(f"[Lebanon Bonds] ⚠️ Using estimated yield: {estimated_yield}% (Lebanon in default since 2020)")
+        
+        return {
+            'yield': estimated_yield,
+            'source': 'Estimated',
+            'date': datetime.now(timezone.utc).isoformat(),
+            'note': 'Estimated - Lebanon defaulted March 2020. Update manually for accuracy.'
+        }
+        
+    except Exception as e:
+        print(f"[Lebanon Bonds] Fallback error: {str(e)[:100]}")
         return None
 
 
