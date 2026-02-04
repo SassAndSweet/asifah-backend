@@ -71,6 +71,7 @@ from flask_cors import CORS
 import requests
 from datetime import datetime, timezone, timedelta
 import os
+import json
 import time
 import re
 import math
@@ -2414,7 +2415,7 @@ def calculate_casualty_trends(current_casualties):
         }
         
         # Calculate days since September 2022
-        start_date = datetime.strptime(CUMULATIVE_BASELINE['start_date'], '%Y-%m-%d')
+        start_date = datetime.strptime(CUMULATIVE_BASELINE['start_date'], '%Y-%m-%d').replace(tzinfo=timezone.utc)
         days_since_start = (datetime.now(timezone.utc) - start_date).days
         weeks_since_start = days_since_start / 7
         
