@@ -370,6 +370,228 @@ def detect_deescalation(text):
     
     return False
 
+def calculate_us_strike_probability(articles, days_analyzed=7, target='iran'):
+    """
+    Calculate US strike probability with US-specific indicators
+    Includes Trump statements, DoD announcements, deployment signals
+    """
+    
+    # US-specific escalation keywords (in addition to base keywords)
+    US_ESCALATION_KEYWORDS = {
+        # Trump & Administration
+        'trump': {'weight': 1.2, 'phrases': [
+            'will not hesitate', 'all options', 'maximum pressure', 'fire and fury',
+            'locked and loaded', 'military response', 'devastating consequences'
+        ]},
+        'dod': {'weight': 1.5, 'phrases': [
+            'reviewing all options', 'prepared to defend', 'directed to deploy',
+            'forces on heightened alert', 'strike options', 'kinetic action',
+            'military posture', 'combat operations'
+        ]},
+        'deployments': {'weight': 2.0, 'phrases': [
+            'carrier strike group', 'bomber deployment', 'additional forces',
+            'troop surge', 'asset redeployment', 'forward deployment',
+            'expeditionary strike', 'amphibious ready group'
+        ]},
+        # Reverse signals (de-escalation)
+        'withdrawal': {'weight': -1.5, 'phrases': [
+            'withdrawing forces', 'troop drawdown', 'reducing presence',
+            'departing region', 'leaving mediterranean', 'pullback'
+        ]}
+    }
+    
+    # Calculate base probability using existing algorithm
+    base_result = calculate_threat_probability(articles, days_analyzed, target)
+    base_prob = base_result['probability'] / 100.0
+    
+    # Add US-specific adjustments
+    us_bonus = 0
+    us_indicators = []
+    
+    for article in articles:
+        title = article.get('title', '').lower()
+        content = f"{title} {article.get('description', '')} {article.get('content', '')}".lower()
+        
+        # Check US-specific keywords
+        for category, data in US_ESCALATION_KEYWORDS.items():
+            for phrase in data['phrases']:
+                if phrase in content:
+                    weight = data['weight']
+                    us_bonus += weight
+                    us_indicators.append({
+                        'category': category,
+                        'phrase': phrase,
+                        'weight': weight,
+                        'article': title[:80]
+                    })
+    
+    # Normalize US bonus (cap at ±20%)
+    us_adjustment = min(max(us_bonus / 10, -0.20), 0.20)
+    
+    # Calculate final US probability
+    us_prob = min(max(base_prob + us_adjustment, 0.05), 0.95)
+    
+    return {
+        'probability': us_prob,
+        'base_probability': base_prob,
+        'us_adjustment': us_adjustment,
+        'us_indicators': us_indicators[:5],  # Top 5
+        'source': 'us_specific_algorithm'
+    }
+
+
+def detect_coordination_signals(israel_prob, us_prob, all_articles):
+    """
+    Detect coordination signals between US and Israel
+    Returns coordination level and specific indicators
+    """
+    
+    coordination_keywords = {
+        'joint_statements': [
+            'joint statement', 'coordinated response', 'in coordination with',
+            'together with allies', 'unified approach', 'combined action'
+        ],
+        'military_coordination': [
+            'joint exercise', 'combined operations', 'coordinated strike',
+            'allied forces', 'joint training', 'integrated operations'
+        ],
+        'diplomatic_coordination': [
+            'biden netanyahu', 'us israel coordination', 'allied planning',
+            'strategic coordination', 'defense consultation'
+        ],
+        'simultaneous_deployments': [
+            'both israel and us', 'us and israeli forces', 'parallel deployment',
+            'concurrent mobilization'
+        ]
+    }
+    
+    signals = 0
+    detected_indicators = []
+    
+    # Signal 1: Both probabilities elevated
+    if israel_prob > 0.50 and us_prob > 0.30:
+        signals += 1
+        detected_indicators.append('Both actors showing elevated strike intent')
+    
+    # Signal 2-5: Check articles for coordination keywords
+    for article in all_articles:
+        content = f"{article.get('title', '')} {article.get('description', '')} {article.get('content', '')}".lower()
+        
+        for category, phrases in coordination_keywords.items():
+            for phrase in phrases:
+                if phrase in content:
+                    signals += 1
+                    detected_indicators.append(f"{category}: '{phrase}' detected")
+                    break  # One signal per category per article
+    
+    # Determine coordination level
+    if signals >= 4:
+        level = 'strong'
+        factor = 0.15
+    elif signals >= 2:
+        level = 'moderate'
+        factor = 0.10
+    elif signals >= 1:
+        level = 'weak'
+        factor = 0.05
+    else:
+        level = 'none'
+        factor = 0.00
+    
+    return {
+        'level': level,
+        'factor': factor,
+        'signals_detected': signals,
+        'indicators': detected_indicators[:3]  # Top 3
+    }
+
+
+def calculate_combined_probability(israel_prob, us_prob, coordination):
+    """
+    Calculate combined probability using independent events + coordination
+    
+    Formula:
+    1. Base: P(at least one) = 1 - (1-P₁)(1-P₂)
+    2. Apply coordination bonus
+    3. Cap at 95%
+    """
+    
+    # Step 1: Independent events probability
+    base_combined = 1 - (1 - israel_prob) * (1 - us_prob)
+    
+    # Step 2: Apply coordination factor
+    coord_factor = coordination.get('factor', 0)
+    adjusted_combined = base_combined * (1 + coord_factor)
+    
+    # Step 3: Cap at 95%
+    final_combined = min(adjusted_combined, 0.95)
+    
+    # Calculate bonus percentage for display
+    coord_bonus = (final_combined - base_combined) * 100
+    
+    return {
+        'combined': final_combined,
+        'base_independent': base_combined,
+        'coordination_bonus': coord_bonus,
+        'coordination_level': coordination.get('level', 'none'),
+        'formula': 'independent_events_with_coordination'
+    }
+
+
+def calculate_reverse_threat(articles, source_actor='iran', target_actor='israel'):
+    """
+    Calculate probability of source actor attacking target
+    (e.g., Iran → Israel, Hezbollah → Israel)
+    """
+    
+    REVERSE_THREAT_KEYWORDS = {
+        'iran_threats': [
+            'iran threatens', 'irgc warns', 'khamenei threatens', 'tehran vows',
+            'retaliation', 'revenge attack', 'severe response'
+        ],
+        'hezbollah_threats': [
+            'nasrallah threatens', 'hezbollah warns', 'resistance axis',
+            'rocket fire', 'cross-border attack'
+        ],
+        'proxy_mobilization': [
+            'militia deployment', 'proxy forces', 'armed groups mobilize',
+            'shiite militias', 'hashd forces'
+        ],
+        'missile_tests': [
+            'missile test', 'ballistic missile', 'cruise missile launch',
+            'weapons test', 'military drill'
+        ]
+    }
+    
+    threat_score = 0
+    indicators = []
+    
+    for article in articles:
+        content = f"{article.get('title', '')} {article.get('description', '')} {article.get('content', '')}".lower()
+        
+        # Check for threat keywords
+        for category, phrases in REVERSE_THREAT_KEYWORDS.items():
+            for phrase in phrases:
+                if phrase in content and target_actor in content:
+                    threat_score += 2
+                    indicators.append({
+                        'type': category,
+                        'phrase': phrase,
+                        'article': article.get('title', '')[:80]
+                    })
+    
+    # Convert to probability (cap at 60% - reverse threats typically lower)
+    probability = min(threat_score / 50.0, 0.60)
+    
+    return {
+        'probability': probability,
+        'source': source_actor,
+        'target': target_actor,
+        'indicators': indicators[:5],
+        'risk_level': 'high' if probability > 0.40 else 'moderate' if probability > 0.20 else 'low'
+    }
+
+
 def calculate_threat_probability(articles, days_analyzed=7, target='iran'):
     """Calculate sophisticated threat probability score"""
     
@@ -2435,6 +2657,158 @@ def api_threat(target):
             'error': str(e),
             'probability': 0
         }), 500
+
+@app.route('/api/threat-matrix/<target>', methods=['GET'])
+def api_threat_matrix(target):
+    """
+    Enhanced threat matrix with multi-directional probabilities
+    Returns: Israel strike, US strike, reverse threats, combined probability
+    """
+    try:
+        days = int(request.args.get('days', 7))
+        
+        if not check_rate_limit():
+            return jsonify({
+                'success': False,
+                'error': 'Rate limit reached',
+                'rate_limited': True
+            }), 200
+        
+        if target not in TARGET_KEYWORDS:
+            return jsonify({
+                'success': False,
+                'error': f"Invalid target: {target}"
+            }), 400
+        
+        # Fetch articles (same as existing endpoint)
+        query = ' OR '.join(TARGET_KEYWORDS[target]['keywords'])
+        
+        articles_en = fetch_newsapi_articles(query, days)
+        articles_gdelt_en = fetch_gdelt_articles(query, days, 'eng')
+        articles_gdelt_ar = fetch_gdelt_articles(query, days, 'ara')
+        articles_gdelt_he = fetch_gdelt_articles(query, days, 'heb')
+        
+        articles_gdelt_fa = []
+        if target == 'iran':
+            articles_gdelt_fa = fetch_gdelt_articles(query, days, 'fas')
+        
+        articles_reddit = fetch_reddit_posts(
+            target,
+            TARGET_KEYWORDS[target]['reddit_keywords'],
+            days
+        )
+        
+        all_articles = (articles_en + articles_gdelt_en + articles_gdelt_ar + 
+                       articles_gdelt_he + articles_gdelt_fa + articles_reddit)
+        
+        # Calculate Israel strike probability (existing algorithm)
+        israel_result = calculate_threat_probability(all_articles, days, target)
+        israel_prob = israel_result['probability'] / 100.0
+        
+        # Calculate US strike probability (new algorithm)
+        us_result = calculate_us_strike_probability(all_articles, days, target)
+        us_prob = us_result['probability']
+        
+        # Detect coordination between US and Israel
+        coordination = detect_coordination_signals(israel_prob, us_prob, all_articles)
+        
+        # Calculate combined probability
+        combined_result = calculate_combined_probability(israel_prob, us_prob, coordination)
+        
+        # Calculate reverse threats (target → Israel, target → US)
+        reverse_israel = calculate_reverse_threat(all_articles, target, 'israel')
+        reverse_us = calculate_reverse_threat(all_articles, target, 'us')
+        
+        # Build response
+        response = {
+            'success': True,
+            'target': target,
+            'target_flag': {
+                'iran': '🇮🇷',
+                'hezbollah': '🇱🇧',
+                'houthis': '🇾🇪',
+                'syria': '🇸🇾'
+            }.get(target, '🏴'),
+            'days_analyzed': days,
+            'total_articles': len(all_articles),
+            
+            # Combined probability (headline number)
+            'combined_probability': {
+                'value': round(combined_result['combined'] * 100, 1),
+                'base': round(combined_result['base_independent'] * 100, 1),
+                'coordination_bonus': round(combined_result['coordination_bonus'], 1),
+                'coordination_level': combined_result['coordination_level'],
+                'risk_level': (
+                    'very_high' if combined_result['combined'] > 0.70 else
+                    'high' if combined_result['combined'] > 0.50 else
+                    'moderate' if combined_result['combined'] > 0.30 else
+                    'low'
+                )
+            },
+            
+            # Incoming threats
+            'incoming_threats': {
+                'israel': {
+                    'probability': round(israel_prob * 100, 1),
+                    'risk_level': (
+                        'very_high' if israel_prob > 0.70 else
+                        'high' if israel_prob > 0.50 else
+                        'moderate' if israel_prob > 0.30 else
+                        'low'
+                    ),
+                    'flag': '🇮🇱',
+                    'indicators': israel_result.get('breakdown', {}).get('top_articles', [])[:3]
+                },
+                'us': {
+                    'probability': round(us_prob * 100, 1),
+                    'risk_level': (
+                        'very_high' if us_prob > 0.70 else
+                        'high' if us_prob > 0.50 else
+                        'moderate' if us_prob > 0.30 else
+                        'low'
+                    ),
+                    'flag': '🇺🇸',
+                    'indicators': us_result.get('us_indicators', [])[:3],
+                    'adjustment': round(us_result.get('us_adjustment', 0) * 100, 1)
+                }
+            },
+            
+            # Outgoing threats
+            'outgoing_threats': {
+                'vs_israel': {
+                    'probability': round(reverse_israel['probability'] * 100, 1),
+                    'risk_level': reverse_israel['risk_level'],
+                    'target_flag': '🇮🇱',
+                    'indicators': reverse_israel.get('indicators', [])[:3]
+                },
+                'vs_us': {
+                    'probability': round(reverse_us['probability'] * 100, 1),
+                    'risk_level': reverse_us['risk_level'],
+                    'target_flag': '🇺🇸',
+                    'indicators': reverse_us.get('indicators', [])[:3]
+                }
+            },
+            
+            # Coordination details
+            'coordination': {
+                'level': coordination['level'],
+                'factor': coordination['factor'],
+                'signals_detected': coordination['signals_detected'],
+                'indicators': coordination.get('indicators', [])
+            },
+            
+            'version': '2.8.0-multi-actor'
+        }
+        
+        return jsonify(response)
+        
+    except Exception as e:
+        print(f"[Threat Matrix] Error: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
 
 @app.route('/scan-iran-protests', methods=['GET'])
 def scan_iran_protests():
