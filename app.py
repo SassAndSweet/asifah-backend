@@ -663,7 +663,9 @@ def calculate_threat_probability(articles, days_analyzed=7, target='iran'):
     # Calculate momentum
     if recent_articles > 0 and older_articles > 0:
         recent_density = recent_articles / 2.0
-        older_density = older_articles / (days_analyzed - 2)
+        # FIX: Prevent division by zero when days_analyzed <= 2
+        days_for_older = max(1, days_analyzed - 2)
+        older_density = older_articles / days_for_older
         
         momentum_ratio = recent_density / older_density if older_density > 0 else 2.0
         
