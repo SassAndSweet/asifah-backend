@@ -78,7 +78,8 @@ import math
 from rss_monitor import (
     fetch_all_rss,
     enhance_article_with_leadership,
-    apply_leadership_multiplier
+    apply_leadership_multiplier,
+    fetch_airline_disruptions  # ADD THIS LINE
 )
 
 app = Flask(__name__)
