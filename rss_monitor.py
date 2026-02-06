@@ -121,7 +121,7 @@ CONTEXT_INDICATORS = {
     'operational': [
         # Specific operational language
         'prepared to', 'ready to', 'מוכנים', 'مستعدون', 'جاهزون',
-        'target', 'targets', 'أهداف', 'هدף', 'מטרות',
+        'target', 'targets', 'أهداف', 'هدف', 'מטרות',
         'missile', 'missiles', 'صواريخ', 'صاروخ', 'טילים',
         'drone', 'drones', 'طائرة مسيرة', 'طائرات', 'כטב"מ',
         'military operation', 'عملية عسكرية', 'מבצע צבאי',
@@ -334,10 +334,11 @@ def detect_leadership_quote(article):
     }
     """
     
-    title = article.get('title', '').lower()
-    description = article.get('description', '').lower()
-    content = article.get('content', '').lower()
-    full_text = f"{title} {description} {content}"
+    # FIX: Ensure we never pass None to .lower()
+    title = article.get('title') or ''
+    description = article.get('description') or ''
+    content = article.get('content') or ''
+    full_text = f"{title} {description} {content}".lower()
     
     result = {
         'has_leadership': False,
@@ -413,6 +414,10 @@ def classify_context(text):
     3. Domestic (default - internal messaging)
     """
     
+    # FIX: Guard against None
+    if not text:
+        return 'domestic'
+    
     text_lower = text.lower()
     
     # Check operational first (highest priority)
@@ -451,6 +456,10 @@ def detect_threat_level(text):
     - capability: Mentions weapons/capabilities
     - none: No threat detected
     """
+    
+    # FIX: Guard against None
+    if not text:
+        return 'none'
     
     text_lower = text.lower()
     
