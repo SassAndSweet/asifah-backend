@@ -2602,7 +2602,7 @@ def api_threat(target):
             days
         )
         
-all_articles = (articles_en + articles_gdelt_en + articles_gdelt_ar + 
+        all_articles = (articles_en + articles_gdelt_en + articles_gdelt_ar + 
                        articles_gdelt_he + articles_gdelt_fa + articles_reddit)
         
         # NEW: Fetch ALL RSS feeds (leadership rhetoric + Israeli news)
@@ -2619,6 +2619,62 @@ all_articles = (articles_en + articles_gdelt_en + articles_gdelt_ar +
         print(f"[RSS] Total articles with RSS feeds: {len(all_articles)}")
         
         scoring_result = calculate_threat_probability(all_articles, days, target)
+        probability = scoring_result['probability']
+        momentum = scoring_result['momentum']
+        breakdown = scoring_result['breakdown']
+        
+        if probability < 30:
+            timeline = "180+ Days"
+        elif probability < 50:
+            timeline = "91-180 Days"
+        elif probability < 70:
+            timeline = "31-90 Days"
+        else:
+            timeline = "0-30 Days"
+        
+        unique_sources = len(set(a.get('source', {}).get('name', 'Unknown') for a in all_articles))
+        if len(all_articles) >= 20 and unique_sources >= 8:
+            confidence = "High"
+        elif len(all_articles) >= 10 and unique_sources >= 5:
+            confidence = "Medium"
+        else:
+            confidence = "Low"
+        
+        top_articles = []
+        top_contributors = scoring_result.get('top_contributors', [])
+        
+        for contributor in top_contributors:
+            matching_article = None
+            for article in all_articles:
+                if article.get('source', {}).get('name', '') == contributor['source']:
+                    matching_article = article
+                    break
+            
+            if matching_article:
+                article_data = {
+                    'title': matching_article.get('title', 'No title'),
+                    'source': contributor['source'],
+                    'url': matching_article.get('url', ''),
+                    'publishedAt': matching_article.get('publishedAt', ''),
+                    'contribution': contributor['contribution'],
+                    'contribution_percent': abs(contributor['contribution']) / max(abs(breakdown['weighted_score']), 1) * 100,
+                    'severity': contributor['severity'],
+                    'source_weight': contributor['source_weight'],
+                    'time_decay': contributor['time_decay'],
+                    'deescalation': contributor['deescalation']
+                }
+                
+                # NEW: Add leadership data if present
+                if 'leadership' in matching_article and matching_article['leadership']['has_leadership']:
+                    leadership = matching_article['leadership']
+                    article_data['leadership'] = {
+                        'leader': leadership['leader_name'],
+                        'context': leadership['context'],
+                        'threat_level': leadership['threat_level'],
+                        'weight_multiplier': leadership['weight_multiplier']
+                    }
+                
+                top_articles.append(article_data)
         
         return jsonify({
             'success': True,
@@ -2636,7 +2692,7 @@ all_articles = (articles_en + articles_gdelt_en + articles_gdelt_ar +
             'escalation_keywords': ESCALATION_KEYWORDS,
             'target_keywords': TARGET_KEYWORDS[target]['keywords'],
             'cached': False,
-            'version': '2.6.3'
+            'version': '2.7.0'
         })
         
     except Exception as e:
