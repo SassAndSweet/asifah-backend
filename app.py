@@ -75,6 +75,11 @@ import json
 import time
 import re
 import math
+from rss_monitor import (
+    fetch_all_rss,
+    enhance_article_with_leadership,
+    apply_leadership_multiplier
+)
 
 app = Flask(__name__)
 CORS(app)
@@ -201,15 +206,23 @@ TARGET_BASELINES = {
     }
 }
 
-# ========================================
-# REDDIT CONFIGURATION
-# ========================================
-REDDIT_USER_AGENT = "AsifahAnalytics/2.6.3 (OSINT monitoring tool)"
 REDDIT_SUBREDDITS = {
-    "hezbollah": ["ForbiddenBromance", "Israel", "Lebanon"],
-    "iran": ["Iran", "Israel", "geopolitics"],
-    "houthis": ["Yemen", "Israel", "geopolitics"],
-    "syria": ["syriancivilwar", "Syria", "geopolitics"]
+    "hezbollah": [
+        "ForbiddenBromance", "Israel", "Lebanon",
+        "geopolitics", "anime_titties", "CredibleDefense"
+    ],
+    "iran": [
+        "Iran", "Israel", "geopolitics",
+        "iranpolitics", "CredibleDefense", "anime_titties"
+    ],
+    "houthis": [
+        "Yemen", "Israel", "geopolitics",
+        "CredibleDefense", "YemeniCrisis", "anime_titties"
+    ],
+    "syria": [
+        "syriancivilwar", "Syria", "geopolitics",
+        "CredibleDefense", "anime_titties"
+    ]
 }
 
 # ========================================
@@ -618,7 +631,7 @@ def calculate_threat_probability(articles, days_analyzed=7, target='iran'):
     
     article_details = []
     
-    for article in articles:
+for article in articles:
         title = article.get('title', '')
         description = article.get('description', '')
         content = article.get('content', '')
@@ -637,6 +650,9 @@ def calculate_threat_probability(articles, days_analyzed=7, target='iran'):
             deescalation_count += 1
         else:
             article_contribution = time_decay * source_weight * severity_multiplier
+        
+        # Apply leadership multiplier if present
+        article_contribution = apply_leadership_multiplier(article_contribution, article)
         
         weighted_score += article_contribution
         
@@ -2586,54 +2602,23 @@ def api_threat(target):
             days
         )
         
-        all_articles = (articles_en + articles_gdelt_en + articles_gdelt_ar + 
+all_articles = (articles_en + articles_gdelt_en + articles_gdelt_ar + 
                        articles_gdelt_he + articles_gdelt_fa + articles_reddit)
         
+        # NEW: Fetch ALL RSS feeds (leadership rhetoric + Israeli news)
+        print(f"[RSS] Fetching RSS feeds...")
+        rss_articles = fetch_all_rss()  # Includes: MEMRI, Al-Manar, Iran Wire, Ynet, ToI, JPost, i24NEWS, Haaretz
+        
+        # Add leadership detection to all articles
+        print(f"[RSS] Analyzing {len(all_articles) + len(rss_articles)} articles for leadership quotes...")
+        for article in all_articles + rss_articles:
+            article['leadership'] = enhance_article_with_leadership(article)
+        
+        # Merge RSS articles into main pool
+        all_articles.extend(rss_articles)
+        print(f"[RSS] Total articles with RSS feeds: {len(all_articles)}")
+        
         scoring_result = calculate_threat_probability(all_articles, days, target)
-        probability = scoring_result['probability']
-        momentum = scoring_result['momentum']
-        breakdown = scoring_result['breakdown']
-        
-        if probability < 30:
-            timeline = "180+ Days"
-        elif probability < 50:
-            timeline = "91-180 Days"
-        elif probability < 70:
-            timeline = "31-90 Days"
-        else:
-            timeline = "0-30 Days"
-        
-        unique_sources = len(set(a.get('source', {}).get('name', 'Unknown') for a in all_articles))
-        if len(all_articles) >= 20 and unique_sources >= 8:
-            confidence = "High"
-        elif len(all_articles) >= 10 and unique_sources >= 5:
-            confidence = "Medium"
-        else:
-            confidence = "Low"
-        
-        top_articles = []
-        top_contributors = scoring_result.get('top_contributors', [])
-        
-        for contributor in top_contributors:
-            matching_article = None
-            for article in all_articles:
-                if article.get('source', {}).get('name', '') == contributor['source']:
-                    matching_article = article
-                    break
-            
-            if matching_article:
-                top_articles.append({
-                    'title': matching_article.get('title', 'No title'),
-                    'source': contributor['source'],
-                    'url': matching_article.get('url', ''),
-                    'publishedAt': matching_article.get('publishedAt', ''),
-                    'contribution': contributor['contribution'],
-                    'contribution_percent': abs(contributor['contribution']) / max(abs(breakdown['weighted_score']), 1) * 100,
-                    'severity': contributor['severity'],
-                    'source_weight': contributor['source_weight'],
-                    'time_decay': contributor['time_decay'],
-                    'deescalation': contributor['deescalation']
-                })
         
         return jsonify({
             'success': True,
@@ -2835,6 +2820,19 @@ def scan_iran_protests():
         all_articles = (newsapi_articles + gdelt_en + gdelt_ar + gdelt_fa + 
                        gdelt_he + reddit_posts + iranwire_articles + hrana_articles)
         
+        # NEW: Fetch ALL RSS feeds (includes Iran Wire which we already have, but adds MEMRI, Al-Manar, Israeli sources)
+        print(f"[RSS] Fetching additional RSS feeds for Iran protests...")
+        rss_articles = fetch_all_rss()
+        
+        # Add leadership detection to all articles
+        print(f"[RSS] Analyzing {len(all_articles) + len(rss_articles)} articles for leadership quotes...")
+        for article in all_articles + rss_articles:
+            article['leadership'] = enhance_article_with_leadership(article)
+        
+        # Merge RSS articles into main pool
+        all_articles.extend(rss_articles)
+        print(f"[RSS] Total articles for Iran protests: {len(all_articles)}")
+        
         hrana_data = extract_hrana_structured_data(hrana_articles)
         casualties_regex = extract_casualty_data(all_articles)
         
@@ -2865,7 +2863,7 @@ def scan_iran_protests():
             'intensity': int(intensity_score),
             'stability': int(stability_score),
             'casualties': casualties,
-            'casualties_enhanced': casualties_enhanced,  # NEW: Enhanced casualty data
+            'casualties_enhanced': casualties_enhanced,
             'days_analyzed': days,
             'total_articles': len(all_articles)
         }
@@ -2888,9 +2886,9 @@ def scan_iran_protests():
             'intensity': int(intensity_score),
             'stability': int(stability_score),
             'casualties': casualties,
-            'casualties_enhanced': casualties_enhanced,  # NEW: Enhanced casualty data
-            'cities': cities,  # Now includes actual city data with sources
-            'num_cities_affected': num_cities,  # Real count, not hardcoded
+            'casualties_enhanced': casualties_enhanced,
+            'cities': cities,
+            'num_cities_affected': num_cities,
             'articles_en': [a for a in all_articles if a.get('language') == 'en'][:20],
             'articles_fa': [a for a in all_articles if a.get('language') == 'fa'][:20],
             'articles_ar': [a for a in all_articles if a.get('language') == 'ar'][:20],
