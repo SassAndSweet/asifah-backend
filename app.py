@@ -91,6 +91,8 @@ NEWSAPI_KEY = os.environ.get('NEWSAPI_KEY')
 EODHD_API_KEY = os.environ.get('EODHD_API_KEY', '697925068da530.81277377')
 ALPHA_VANTAGE_KEY = os.environ.get('ALPHA_VANTAGE_KEY', '6V1C73D5FYVIDWM5')
 GDELT_BASE_URL = "http://api.gdeltproject.org/api/v2/doc/doc"
+# Reddit User Agent
+REDDIT_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 
 # Rate limiting
 RATE_LIMIT = 100
