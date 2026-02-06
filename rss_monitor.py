@@ -5,7 +5,8 @@ Comprehensive RSS feed monitoring for Middle East intelligence
 Monitors:
 1. Leadership Rhetoric (MEMRI, Al-Manar, Iran Wire)
 2. Israeli News Sources (Ynet, Times of Israel, JPost, i24NEWS, Haaretz)
-3. Regional Sources (expandable)
+3. Regional Arab News Sources (Arab News)
+4. Airline Flight Disruptions (Lufthansa, Air France, KLM, Emirates, Turkish, British Airways)
 
 Leaders monitored:
 - Naim Qassem (Hezbollah Secretary-General)
@@ -39,8 +40,34 @@ ISRAELI_RSS_FEEDS = {
     'haaretz': 'https://www.haaretz.com/cmlink/1.628810',
 }
 
+# NEW: Regional Arab News Sources
+REGIONAL_ARAB_RSS_FEEDS = {
+    'arab_news': 'https://www.arabnews.com/middleeast/rss.xml',  # Middle East section for max relevance
+}
+
 # Combine all feeds
-ALL_RSS_FEEDS = {**LEADERSHIP_RSS_FEEDS, **ISRAELI_RSS_FEEDS}
+ALL_RSS_FEEDS = {**LEADERSHIP_RSS_FEEDS, **ISRAELI_RSS_FEEDS, **REGIONAL_ARAB_RSS_FEEDS}
+
+
+# ========================================
+# AIRLINE RSS FEEDS - FLIGHT DISRUPTIONS
+# ========================================
+AIRLINE_RSS_FEEDS = {
+    'lufthansa': 'https://www.lufthansa.com/xx/en/homepage',  # Note: Lufthansa doesn't have public RSS, will use scraped data
+    'air_france': 'https://wwws.airfrance.com/search/all/all/en',
+    'klm': 'https://www.klm.com',
+    'emirates': 'https://www.emirates.com/media-centre',
+    'turkish': 'https://www.turkishairlines.com/en-int/press-room/',
+    'british_airways': 'https://mediacentre.britishairways.com',
+}
+
+DISRUPTION_KEYWORDS = [
+    'suspend', 'cancel', 'disrupt', 'halt', 'stop', 'cease',
+    'beirut', 'tel aviv', 'damascus', 'tehran', 'sanaa',
+    'lebanon', 'israel', 'syria', 'iran', 'yemen',
+    'middle east', 'regional tensions', 'security',
+    'extend', 'prolong', 'continue suspension'
+]
 
 
 # ========================================
@@ -197,7 +224,7 @@ LEADERSHIP_WEIGHTS = {
 # ========================================
 def fetch_all_rss(feed_dict=None):
     """
-    Fetch all RSS feeds (leadership + Israeli + any additional)
+    Fetch all RSS feeds (leadership + Israeli + regional Arab + any additional)
     
     Args:
         feed_dict: Optional custom feed dictionary, defaults to ALL_RSS_FEEDS
@@ -283,6 +310,8 @@ def fetch_all_rss(feed_dict=None):
                     source_display = 'Iran Wire'
                 elif feed_name == 'iran_wire_fa':
                     source_display = 'Iran Wire (FA)'
+                elif feed_name == 'arab_news':
+                    source_display = 'Arab News'
                 
                 all_articles.append({
                     'title': title_elem.text or '',
@@ -312,6 +341,83 @@ def fetch_leadership_rss():
 def fetch_israeli_rss():
     """Fetch only Israeli news RSS feeds"""
     return fetch_all_rss(ISRAELI_RSS_FEEDS)
+
+
+# ========================================
+# AIRLINE FLIGHT DISRUPTION MONITORING
+# ========================================
+def fetch_airline_disruptions():
+    """
+    Fetch flight disruption notices from Google News
+    More reliable than airline websites (which often lack RSS)
+    
+    Returns: List of disruption articles
+    """
+    
+    disruptions = []
+    
+    # Search queries for major Middle East routes
+    search_queries = [
+        'Lufthansa Beirut suspended',
+        'Air France Lebanon cancelled',
+        'KLM Tel Aviv suspended',
+        'Emirates Damascus cancelled',
+        'British Airways Iran suspended',
+        'Turkish Airlines Yemen cancelled',
+        'airline suspended Middle East',
+        'flights cancelled Beirut',
+        'flights suspended Tel Aviv',
+    ]
+    
+    for query in search_queries:
+        try:
+            # Use Google News RSS
+            query_encoded = query.replace(' ', '+')
+            url = f"https://news.google.com/rss/search?q={query_encoded}&hl=en&gl=US&ceid=US:en"
+            
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            }
+            
+            response = requests.get(url, headers=headers, timeout=10)
+            
+            if response.status_code != 200:
+                continue
+            
+            try:
+                root = ET.fromstring(response.content)
+            except ET.ParseError:
+                continue
+            
+            items = root.findall('.//item')
+            
+            for item in items[:3]:  # Top 3 per query
+                title_elem = item.find('title')
+                link_elem = item.find('link')
+                pubDate_elem = item.find('pubDate')
+                
+                if title_elem is None:
+                    continue
+                
+                title = title_elem.text or ''
+                title_lower = title.lower()
+                
+                # Check for disruption keywords
+                if any(keyword in title_lower for keyword in DISRUPTION_KEYWORDS):
+                    disruptions.append({
+                        'title': title,
+                        'url': link_elem.text if link_elem is not None else '',
+                        'date': pubDate_elem.text if pubDate_elem is not None else '',
+                        'source': 'Airline News',
+                        'query': query
+                    })
+            
+        except Exception as e:
+            print(f"[Airline Disruptions] Query '{query}' error: {str(e)[:100]}")
+            continue
+    
+    print(f"[Airline Disruptions] Found {len(disruptions)} potential disruptions")
+    return disruptions
 
 
 # ========================================
@@ -612,6 +718,13 @@ def test_rss_monitor():
     print(f"  Leadership quotes: {leadership_count}/{len(articles[:30])}")
     print(f"  Israeli operations: {israeli_ops_count}/{len(articles[:30])}")
     print("\n" + "="*60)
+    
+    # Test airline disruptions
+    print("\nTesting airline disruptions...\n")
+    disruptions = fetch_airline_disruptions()
+    print(f"\nFound {len(disruptions)} airline disruption articles")
+    for disruption in disruptions[:5]:
+        print(f"  • {disruption['title'][:80]}...")
 
 
 if __name__ == "__main__":
