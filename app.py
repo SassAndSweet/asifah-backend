@@ -631,7 +631,7 @@ def calculate_threat_probability(articles, days_analyzed=7, target='iran'):
     
     article_details = []
     
-for article in articles:
+    for article in articles:
         title = article.get('title', '')
         description = article.get('description', '')
         content = article.get('content', '')
