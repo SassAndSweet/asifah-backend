@@ -3125,6 +3125,11 @@ def flight_cancellations():
     try:
         print("[Flight Cancellations] Starting scan...")
         
+        # NEW: Fetch airline disruptions from RSS monitor (Google News search for specific airlines)
+        print("[Flight Cancellations] Calling fetch_airline_disruptions()...")
+        rss_disruptions = fetch_airline_disruptions()
+        print(f"[Flight Cancellations] RSS monitor returned {len(rss_disruptions)} disruptions")
+        
         # Search queries for Google News - Comprehensive Middle East coverage
         destinations = [
             # Israel
@@ -3225,6 +3230,16 @@ def flight_cancellations():
                     print(f"[Flight Cancellations] Error searching {destination}: {str(e)[:100]}")
                     continue
         
+        # NEW: Merge RSS monitor disruptions with Google News results
+        print(f"[Flight Cancellations] Merging {len(rss_disruptions)} RSS disruptions with {len(all_cancellations)} Google News results")
+        for disruption in rss_disruptions:
+            # Add to seen_urls to prevent duplicates
+            if disruption.get('url') and disruption['url'] not in seen_urls:
+                seen_urls.add(disruption['url'])
+                all_cancellations.append(disruption)
+        
+        print(f"[Flight Cancellations] Total after merge: {len(all_cancellations)}")
+        
         # Filter to last 30 days
         thirty_days_ago = datetime.now(timezone.utc) - timedelta(days=30)
         recent_cancellations = []
@@ -3250,7 +3265,7 @@ def flight_cancellations():
                 seen_combos.add(combo)
                 unique_cancellations.append(cancel)
         
-        print(f"[Flight Cancellations] Found {len(unique_cancellations)} unique disruptions")
+        print(f"[Flight Cancellations] Found {len(unique_cancellations)} unique disruptions (after deduplication)")
         
         return jsonify({
             'success': True,
