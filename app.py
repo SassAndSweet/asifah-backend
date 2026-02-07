@@ -2725,7 +2725,11 @@ def scrape_osint_instagram_fallback():
         print("[Instagram Fallback] Trying Picuki...")
         
         # Picuki is an Instagram viewer that doesn't require auth
-        url = f"https://www.picuki.c
+        url = f"https://www.picuki.com/profile/{OSINT_INSTAGRAM_HANDLE}"
+        
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        }
         
 # ========================================
 # LEBANON STABILITY CACHE FUNCTIONS
