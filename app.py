@@ -177,6 +177,38 @@ KEYWORD_SEVERITY = {
 }
 
 # ========================================
+# OSINT DEFENDER INSTAGRAM FEED
+# ========================================
+OSINT_INSTAGRAM_HANDLE = 'osintdefender'
+
+# Middle East country keyword detection
+MIDDLE_EAST_COUNTRIES = {
+    'IRAN': ['iran', 'iranian', 'tehran', 'irgc', 'khamenei', 'revolutionary guard'],
+    'SYRIA': ['syria', 'syrian', 'damascus', 'aleppo', 'assad', 'hts'],
+    'LEBANON': ['lebanon', 'lebanese', 'beirut', 'hezbollah', 'nasrallah'],
+    'ISRAEL': ['israel', 'israeli', 'idf', 'tel aviv', 'jerusalem', 'netanyahu'],
+    'YEMEN': ['yemen', 'yemeni', 'houthi', 'houthis', 'sanaa', 'ansarallah'],
+    'SAUDI ARABIA': ['saudi', 'riyadh', 'mbs', 'kingdom'],
+    'UAE': ['uae', 'dubai', 'abu dhabi', 'emirates'],
+    'JORDAN': ['jordan', 'jordanian', 'amman'],
+    'EGYPT': ['egypt', 'egyptian', 'cairo', 'sisi'],
+    'IRAQ': ['iraq', 'iraqi', 'baghdad', 'erbil'],
+    'TURKEY': ['turkey', 'turkish', 'ankara', 'erdogan', 'istanbul'],
+    'QATAR': ['qatar', 'doha'],
+    'KUWAIT': ['kuwait'],
+    'BAHRAIN': ['bahrain', 'manama'],
+    'OMAN': ['oman', 'muscat'],
+    'GAZA': ['gaza', 'hamas', 'palestinian'],
+    'WEST BANK': ['west bank', 'jenin', 'ramallah']
+}
+
+# Cache for Instagram feed (30 minute TTL)
+instagram_feed_cache = {
+    'data': None,
+    'expires_at': 0
+}
+
+# ========================================
 # DE-ESCALATION
 # ========================================
 DEESCALATION_KEYWORDS = [
@@ -2565,6 +2597,136 @@ def extract_hrana_structured_data(articles):
     
     return structured_data
 
+     # ========================================
+# INSTAGRAM FEED SCRAPER
+# ========================================
+def scrape_osint_instagram():
+    """
+    Scrape OSINTDefender's Instagram feed
+    Returns last 3 posts with images, captions, timestamps, URLs
+    """
+    try:
+        print(f"[Instagram] Scraping @{OSINT_INSTAGRAM_HANDLE}...")
+        
+        # Instagram public profile URL
+        url = f"https://www.instagram.com/{OSINT_INSTAGRAM_HANDLE}/"
+        
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.5',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'Connection': 'keep-alive',
+            'Upgrade-Insecure-Requests': '1',
+            'Sec-Fetch-Dest': 'document',
+            'Sec-Fetch-Mode': 'navigate',
+            'Sec-Fetch-Site': 'none',
+            'Cache-Control': 'max-age=0'
+        }
+        
+        response = requests.get(url, headers=headers, timeout=15)
+        
+        if response.status_code != 200:
+            print(f"[Instagram] HTTP error: {response.status_code}")
+            return scrape_osint_instagram_fallback()
+        
+        html = response.text
+        
+        # Instagram embeds post data in JavaScript as JSON
+        # Look for window._sharedData pattern
+        import re
+        
+        # Try to find JSON data embedded in script tags
+        # Pattern 1: window._sharedData
+        pattern1 = r'window\._sharedData\s*=\s*(\{.+?\});'
+        match1 = re.search(pattern1, html)
+        
+        # Pattern 2: Static JSON (newer Instagram)
+        pattern2 = r'<script type="application/ld\+json">(.+?)</script>'
+        matches2 = re.findall(pattern2, html, re.DOTALL)
+        
+        posts = []
+        
+        # Try Pattern 1 first
+        if match1:
+            try:
+                shared_data = json.loads(match1.group(1))
+                
+                # Navigate to posts
+                user_data = shared_data.get('entry_data', {}).get('ProfilePage', [{}])[0]
+                user_info = user_data.get('graphql', {}).get('user', {})
+                edges = user_info.get('edge_owner_to_timeline_media', {}).get('edges', [])
+                
+                for edge in edges[:3]:  # First 3 posts
+                    node = edge.get('node', {})
+                    
+                    post_id = node.get('shortcode', '')
+                    caption_edges = node.get('edge_media_to_caption', {}).get('edges', [])
+                    caption = caption_edges[0].get('node', {}).get('text', '') if caption_edges else ''
+                    timestamp = node.get('taken_at_timestamp', 0)
+                    image_url = node.get('display_url', '')
+                    
+                    if post_id and image_url:
+                        posts.append({
+                            'post_id': post_id,
+                            'caption': caption[:300],  # Truncate long captions
+                            'image_url': image_url,
+                            'post_url': f"https://www.instagram.com/p/{post_id}/",
+                            'timestamp': datetime.fromtimestamp(timestamp, tz=timezone.utc).isoformat() if timestamp else ''
+                        })
+                
+                print(f"[Instagram] ✅ Scraped {len(posts)} posts via Pattern 1")
+                
+            except json.JSONDecodeError:
+                print("[Instagram] JSON decode error on Pattern 1")
+        
+        # Try Pattern 2 if Pattern 1 failed
+        if not posts and matches2:
+            for json_str in matches2:
+                try:
+                    data = json.loads(json_str)
+                    
+                    # Look for article or social media posting schemas
+                    if data.get('@type') in ['SocialMediaPosting', 'ImageObject']:
+                        # Extract what we can
+                        print("[Instagram] Found structured data, but format varies")
+                        # This pattern is less reliable, mostly for metadata
+                        
+                except:
+                    continue
+        
+        # If scraping failed, try RSS-to-JSON fallback
+        if not posts:
+            print("[Instagram] Direct scraping failed, trying fallback...")
+            return scrape_osint_instagram_fallback()
+        
+        # Detect countries in captions
+        for post in posts:
+            post['countries'] = detect_countries_in_text(post['caption'])
+        
+        return {
+            'success': True,
+            'posts': posts,
+            'count': len(posts),
+            'handle': OSINT_INSTAGRAM_HANDLE,
+            'source': 'instagram_scrape'
+        }
+        
+    except Exception as e:
+        print(f"[Instagram] Scraping error: {str(e)[:200]}")
+        return scrape_osint_instagram_fallback()
+
+
+def scrape_osint_instagram_fallback():
+    """
+    Fallback: Use Picuki (Instagram viewer) or return placeholder
+    """
+    try:
+        print("[Instagram Fallback] Trying Picuki...")
+        
+        # Picuki is an Instagram viewer that doesn't require auth
+        url = f"https://www.picuki.c
+        
 # ========================================
 # LEBANON STABILITY CACHE FUNCTIONS
 # ========================================
@@ -3723,6 +3885,38 @@ def polymarket_proxy():
         return jsonify({
             'success': False,
             'markets': [],
+            'error': str(e)[:200]
+        }), 500
+
+@app.route('/api/osint-feed', methods=['GET'])
+def api_osint_feed():
+    """
+    OSINTDefender Instagram feed endpoint
+    Returns last 3 posts with country detection
+    Cached for 30 minutes
+    """
+    try:
+        current_time = time.time()
+        
+        # Check cache
+        if instagram_feed_cache['data'] and current_time < instagram_feed_cache['expires_at']:
+            print("[Instagram API] Returning cached data")
+            return jsonify(instagram_feed_cache['data'])
+        
+        # Scrape fresh data
+        feed_data = scrape_osint_instagram()
+        
+        # Cache for 30 minutes
+        instagram_feed_cache['data'] = feed_data
+        instagram_feed_cache['expires_at'] = current_time + 1800  # 30 min = 1800 sec
+        
+        return jsonify(feed_data)
+        
+    except Exception as e:
+        print(f"[Instagram API] Error: {str(e)}")
+        return jsonify({
+            'success': False,
+            'posts': [],
             'error': str(e)[:200]
         }), 500
 
