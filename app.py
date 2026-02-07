@@ -2566,6 +2566,132 @@ def extract_hrana_structured_data(articles):
     return structured_data
 
 # ========================================
+# LEBANON STABILITY CACHE FUNCTIONS
+# ========================================
+def load_lebanon_cache():
+    """Load daily Lebanon stability cache for trend calculation"""
+    cache_file = 'cache_lebanon_stability.json'
+    try:
+        if os.path.exists(cache_file):
+            with open(cache_file, 'r') as f:
+                return json.load(f)
+        else:
+            # Create initial cache
+            initial_cache = {
+                'last_updated': datetime.now(timezone.utc).isoformat(),
+                'history': {},
+                'metadata': {
+                    'description': 'Daily snapshots of Lebanon stability metrics',
+                    'data_source': 'Currency API + Bond scraping + Hezbollah activity',
+                    'started': datetime.now(timezone.utc).date().isoformat()
+                }
+            }
+            with open(cache_file, 'w') as f:
+                json.dump(initial_cache, f, indent=2)
+            print("[Lebanon Cache] Created new cache file")
+            return initial_cache
+    except Exception as e:
+        print(f"[Lebanon Cache] Error loading cache: {str(e)}")
+        return {'history': {}, 'last_updated': '', 'metadata': {}}
+
+
+def save_lebanon_cache(cache_data):
+    """Save daily Lebanon stability cache"""
+    cache_file = 'cache_lebanon_stability.json'
+    try:
+        cache_data['last_updated'] = datetime.now(timezone.utc).isoformat()
+        with open(cache_file, 'w') as f:
+            json.dump(cache_data, f, indent=2)
+        print(f"[Lebanon Cache] Saved stability data for {len(cache_data.get('history', {}))} days")
+    except Exception as e:
+        print(f"[Lebanon Cache] Error saving cache: {str(e)}")
+
+
+def update_lebanon_cache(currency_data, bond_data, hezbollah_data, stability_score):
+    """Update cache with today's Lebanon stability snapshot"""
+    try:
+        cache = load_lebanon_cache()
+        today = datetime.now(timezone.utc).date().isoformat()
+        
+        # Store today's snapshot
+        cache['history'][today] = {
+            'currency_rate': currency_data.get('usd_to_lbp', 0) if currency_data else 0,
+            'bond_yield': bond_data.get('yield', 0) if bond_data else 0,
+            'hezbollah_activity': hezbollah_data.get('activity_score', 0) if hezbollah_data else 0,
+            'stability_score': stability_score,
+            'timestamp': datetime.now(timezone.utc).isoformat()
+        }
+        
+        # Keep only last 90 days
+        if len(cache['history']) > 90:
+            sorted_dates = sorted(cache['history'].keys())
+            for old_date in sorted_dates[:-90]:
+                del cache['history'][old_date]
+        
+        save_lebanon_cache(cache)
+        print(f"[Lebanon Cache] Updated stability data for {today}")
+        
+    except Exception as e:
+        print(f"[Lebanon Cache] Error updating cache: {str(e)}")
+
+
+def get_lebanon_trends(days=30):
+    """
+    Get trend data for Lebanon stability sparklines
+    
+    Returns last N days of:
+    - Currency rate (LBP/USD)
+    - Bond yield (%)
+    - Hezbollah activity score
+    - Overall stability score
+    """
+    try:
+        cache = load_lebanon_cache()
+        history = cache.get('history', {})
+        
+        if not history:
+            return {
+                'success': False,
+                'message': 'No historical data yet. Building trend data...',
+                'days_collected': 0
+            }
+        
+        # Get last N days
+        sorted_dates = sorted(history.keys(), reverse=True)[:days]
+        sorted_dates.reverse()  # Chronological order for charts
+        
+        trends = {
+            'dates': [],
+            'currency': [],
+            'bonds': [],
+            'hezbollah': [],
+            'stability': []
+        }
+        
+        for date in sorted_dates:
+            day_data = history[date]
+            trends['dates'].append(date)
+            trends['currency'].append(day_data.get('currency_rate', 0))
+            trends['bonds'].append(day_data.get('bond_yield', 0))
+            trends['hezbollah'].append(day_data.get('hezbollah_activity', 0))
+            trends['stability'].append(day_data.get('stability_score', 0))
+        
+        return {
+            'success': True,
+            'days_collected': len(sorted_dates),
+            'trends': trends,
+            'latest': history[sorted_dates[-1]] if sorted_dates else {}
+        }
+        
+    except Exception as e:
+        print(f"[Lebanon Trends] Error: {str(e)}")
+        return {
+            'success': False,
+            'message': str(e),
+            'days_collected': 0
+        }
+
+# ========================================
 # API ENDPOINTS
 # ========================================
 @app.route('/api/threat/<target>', methods=['GET'])
@@ -2989,6 +3115,14 @@ def scan_lebanon_stability():
         # Calculate overall stability
         stability = calculate_lebanon_stability(currency_data, bond_data, hezbollah_data)
         
+        # NEW: Update cache with today's data
+        update_lebanon_cache(
+            currency_data, 
+            bond_data, 
+            hezbollah_data, 
+            stability.get('score', 0)
+        )
+        
         return jsonify({
             'success': True,
             'stability': stability,
@@ -3009,6 +3143,29 @@ def scan_lebanon_stability():
     except Exception as e:
         print(f"[Lebanon] ❌ Error: {str(e)}")
         return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/lebanon-trends', methods=['GET'])
+def api_lebanon_trends():
+    """
+    Lebanon trends endpoint for sparklines
+    Returns historical data for currency, bonds, Hezbollah activity, stability score
+    """
+    try:
+        days = int(request.args.get('days', 30))
+        days = min(days, 90)  # Cap at 90 days max
+        
+        trends_data = get_lebanon_trends(days)
+        
+        return jsonify(trends_data)
+        
+    except Exception as e:
+        print(f"[Lebanon Trends API] Error: {str(e)}")
+        return jsonify({
+            'success': False,
+            'message': str(e),
+            'days_collected': 0
+        }), 500
 
 @app.route('/api/syria-conflicts', methods=['GET'])
 def api_syria_conflicts():
