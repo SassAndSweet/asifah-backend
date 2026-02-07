@@ -349,74 +349,112 @@ def fetch_israeli_rss():
 def fetch_airline_disruptions():
     """
     Fetch flight disruption notices from Google News
-    More reliable than airline websites (which often lack RSS)
+    Returns data in format compatible with /flight-cancellations endpoint
     
-    Returns: List of disruption articles
+    Returns: List of disruption dicts matching parse_flight_cancellation format
     """
     
     disruptions = []
+    seen_urls = set()
     
-    # Search queries for major Middle East routes
-    search_queries = [
-        'Lufthansa Beirut suspended',
-        'Air France Lebanon cancelled',
-        'KLM Tel Aviv suspended',
-        'Emirates Damascus cancelled',
-        'British Airways Iran suspended',
-        'Turkish Airlines Yemen cancelled',
-        'airline suspended Middle East',
-        'flights cancelled Beirut',
-        'flights suspended Tel Aviv',
+    # Major airlines to monitor
+    airlines = [
+        'Lufthansa', 'British Airways', 'Air France', 'KLM',
+        'United Airlines', 'Delta', 'American Airlines',
+        'Emirates', 'Qatar Airways', 'Turkish Airlines',
+        'El Al', 'Swiss', 'Austrian Airlines'
     ]
     
-    for query in search_queries:
-        try:
-            # Use Google News RSS
-            query_encoded = query.replace(' ', '+')
-            url = f"https://news.google.com/rss/search?q={query_encoded}&hl=en&gl=US&ceid=US:en"
-            
-            headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-            }
-            
-            response = requests.get(url, headers=headers, timeout=10)
-            
-            if response.status_code != 200:
-                continue
-            
-            try:
-                root = ET.fromstring(response.content)
-            except ET.ParseError:
-                continue
-            
-            items = root.findall('.//item')
-            
-            for item in items[:3]:  # Top 3 per query
-                title_elem = item.find('title')
-                link_elem = item.find('link')
-                pubDate_elem = item.find('pubDate')
-                
-                if title_elem is None:
-                    continue
-                
-                title = title_elem.text or ''
-                title_lower = title.lower()
-                
-                # Check for disruption keywords
-                if any(keyword in title_lower for keyword in DISRUPTION_KEYWORDS):
-                    disruptions.append({
-                        'title': title,
-                        'url': link_elem.text if link_elem is not None else '',
-                        'date': pubDate_elem.text if pubDate_elem is not None else '',
-                        'source': 'Airline News',
-                        'query': query
-                    })
-            
-        except Exception as e:
-            print(f"[Airline Disruptions] Query '{query}' error: {str(e)[:100]}")
-            continue
+    # Middle East destinations
+    destinations = ['Beirut', 'Tel Aviv', 'Damascus', 'Tehran', 'Baghdad', 'Sanaa']
     
-    print(f"[Airline Disruptions] Found {len(disruptions)} potential disruptions")
+    # Keywords
+    keywords = ['suspend', 'cancel', 'halt', 'resume']
+    
+    for airline in airlines[:5]:  # Limit to 5 airlines to avoid rate limits
+        for dest in destinations[:3]:  # Limit to 3 destinations
+            for keyword in keywords[:2]:  # Limit to 2 keywords
+                
+                query = f'{airline} {keyword} {dest}'
+                url = f"https://news.google.com/rss/search?q={query.replace(' ', '+')}&hl=en&gl=US&ceid=US:en"
+                
+                try:
+                    response = requests.get(url, timeout=10, headers={
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                    })
+                    
+                    if response.status_code != 200:
+                        continue
+                    
+                    root = ET.fromstring(response.content)
+                    items = root.findall('.//item')
+                    
+                    for item in items[:2]:  # Top 2 per query
+                        title_elem = item.find('title')
+                        link_elem = item.find('link')
+                        pubDate_elem = item.find('pubDate')
+                        
+                        if title_elem is None or link_elem is None:
+                            continue
+                        
+                        title = title_elem.text or ''
+                        link = link_elem.text or ''
+                        pub_date = pubDate_elem.text if pubDate_elem is not None else ''
+                        
+                        if link in seen_urls:
+                            continue
+                        
+                        seen_urls.add(link)
+                        
+                        # Check if title actually mentions disruption
+                        title_lower = title.lower()
+                        if not any(kw in title_lower for kw in ['suspend', 'cancel', 'halt', 'resume', 'stop']):
+                            continue
+                        
+                        # Parse into standard format (matching /flight-cancellations endpoint)
+                        status = 'Suspended'
+                        if 'resume' in title_lower or 'restart' in title_lower:
+                            status = 'Resumed'
+                        elif 'cancel' in title_lower:
+                            status = 'Cancelled'
+                        
+                        # Extract duration if mentioned
+                        duration = 'Unknown'
+                        if 'until' in title_lower:
+                            duration_match = re.search(r'until\s+([A-Za-z]+\s+\d{1,2})', title, re.IGNORECASE)
+                            if duration_match:
+                                duration = f"Until {duration_match.group(1)}"
+                        
+                        # Parse date
+                        try:
+                            if pub_date:
+                                from email.utils import parsedate_to_datetime
+                                date_obj = parsedate_to_datetime(pub_date)
+                                date_str = date_obj.isoformat()
+                            else:
+                                date_str = datetime.now(timezone.utc).isoformat()
+                        except:
+                            date_str = datetime.now(timezone.utc).isoformat()
+                        
+                        disruption = {
+                            'airline': airline,
+                            'destination': dest,
+                            'route': f'Various → {dest}',
+                            'origin': 'Various',
+                            'status': status,
+                            'date': date_str,
+                            'duration': duration,
+                            'source_url': link,
+                            'headline': title[:150]
+                        }
+                        
+                        disruptions.append(disruption)
+                        
+                except Exception as e:
+                    print(f"[Airline Disruptions] Error: {str(e)[:100]}")
+                    continue
+    
+    print(f"[Airline Disruptions] Found {len(disruptions)} disruptions")
     return disruptions
 
 
