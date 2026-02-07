@@ -3886,12 +3886,6 @@ def parse_flight_cancellation(title, link, pub_date, destination):
 def get_notams():
     """Fetch active NOTAMs for Middle East region"""
     
-    # Check cache first
-    cache_key = 'notams_middle_east'
-    cached = cache.get(cache_key)
-    if cached:
-        return jsonify(cached)
-    
     # Middle East ICAO codes and country mappings
     MIDDLE_EAST_FIRS = {
         'LLLL': {'country': 'Israel', 'flag': '🇮🇱', 'name': 'Tel Aviv FIR'},
@@ -3961,9 +3955,6 @@ def get_notams():
             'count': len(notams),
             'last_updated': datetime.now(timezone.utc).isoformat()
         }
-        
-        # Cache for 15 minutes
-        cache.set(cache_key, result, timeout=900)
         
         return jsonify(result)
     
