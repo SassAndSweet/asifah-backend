@@ -3883,7 +3883,6 @@ def parse_flight_cancellation(title, link, pub_date, destination):
 
 # NOTAM endpoint
 @app.route('/api/notams')
-@limiter.limit("100 per hour")
 def get_notams():
     """Fetch active NOTAMs for Middle East region"""
     
