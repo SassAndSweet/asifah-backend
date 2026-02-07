@@ -2731,6 +2731,105 @@ def scrape_osint_instagram_fallback():
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
         }
         
+        response = requests.get(url, headers=headers, timeout=10)
+        
+        if response.status_code != 200:
+            print(f"[Instagram Fallback] Picuki failed: {response.status_code}")
+            return generate_instagram_placeholder()
+        
+        from bs4 import BeautifulSoup
+        soup = BeautifulSoup(response.content, 'html.parser')
+        
+        posts = []
+        
+        # Picuki uses .box-photos class for posts
+        photo_boxes = soup.find_all('div', class_='box-photo')[:3]
+        
+        for box in photo_boxes:
+            try:
+                # Extract image
+                img_tag = box.find('img')
+                image_url = img_tag.get('src') if img_tag else ''
+                
+                # Extract caption
+                caption_div = box.find('div', class_='photo-description')
+                caption = caption_div.get_text(strip=True) if caption_div else ''
+                
+                # Extract post link
+                link_tag = box.find('a', href=True)
+                post_url = link_tag['href'] if link_tag else ''
+                if post_url and not post_url.startswith('http'):
+                    post_url = f"https://www.picuki.com{post_url}"
+                
+                # Extract timestamp
+                time_tag = box.find('time')
+                timestamp = time_tag.get('datetime', '') if time_tag else ''
+                
+                if image_url:
+                    posts.append({
+                        'post_id': post_url.split('/')[-1] if post_url else '',
+                        'caption': caption[:300],
+                        'image_url': image_url,
+                        'post_url': post_url.replace('picuki.com', 'instagram.com'),  # Convert to IG link
+                        'timestamp': timestamp,
+                        'countries': detect_countries_in_text(caption)
+                    })
+            except:
+                continue
+        
+        if posts:
+            print(f"[Instagram Fallback] ✅ Got {len(posts)} posts via Picuki")
+            return {
+                'success': True,
+                'posts': posts,
+                'count': len(posts),
+                'handle': OSINT_INSTAGRAM_HANDLE,
+                'source': 'picuki_fallback'
+            }
+        
+        print("[Instagram Fallback] Picuki parsing failed")
+        return generate_instagram_placeholder()
+        
+    except Exception as e:
+        print(f"[Instagram Fallback] Error: {str(e)[:100]}")
+        return generate_instagram_placeholder()
+
+
+def generate_instagram_placeholder():
+    """
+    Generate placeholder data if all scraping fails
+    Shows "Unable to load feed" message
+    """
+    return {
+        'success': False,
+        'posts': [],
+        'count': 0,
+        'handle': OSINT_INSTAGRAM_HANDLE,
+        'message': 'Unable to load Instagram feed. Visit @osintdefender directly.',
+        'source': 'placeholder'
+    }
+
+
+def detect_countries_in_text(text):
+    """
+    Detect Middle East countries mentioned in text
+    Returns list of country names (for RED badges)
+    """
+    if not text:
+        return []
+    
+    text_lower = text.lower()
+    detected = []
+    
+    for country, keywords in MIDDLE_EAST_COUNTRIES.items():
+        for keyword in keywords:
+            if keyword in text_lower:
+                if country not in detected:
+                    detected.append(country)
+                break
+    
+    return detected[:2]  # Max 2 country tags per post
+        
 # ========================================
 # LEBANON STABILITY CACHE FUNCTIONS
 # ========================================
