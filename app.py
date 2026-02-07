@@ -3240,7 +3240,7 @@ def flight_cancellations():
         
         print(f"[Flight Cancellations] Total after merge: {len(all_cancellations)}")
         
-        # Filter to last 30 days
+       # Filter to last 30 days
         thirty_days_ago = datetime.now(timezone.utc) - timedelta(days=30)
         recent_cancellations = []
         
@@ -3252,30 +3252,31 @@ def flight_cancellations():
             except:
                 recent_cancellations.append(cancel)  # Include if date parsing fails
         
-# Sort by date (newest first) BEFORE deduplication
-recent_cancellations.sort(key=lambda x: x.get('date', ''), reverse=True)
-
-# Remove duplicates by airline + destination (keeping newest for each combo)
-unique_cancellations = []
-seen_combos = set()
-
-for cancel in recent_cancellations:
-    combo = f"{cancel['airline']}_{cancel['destination']}"
-    if combo not in seen_combos:
-        seen_combos.add(combo)
-        unique_cancellations.append(cancel)
-
-# Sort again by date to ensure final list is chronological
-unique_cancellations.sort(key=lambda x: x.get('date', ''), reverse=True)
-
-print(f"[Flight Cancellations] Found {len(unique_cancellations)} unique disruptions (after deduplication)")
-
-return jsonify({
-    'success': True,
-    'cancellations': unique_cancellations[:20],  # Top 20 most recent
-    'count': len(unique_cancellations),
-    'last_updated': datetime.now(timezone.utc).isoformat()
-})
+        # Sort by date (newest first) BEFORE deduplication
+        recent_cancellations.sort(key=lambda x: x.get('date', ''), reverse=True)
+        
+        # Remove duplicates by airline + destination (keeping newest for each combo)
+        unique_cancellations = []
+        seen_combos = set()
+        
+        for cancel in recent_cancellations:
+            combo = f"{cancel['airline']}_{cancel['destination']}"
+            if combo not in seen_combos:
+                seen_combos.add(combo)
+                unique_cancellations.append(cancel)
+        
+        # Sort again by date to ensure final list is chronological
+        unique_cancellations.sort(key=lambda x: x.get('date', ''), reverse=True)
+        
+        print(f"[Flight Cancellations] Found {len(unique_cancellations)} unique disruptions (after deduplication)")
+        
+        return jsonify({
+            'success': True,
+            'cancellations': unique_cancellations[:20],  # Top 20 most recent
+            'count': len(unique_cancellations),
+            'last_updated': datetime.now(timezone.utc).isoformat()
+        })
+        
     except Exception as e:
         print(f"[Flight Cancellations] ERROR: {str(e)}")
         return jsonify({
