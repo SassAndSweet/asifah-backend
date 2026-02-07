@@ -3881,6 +3881,183 @@ def parse_flight_cancellation(title, link, pub_date, destination):
         'headline': title[:150]  # Truncate long headlines
     }
 
+# NOTAM endpoint
+@app.route('/api/notams')
+@limiter.limit("100 per hour")
+def get_notams():
+    """Fetch active NOTAMs for Middle East region"""
+    
+    # Check cache first
+    cache_key = 'notams_middle_east'
+    cached = cache.get(cache_key)
+    if cached:
+        return jsonify(cached)
+    
+    # Middle East ICAO codes and country mappings
+    MIDDLE_EAST_FIRS = {
+        'LLLL': {'country': 'Israel', 'flag': '🇮🇱', 'name': 'Tel Aviv FIR'},
+        'OLBB': {'country': 'Lebanon', 'flag': '🇱🇧', 'name': 'Beirut FIR'},
+        'OSTT': {'country': 'Syria', 'flag': '🇸🇾', 'name': 'Damascus FIR'},
+        'OIIX': {'country': 'Iran', 'flag': '🇮🇷', 'name': 'Tehran FIR'},
+        'OYSC': {'country': 'Yemen', 'flag': '🇾🇪', 'name': 'Sanaa FIR'},
+        'ORBB': {'country': 'Iraq', 'flag': '🇮🇶', 'name': 'Baghdad FIR'},
+        'OJAC': {'country': 'Jordan', 'flag': '🇯🇴', 'name': 'Amman FIR'},
+        'HECC': {'country': 'Egypt', 'flag': '🇪🇬', 'name': 'Cairo FIR'},
+        'OEJD': {'country': 'Saudi Arabia', 'flag': '🇸🇦', 'name': 'Jeddah FIR'},
+        'OEDF': {'country': 'Saudi Arabia', 'flag': '🇸🇦', 'name': 'Riyadh FIR'},
+        'OMAE': {'country': 'UAE', 'flag': '🇦🇪', 'name': 'Dubai FIR'},
+        'OTDF': {'country': 'Qatar', 'flag': '🇶🇦', 'name': 'Doha FIR'},
+        'OOMM': {'country': 'Oman', 'flag': '🇴🇲', 'name': 'Muscat FIR'},
+        'OBBB': {'country': 'Bahrain', 'flag': '🇧🇭', 'name': 'Bahrain FIR'}
+    }
+    
+    notams = []
+    
+    try:
+        # FAA NOTAM Search API endpoint
+        base_url = "https://external-api.faa.gov/notamapi/v1/notams"
+        
+        for icao_code, info in MIDDLE_EAST_FIRS.items():
+            try:
+                # Query FAA NOTAM API
+                params = {
+                    'locationICAOId': icao_code,
+                    'responseType': 'application/json'
+                }
+                
+                response = requests.get(base_url, params=params, timeout=5)
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    
+                    # Parse NOTAMs
+                    if data.get('notamList'):
+                        for notam in data['notamList']:
+                            parsed = parse_notam(notam, info)
+                            if parsed:
+                                notams.append(parsed)
+                
+                # Rate limit protection
+                time.sleep(0.2)
+                
+            except Exception as e:
+                print(f"Error fetching NOTAM for {icao_code}: {e}")
+                continue
+        
+        # Sort by priority (closures first, then by date)
+        priority_order = {
+            'AIRSPACE CLOSURE': 1,
+            'FLIGHT RESTRICTION': 2,
+            'MILITARY ACTIVITY': 3,
+            'AIRPORT CLOSURE': 4,
+            'NAVAID OUTAGE': 5,
+            'HAZARD': 6,
+            'OTHER': 7
+        }
+        
+        notams.sort(key=lambda x: (priority_order.get(x['type'], 99), x.get('effective_date', '')))
+        
+        result = {
+            'notams': notams,
+            'count': len(notams),
+            'last_updated': datetime.now(timezone.utc).isoformat()
+        }
+        
+        # Cache for 15 minutes
+        cache.set(cache_key, result, timeout=900)
+        
+        return jsonify(result)
+    
+    except Exception as e:
+        print(f"NOTAM fetch error: {e}")
+        return jsonify({'notams': [], 'count': 0, 'error': str(e)}), 500
+
+
+def parse_notam(notam_data, location_info):
+    """Parse NOTAM data into structured format"""
+    try:
+        # Extract NOTAM text
+        notam_text = notam_data.get('notamText', '').upper()
+        
+        # Determine NOTAM type based on keywords
+        notam_type = 'OTHER'
+        icon = '📋'
+        color = 'gray'
+        
+        if any(word in notam_text for word in ['AIRSPACE CLOSED', 'AIRSPACE CLO', 'FIR CLOSED']):
+            notam_type = 'AIRSPACE CLOSURE'
+            icon = '⛔'
+            color = 'red'
+        elif any(word in notam_text for word in ['RESTRICTED', 'PROHIBITED', 'DANGER AREA']):
+            notam_type = 'FLIGHT RESTRICTION'
+            icon = '🚫'
+            color = 'orange'
+        elif any(word in notam_text for word in ['MILITARY', 'MIL ACT', 'EXERCISE']):
+            notam_type = 'MILITARY ACTIVITY'
+            icon = '⚠️'
+            color = 'yellow'
+        elif any(word in notam_text for word in ['AIRPORT CLOSED', 'AD CLOSED', 'RWY CLOSED']):
+            notam_type = 'AIRPORT CLOSURE'
+            icon = '🛑'
+            color = 'purple'
+        elif any(word in notam_text for word in ['NAVAID', 'VOR', 'DME', 'ILS', 'U/S']):
+            notam_type = 'NAVAID OUTAGE'
+            icon = '📡'
+            color = 'blue'
+        elif any(word in notam_text for word in ['VOLCANIC', 'ASH', 'HAZARD', 'OBSTRUCTION']):
+            notam_type = 'HAZARD'
+            icon = '⚠️'
+            color = 'gray'
+        
+        # Extract dates
+        effective_date = notam_data.get('effectiveStart', '')
+        expiry_date = notam_data.get('effectiveEnd', '')
+        
+        # Format dates
+        effective_formatted = ''
+        expiry_formatted = ''
+        
+        if effective_date:
+            try:
+                eff_dt = datetime.fromisoformat(effective_date.replace('Z', '+00:00'))
+                effective_formatted = eff_dt.strftime('%b %d, %Y')
+            except:
+                effective_formatted = effective_date[:10]
+        
+        if expiry_date:
+            try:
+                exp_dt = datetime.fromisoformat(expiry_date.replace('Z', '+00:00'))
+                expiry_formatted = exp_dt.strftime('%b %d, %Y')
+            except:
+                expiry_formatted = expiry_date[:10]
+        
+        # Create summary (first 150 chars of NOTAM text)
+        summary = notam_text[:150].strip()
+        if len(notam_text) > 150:
+            summary += '...'
+        
+        # NOTAM ID
+        notam_id = notam_data.get('notamID', 'N/A')
+        
+        return {
+            'id': notam_id,
+            'country': location_info['country'],
+            'flag': location_info['flag'],
+            'fir': location_info['name'],
+            'type': notam_type,
+            'icon': icon,
+            'color': color,
+            'summary': summary,
+            'effective_date': effective_formatted,
+            'expiry_date': expiry_formatted,
+            'valid_range': f"{effective_formatted} - {expiry_formatted}" if expiry_formatted else f"From {effective_formatted}",
+            'notam_text': notam_text,
+            'source_url': f"https://notams.aim.faa.gov/notamSearch/notam.html?id={notam_id}"
+        }
+    
+    except Exception as e:
+        print(f"NOTAM parse error: {e}")
+        return None
 
 @app.route('/api/polymarket', methods=['GET'])
 def polymarket_proxy():
