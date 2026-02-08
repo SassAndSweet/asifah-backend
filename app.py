@@ -66,12 +66,12 @@ February 8, 2026
 
 All endpoints working:
 - /api/threat/<target> (hezbollah, iran, houthis, syria)
-- /scan-iran-protests (with HRANA data + Regime Stability! ✅)
+- /scan-iran-protests (with HRANA data + Regime Stability!)
 - /api/syria-conflicts
-- /api/iran-strike-probability (with caching! ✅)
-- /api/hezbollah-activity (with caching! ✅)
-- /api/houthis-threat (with caching! ✅)
-- /api/syria-conflict (with caching! ✅)
+- /api/iran-strike-probability (with caching!)
+- /api/hezbollah-activity (with caching!)
+- /api/houthis-threat (with caching!)
+- /api/syria-conflict (with caching!)
 """
 
 # ========================================
