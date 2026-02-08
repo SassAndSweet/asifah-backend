@@ -1,66 +1,4 @@
 """
-Asifah Analytics Backend v2.7.0
-February 3, 2026
-
-Changes from v2.6.7:
-- NEW: Lebanon Stability Index (/scan-lebanon-stability) 🇱🇧
-  * Multi-factor stability scoring (Political, Economic, Security, Hezbollah)
-  * Eurobond yield scraping (Trading Economics)
-  * LBP/USD black market rate tracking
-  * Hezbollah rearmament indicators
-  * Parliamentary elections countdown (May 3, 2026)
-  * Presidential vacancy tracking (since Oct 2022)
-  * Color-coded risk levels (Green/Yellow/Orange/Red)
-
-Changes from v2.6.6:
-- REBALANCED: Regime Stability formula - reduced Rial devaluation weight
-  * Changed from 0.3 to 0.15 multiplier
-  * Reflects that regime has survived extreme currency collapse
-  * Should show ~33/100 instead of 0/100 for current conditions
-  * More realistic "Critical Risk" vs "Imminent Collapse" distinction
-
-Changes from v2.6.5:
-- FIXED: Oil price cascade with 4 reliable FREE APIs!
-  * US EIA (Energy Information Administration) - No key required
-  * OilPriceAPI Demo - 20 requests/hour, no auth
-  * FRED (Federal Reserve) - CSV download, no key
-  * Alpha Vantage - Backup (25/day)
-  * Should fix Regime Stability stuck at 2/100
-
-Changes from v2.6.4:
-- ENHANCED: Flight Cancellations Monitor - Massive upgrade!
-  * Added 40+ airlines (regional carriers, airline groups)
-  * Expanded to ALL Middle East destinations (Iraq, Jordan, Saudi, UAE, Egypt, Turkey, Bahrain, Kuwait, Qatar, Oman)
-  * Improved airline extraction with group recognition (Lufthansa Group, IAG, Air France-KLM)
-  * Better parsing patterns for complex headlines
-  * Total coverage: 45+ destinations across 15 countries
-
-Changes from v2.6.3:
-- NEW: Flight Cancellations Monitor (/flight-cancellations)
-- Automated Google News scraping for airline disruptions
-- Tracks Israel, Lebanon, Syria, Iran, Yemen destinations
-- Returns airline, route, date, duration, status, source link
-- 30-day rolling window with auto-deduplication
-
-Changes from v2.6.2:
-- FIXED: Alpha Vantage oil price parsing bug
-- Better error handling for API responses
-- More detailed logging for debugging
-- Validates data structure before parsing
-
-Changes from v2.6.1:
-- NEW: Oil price integration via cascading fallback (Alpha Vantage → Commodities-API → OilPriceAPI)
-- Oil prices now factor into Regime Stability calculation (±5 points)
-- Higher oil = more Iran revenue = higher stability (despite sanctions)
-- Baseline: $75/barrel, $10 deviation = ±0.5 stability points
-
-Changes from v2.6.0:
-- FIXED: Regime Stability formula now includes +30 military strength baseline
-- Accounts for IRGC operational effectiveness preventing immediate collapse
-- Reweighted economic factors (×0.3 instead of ×1.5) to be less catastrophic
-- Realistic scores: ~30-35 (High Risk) instead of 0 (Critical)
-
-"""
 Asifah Analytics Backend v2.8.0
 February 8, 2026
 
@@ -681,7 +619,7 @@ def calculate_combined_probability(israel_prob, us_prob, coordination):
 def calculate_reverse_threat(articles, source_actor='iran', target_actor='israel'):
     """
     Calculate probability of source actor attacking target
-    (e.g., Iran → Israel, Hezbollah → Israel)
+    (e.g., Iran -> Israel, Hezbollah -> Israel)
     """
     
     REVERSE_THREAT_KEYWORDS = {
