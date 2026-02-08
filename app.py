@@ -3248,6 +3248,356 @@ def api_threat_matrix(target):
         }), 500
 
 
+# ========================================
+# NEW: INDIVIDUAL COUNTRY ENDPOINTS
+# (Added for frontend collapse cards)
+# ========================================
+
+@app.route('/api/iran-strike-probability', methods=['GET'])
+def api_iran_strike_probability():
+    """
+    Iran Strike Probability Endpoint
+    Returns probability of Israeli strike against Iran
+    """
+    try:
+        days = int(request.args.get('days', 7))
+        
+        if not check_rate_limit():
+            return jsonify({
+                'success': False,
+                'error': 'Rate limit exceeded',
+                'probability': 0,
+                'rate_limited': True
+            }), 200
+        
+        # Use your existing TARGET_KEYWORDS for 'iran'
+        query = ' OR '.join(TARGET_KEYWORDS['iran']['keywords'])
+        
+        # Fetch articles using your existing functions
+        articles_en = fetch_newsapi_articles(query + ' AND (strike OR attack OR threat)', days)
+        articles_gdelt_en = fetch_gdelt_articles(query + ' AND (strike OR attack)', days, 'eng')
+        articles_gdelt_ar = fetch_gdelt_articles(query + ' AND (strike OR attack)', days, 'ara')
+        articles_gdelt_he = fetch_gdelt_articles(query + ' AND (strike OR attack)', days, 'heb')
+        articles_gdelt_fa = fetch_gdelt_articles(query + ' AND (strike OR attack)', days, 'fas')
+        
+        articles_reddit = fetch_reddit_posts(
+            'iran',
+            ['Iran', 'Israel', 'strike', 'attack', 'nuclear', 'IRGC'],
+            days
+        )
+        
+        all_articles = (articles_en + articles_gdelt_en + articles_gdelt_ar + 
+                       articles_gdelt_he + articles_gdelt_fa + articles_reddit)
+        
+        # Use your existing scoring algorithm
+        scoring_result = calculate_threat_probability(all_articles, days, 'iran')
+        probability = scoring_result['probability']
+        momentum = scoring_result['momentum']
+        
+        # Timeline based on probability
+        if probability < 30:
+            timeline = "180+ Days"
+        elif probability < 50:
+            timeline = "91-180 Days"
+        elif probability < 70:
+            timeline = "31-90 Days"
+        else:
+            timeline = "0-30 Days"
+        
+        # Confidence based on article count and sources
+        unique_sources = len(set(a.get('source', {}).get('name', 'Unknown') for a in all_articles))
+        if len(all_articles) >= 20 and unique_sources >= 8:
+            confidence = "High"
+        elif len(all_articles) >= 10 and unique_sources >= 5:
+            confidence = "Medium"
+        else:
+            confidence = "Low"
+        
+        return jsonify({
+            'success': True,
+            'probability': probability,
+            'timeline': timeline,
+            'confidence': confidence,
+            'momentum': momentum,
+            'total_articles': len(all_articles),
+            'unique_sources': unique_sources,
+            'recent_articles_48h': scoring_result['breakdown']['recent_articles_48h'],
+            'last_updated': datetime.now(timezone.utc).isoformat(),
+            'cached': False,
+            'version': '2.7.0'
+        })
+        
+    except Exception as e:
+        print(f"Error in /api/iran-strike-probability: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'probability': 0,
+            'timeline': 'Unknown',
+            'confidence': 'Low'
+        }), 500
+
+
+@app.route('/api/hezbollah-activity', methods=['GET'])
+def api_hezbollah_activity():
+    """
+    Hezbollah Activity Level Endpoint
+    Returns activity level and strike probability for Hezbollah
+    """
+    try:
+        days = int(request.args.get('days', 7))
+        
+        if not check_rate_limit():
+            return jsonify({
+                'success': False,
+                'error': 'Rate limit exceeded',
+                'activity_level': 0,
+                'rate_limited': True
+            }), 200
+        
+        # Use your existing TARGET_KEYWORDS for 'hezbollah'
+        query = ' OR '.join(TARGET_KEYWORDS['hezbollah']['keywords'])
+        
+        # Fetch articles
+        articles_en = fetch_newsapi_articles(query, days)
+        articles_gdelt_en = fetch_gdelt_articles(query, days, 'eng')
+        articles_gdelt_ar = fetch_gdelt_articles(query, days, 'ara')
+        articles_gdelt_he = fetch_gdelt_articles(query, days, 'heb')
+        
+        articles_reddit = fetch_reddit_posts(
+            'hezbollah',
+            TARGET_KEYWORDS['hezbollah']['reddit_keywords'],
+            days
+        )
+        
+        all_articles = (articles_en + articles_gdelt_en + articles_gdelt_ar + 
+                       articles_gdelt_he + articles_reddit)
+        
+        # Use your existing scoring algorithm
+        scoring_result = calculate_threat_probability(all_articles, days, 'hezbollah')
+        probability = scoring_result['probability']
+        momentum = scoring_result['momentum']
+        
+        # Activity level calculation (0-100 scale)
+        # More articles = higher activity
+        activity_level = min(100, (len(all_articles) * 2) + scoring_result['breakdown']['recent_articles_48h'] * 3)
+        
+        # Activity description
+        if activity_level >= 75:
+            activity_desc = "Very High"
+        elif activity_level >= 50:
+            activity_desc = "High"
+        elif activity_level >= 25:
+            activity_desc = "Moderate"
+        else:
+            activity_desc = "Low"
+        
+        return jsonify({
+            'success': True,
+            'activity_level': int(activity_level),
+            'activity_description': activity_desc,
+            'strike_probability': probability,
+            'momentum': momentum,
+            'total_articles': len(all_articles),
+            'recent_articles_48h': scoring_result['breakdown']['recent_articles_48h'],
+            'last_updated': datetime.now(timezone.utc).isoformat(),
+            'cached': False,
+            'version': '2.7.0'
+        })
+        
+    except Exception as e:
+        print(f"Error in /api/hezbollah-activity: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'activity_level': 0,
+            'activity_description': 'Unknown'
+        }), 500
+
+
+@app.route('/api/houthis-threat', methods=['GET'])
+def api_houthis_threat():
+    """
+    Houthis Threat Level Endpoint
+    Returns threat level and shipping disruption data for Houthis
+    """
+    try:
+        days = int(request.args.get('days', 7))
+        
+        if not check_rate_limit():
+            return jsonify({
+                'success': False,
+                'error': 'Rate limit exceeded',
+                'threat_level': 0,
+                'rate_limited': True
+            }), 200
+        
+        # Use your existing TARGET_KEYWORDS for 'houthis'
+        query = ' OR '.join(TARGET_KEYWORDS['houthis']['keywords'])
+        
+        # Fetch articles with shipping/Red Sea focus
+        articles_en = fetch_newsapi_articles(query + ' AND (Red Sea OR shipping OR attack)', days)
+        articles_gdelt_en = fetch_gdelt_articles(query + ' AND (Red Sea OR shipping)', days, 'eng')
+        articles_gdelt_ar = fetch_gdelt_articles(query, days, 'ara')
+        
+        articles_reddit = fetch_reddit_posts(
+            'houthis',
+            TARGET_KEYWORDS['houthis']['reddit_keywords'],
+            days
+        )
+        
+        all_articles = (articles_en + articles_gdelt_en + articles_gdelt_ar + articles_reddit)
+        
+        # Use your existing scoring algorithm
+        scoring_result = calculate_threat_probability(all_articles, days, 'houthis')
+        probability = scoring_result['probability']
+        momentum = scoring_result['momentum']
+        
+        # Threat level calculation
+        threat_level = min(100, probability + (len(all_articles) / 2))
+        
+        # Check for shipping disruption keywords
+        shipping_incidents = 0
+        for article in all_articles:
+            text = f"{article.get('title', '')} {article.get('description', '')}".lower()
+            if any(word in text for word in ['shipping', 'red sea', 'attacked', 'strike', 'missile', 'drone']):
+                shipping_incidents += 1
+        
+        # Threat description
+        if threat_level >= 75:
+            threat_desc = "Critical"
+        elif threat_level >= 50:
+            threat_desc = "High"
+        elif threat_level >= 25:
+            threat_desc = "Moderate"
+        else:
+            threat_desc = "Low"
+        
+        return jsonify({
+            'success': True,
+            'threat_level': int(threat_level),
+            'threat_description': threat_desc,
+            'strike_probability': probability,
+            'momentum': momentum,
+            'shipping_incidents': shipping_incidents,
+            'total_articles': len(all_articles),
+            'recent_articles_48h': scoring_result['breakdown']['recent_articles_48h'],
+            'last_updated': datetime.now(timezone.utc).isoformat(),
+            'cached': False,
+            'version': '2.7.0'
+        })
+        
+    except Exception as e:
+        print(f"Error in /api/houthis-threat: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'threat_level': 0,
+            'threat_description': 'Unknown'
+        }), 500
+
+
+@app.route('/api/syria-conflict', methods=['GET'])
+def api_syria_conflict():
+    """
+    Syria Conflict Status Endpoint
+    Returns conflict intensity and activity level in Syria
+    """
+    try:
+        days = int(request.args.get('days', 7))
+        
+        if not check_rate_limit():
+            return jsonify({
+                'success': False,
+                'error': 'Rate limit exceeded',
+                'intensity': 0,
+                'rate_limited': True
+            }), 200
+        
+        # Syria-specific keywords
+        syria_keywords = ['syria', 'syrian', 'damascus', 'assad', 'aleppo', 'idlib']
+        query = ' OR '.join(syria_keywords)
+        
+        # Fetch articles
+        articles_en = fetch_newsapi_articles(query + ' AND (strike OR attack OR conflict)', days)
+        articles_gdelt_en = fetch_gdelt_articles(query, days, 'eng')
+        articles_gdelt_ar = fetch_gdelt_articles(query, days, 'ara')
+        
+        articles_reddit = fetch_reddit_posts(
+            'iran',  # Use Iran subreddits as they often cover Syria
+            ['Syria', 'Assad', 'Damascus', 'conflict', 'strike'],
+            days
+        )
+        
+        all_articles = (articles_en + articles_gdelt_en + articles_gdelt_ar + articles_reddit)
+        
+        # Calculate intensity based on article volume and keywords
+        intensity_score = 0
+        escalation_articles = 0
+        
+        for article in all_articles:
+            text = f"{article.get('title', '')} {article.get('description', '')}".lower()
+            
+            # Check for escalation keywords
+            if any(word in text for word in ['strike', 'attack', 'bombing', 'airstrike', 'killed', 'casualties']):
+                escalation_articles += 1
+                intensity_score += 3
+            
+            # Weight recent articles more
+            try:
+                pub_date = article.get('publishedAt', '')
+                if pub_date:
+                    pub_dt = datetime.fromisoformat(pub_date.replace('Z', '+00:00'))
+                    age_hours = (datetime.now(timezone.utc) - pub_dt).total_seconds() / 3600
+                    if age_hours <= 48:
+                        intensity_score += 2
+            except:
+                pass
+        
+        # Normalize to 0-100 scale
+        intensity = min(100, int(intensity_score / max(len(all_articles), 1) * 10))
+        
+        # Intensity description
+        if intensity >= 75:
+            intensity_desc = "Very High"
+        elif intensity >= 50:
+            intensity_desc = "High"
+        elif intensity >= 25:
+            intensity_desc = "Moderate"
+        else:
+            intensity_desc = "Low"
+        
+        # Calculate momentum
+        recent_count = sum(1 for a in all_articles if 'publishedAt' in a)
+        if recent_count > len(all_articles) * 0.6:
+            momentum = "increasing"
+        elif recent_count < len(all_articles) * 0.4:
+            momentum = "decreasing"
+        else:
+            momentum = "stable"
+        
+        return jsonify({
+            'success': True,
+            'intensity': intensity,
+            'intensity_description': intensity_desc,
+            'momentum': momentum,
+            'total_articles': len(all_articles),
+            'escalation_articles': escalation_articles,
+            'last_updated': datetime.now(timezone.utc).isoformat(),
+            'cached': False,
+            'version': '2.7.0'
+        })
+        
+    except Exception as e:
+        print(f"Error in /api/syria-conflict: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'intensity': 0,
+            'intensity_description': 'Unknown'
+        }), 500
+
+
 @app.route('/scan-iran-protests', methods=['GET'])
 def scan_iran_protests():
     """Iran protests endpoint with regime stability calculation"""
