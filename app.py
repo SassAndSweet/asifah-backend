@@ -60,27 +60,116 @@ Changes from v2.6.0:
 - Reweighted economic factors (×0.3 instead of ×1.5) to be less catastrophic
 - Realistic scores: ~30-35 (High Risk) instead of 0 (Critical)
 
+"""
+Asifah Analytics Backend v2.8.0
+February 8, 2026
+
 All endpoints working:
 - /api/threat/<target> (hezbollah, iran, houthis, syria)
 - /scan-iran-protests (with HRANA data + Regime Stability! ✅)
 - /api/syria-conflicts
+- /api/iran-strike-probability (with caching! ✅)
+- /api/hezbollah-activity (with caching! ✅)
+- /api/houthis-threat (with caching! ✅)
+- /api/syria-conflict (with caching! ✅)
 """
 
+# ========================================
+# IMPORTS
+# ========================================
+
+# Standard library imports first
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 import requests
 from datetime import datetime, timezone, timedelta
 import os
-import json
 import time
 import re
 import math
+import json
+from pathlib import Path
+
+# Local imports last
 from rss_monitor import (
     fetch_all_rss,
     enhance_article_with_leadership,
     apply_leadership_multiplier,
-    fetch_airline_disruptions  # ADD THIS LINE
+    fetch_airline_disruptions
 )
+
+# ========================================
+# CACHING SYSTEM
+# ========================================
+
+# Cache file location (persistent across restarts)
+CACHE_FILE = '/tmp/threat_cache.json'
+
+def load_cache():
+    """Load cached threat data from file"""
+    try:
+        if Path(CACHE_FILE).exists():
+            with open(CACHE_FILE, 'r') as f:
+                cache = json.load(f)
+                print(f"[Cache] Loaded cache with {len(cache)} entries")
+                return cache
+        print("[Cache] No cache file found, starting fresh")
+        return {}
+    except Exception as e:
+        print(f"[Cache] Error loading cache: {e}")
+        return {}
+
+def save_cache(cache_data):
+    """Save threat data to cache file"""
+    try:
+        with open(CACHE_FILE, 'w') as f:
+            json.dump(cache_data, f, indent=2)
+        print(f"[Cache] Saved cache with {len(cache_data)} entries")
+        return True
+    except Exception as e:
+        print(f"[Cache] Error saving cache: {e}")
+        return False
+
+def get_cached_result(target):
+    """Get cached result for a target"""
+    cache = load_cache()
+    return cache.get(target)
+
+def update_cache(target, data):
+    """Update cache for a specific target"""
+    cache = load_cache()
+    cache[target] = {
+        **data,
+        'cached_at': datetime.now(timezone.utc).isoformat(),
+        'cached': True
+    }
+    save_cache(cache)
+    print(f"[Cache] Updated {target} cache")
+
+def is_cache_fresh(cached_data, max_age_hours=6):
+    """Check if cached data is still fresh (default: 6 hours)"""
+    if not cached_data:
+        return False
+    
+    try:
+        cached_at = datetime.fromisoformat(cached_data.get('cached_at', ''))
+        age = datetime.now(timezone.utc) - cached_at
+        is_fresh = age.total_seconds() < (max_age_hours * 3600)
+        
+        if is_fresh:
+            hours_old = age.total_seconds() / 3600
+            print(f"[Cache] Data is {hours_old:.1f} hours old (fresh)")
+        else:
+            print(f"[Cache] Data is stale (>{max_age_hours} hours old)")
+        
+        return is_fresh
+    except Exception as e:
+        print(f"[Cache] Error checking freshness: {e}")
+        return False
+
+# ========================================
+# FLASK APP INITIALIZATION
+# ========================================
 
 app = Flask(__name__)
 CORS(app)
@@ -88,10 +177,12 @@ CORS(app)
 # ========================================
 # CONFIGURATION
 # ========================================
+
 NEWSAPI_KEY = os.environ.get('NEWSAPI_KEY')
 EODHD_API_KEY = os.environ.get('EODHD_API_KEY', '697925068da530.81277377')
 ALPHA_VANTAGE_KEY = os.environ.get('ALPHA_VANTAGE_KEY', '6V1C73D5FYVIDWM5')
 GDELT_BASE_URL = "http://api.gdeltproject.org/api/v2/doc/doc"
+
 # Reddit User Agent
 REDDIT_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 
@@ -3247,6 +3338,509 @@ def api_threat_matrix(target):
             'error': str(e)
         }), 500
 
+# ========================================
+# INDIVIDUAL COUNTRY ENDPOINTS WITH CACHING
+# Add these AFTER your /api/threat/<target> endpoint
+# ========================================
+
+@app.route('/api/iran-strike-probability', methods=['GET'])
+def api_iran_strike_probability():
+    """
+    Iran Strike Probability Endpoint
+    Returns cached data by default, only scans when refresh=true
+    """
+    try:
+        # Check if user requested a fresh scan
+        refresh = request.args.get('refresh', 'false').lower() == 'true'
+        days = int(request.args.get('days', 7))
+        
+        # If not refreshing, try to return cached data
+        if not refresh:
+            cached = get_cached_result('iran')
+            if cached and is_cache_fresh(cached, max_age_hours=6):
+                print("[Iran] Returning cached data")
+                return jsonify(cached)
+        
+        # User requested refresh OR cache is stale
+        print("[Iran] Performing fresh scan...")
+        
+        if not check_rate_limit():
+            # If rate limited, return stale cache if available
+            cached = get_cached_result('iran')
+            if cached:
+                print("[Iran] Rate limited, returning stale cache")
+                cached['stale_cache'] = True
+                return jsonify(cached)
+            
+            return jsonify({
+                'success': False,
+                'error': 'Rate limit exceeded',
+                'probability': 0,
+                'rate_limited': True
+            }), 429
+        
+        # Fetch fresh data
+        query = ' OR '.join(TARGET_KEYWORDS['iran']['keywords'])
+        
+        articles_en = fetch_newsapi_articles(query, days)
+        articles_gdelt_en = fetch_gdelt_articles(query, days, 'eng')
+        articles_gdelt_ar = fetch_gdelt_articles(query, days, 'ara')
+        articles_gdelt_he = fetch_gdelt_articles(query, days, 'heb')
+        articles_gdelt_fa = fetch_gdelt_articles(query, days, 'fas')
+        
+        articles_reddit = fetch_reddit_posts(
+            'iran',
+            TARGET_KEYWORDS['iran']['reddit_keywords'],
+            days
+        )
+        
+        all_articles = (articles_en + articles_gdelt_en + articles_gdelt_ar + 
+                       articles_gdelt_he + articles_gdelt_fa + articles_reddit)
+        
+        # Calculate probability
+        scoring_result = calculate_threat_probability(all_articles, days, 'iran')
+        probability = scoring_result['probability']
+        momentum = scoring_result['momentum']
+        
+        # Timeline
+        if probability < 30:
+            timeline = "180+ Days"
+        elif probability < 50:
+            timeline = "91-180 Days"
+        elif probability < 70:
+            timeline = "31-90 Days"
+        else:
+            timeline = "0-30 Days"
+        
+        # Confidence
+        unique_sources = len(set(a.get('source', {}).get('name', 'Unknown') for a in all_articles))
+        if len(all_articles) >= 20 and unique_sources >= 8:
+            confidence = "High"
+        elif len(all_articles) >= 10 and unique_sources >= 5:
+            confidence = "Medium"
+        else:
+            confidence = "Low"
+        
+        # Build response
+        result = {
+            'success': True,
+            'probability': probability,
+            'timeline': timeline,
+            'confidence': confidence,
+            'momentum': momentum,
+            'total_articles': len(all_articles),
+            'unique_sources': unique_sources,
+            'recent_articles_48h': scoring_result['breakdown']['recent_articles_48h'],
+            'last_updated': datetime.now(timezone.utc).isoformat(),
+            'cached': False,
+            'version': '2.8.0'
+        }
+        
+        # Update cache
+        update_cache('iran', result)
+        
+        print(f"[Iran] Fresh scan complete: {probability}%")
+        return jsonify(result)
+        
+    except Exception as e:
+        print(f"Error in /api/iran-strike-probability: {e}")
+        import traceback
+        traceback.print_exc()
+        
+        # Try to return cached data on error
+        cached = get_cached_result('iran')
+        if cached:
+            print("[Iran] Error occurred, returning cached data")
+            cached['error_fallback'] = True
+            return jsonify(cached)
+        
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'probability': 0,
+            'timeline': 'Unknown',
+            'confidence': 'Low'
+        }), 500
+
+
+@app.route('/api/hezbollah-activity', methods=['GET'])
+def api_hezbollah_activity():
+    """
+    Hezbollah Strike Probability Endpoint
+    Returns cached data by default, only scans when refresh=true
+    """
+    try:
+        refresh = request.args.get('refresh', 'false').lower() == 'true'
+        days = int(request.args.get('days', 7))
+        
+        # Try cached data first
+        if not refresh:
+            cached = get_cached_result('hezbollah')
+            if cached and is_cache_fresh(cached, max_age_hours=6):
+                print("[Hezbollah] Returning cached data")
+                return jsonify(cached)
+        
+        print("[Hezbollah] Performing fresh scan...")
+        
+        if not check_rate_limit():
+            cached = get_cached_result('hezbollah')
+            if cached:
+                print("[Hezbollah] Rate limited, returning stale cache")
+                cached['stale_cache'] = True
+                return jsonify(cached)
+            
+            return jsonify({
+                'success': False,
+                'error': 'Rate limit exceeded',
+                'probability': 0,
+                'rate_limited': True
+            }), 429
+        
+        # Fetch fresh data
+        query = ' OR '.join(TARGET_KEYWORDS['hezbollah']['keywords'])
+        
+        articles_en = fetch_newsapi_articles(query, days)
+        articles_gdelt_en = fetch_gdelt_articles(query, days, 'eng')
+        articles_gdelt_ar = fetch_gdelt_articles(query, days, 'ara')
+        articles_gdelt_he = fetch_gdelt_articles(query, days, 'heb')
+        
+        articles_reddit = fetch_reddit_posts(
+            'hezbollah',
+            TARGET_KEYWORDS['hezbollah']['reddit_keywords'],
+            days
+        )
+        
+        all_articles = (articles_en + articles_gdelt_en + articles_gdelt_ar + 
+                       articles_gdelt_he + articles_reddit)
+        
+        # Calculate strike probability
+        scoring_result = calculate_threat_probability(all_articles, days, 'hezbollah')
+        probability = scoring_result['probability']
+        momentum = scoring_result['momentum']
+        
+        # Activity level as secondary metric
+        activity_level = min(100, (len(all_articles) * 2) + scoring_result['breakdown']['recent_articles_48h'] * 3)
+        
+        if activity_level >= 75:
+            activity_desc = "Very High"
+        elif activity_level >= 50:
+            activity_desc = "High"
+        elif activity_level >= 25:
+            activity_desc = "Moderate"
+        else:
+            activity_desc = "Low"
+        
+        result = {
+            'success': True,
+            'probability': probability,  # PRIMARY: Strike probability
+            'activity_level': int(activity_level),
+            'activity_description': activity_desc,
+            'momentum': momentum,
+            'total_articles': len(all_articles),
+            'recent_articles_48h': scoring_result['breakdown']['recent_articles_48h'],
+            'last_updated': datetime.now(timezone.utc).isoformat(),
+            'cached': False,
+            'version': '2.8.0'
+        }
+        
+        update_cache('hezbollah', result)
+        
+        print(f"[Hezbollah] Fresh scan complete: {probability}%")
+        return jsonify(result)
+        
+    except Exception as e:
+        print(f"Error in /api/hezbollah-activity: {e}")
+        import traceback
+        traceback.print_exc()
+        
+        cached = get_cached_result('hezbollah')
+        if cached:
+            print("[Hezbollah] Error occurred, returning cached data")
+            cached['error_fallback'] = True
+            return jsonify(cached)
+        
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'probability': 0,
+            'activity_description': 'Unknown'
+        }), 500
+
+
+@app.route('/api/houthis-threat', methods=['GET'])
+def api_houthis_threat():
+    """
+    Houthis Strike Probability Endpoint
+    Returns cached data by default, only scans when refresh=true
+    """
+    try:
+        refresh = request.args.get('refresh', 'false').lower() == 'true'
+        days = int(request.args.get('days', 7))
+        
+        # Try cached data first
+        if not refresh:
+            cached = get_cached_result('houthis')
+            if cached and is_cache_fresh(cached, max_age_hours=6):
+                print("[Houthis] Returning cached data")
+                return jsonify(cached)
+        
+        print("[Houthis] Performing fresh scan...")
+        
+        if not check_rate_limit():
+            cached = get_cached_result('houthis')
+            if cached:
+                print("[Houthis] Rate limited, returning stale cache")
+                cached['stale_cache'] = True
+                return jsonify(cached)
+            
+            return jsonify({
+                'success': False,
+                'error': 'Rate limit exceeded',
+                'probability': 0,
+                'rate_limited': True
+            }), 429
+        
+        # Fetch fresh data
+        query = ' OR '.join(TARGET_KEYWORDS['houthis']['keywords'])
+        
+        articles_en = fetch_newsapi_articles(query, days)
+        articles_gdelt_en = fetch_gdelt_articles(query, days, 'eng')
+        articles_gdelt_ar = fetch_gdelt_articles(query, days, 'ara')
+        
+        articles_reddit = fetch_reddit_posts(
+            'houthis',
+            TARGET_KEYWORDS['houthis']['reddit_keywords'],
+            days
+        )
+        
+        all_articles = (articles_en + articles_gdelt_en + articles_gdelt_ar + articles_reddit)
+        
+        # Calculate strike probability (NOT threat_level + probability!)
+        scoring_result = calculate_threat_probability(all_articles, days, 'houthis')
+        probability = scoring_result['probability']  # JUST USE THIS!
+        momentum = scoring_result['momentum']
+        
+        # Shipping incidents as secondary metric
+        shipping_incidents = 0
+        for article in all_articles:
+            text = f"{article.get('title', '')} {article.get('description', '')}".lower()
+            if any(word in text for word in ['shipping', 'red sea', 'attacked', 'strike', 'missile', 'drone']):
+                shipping_incidents += 1
+        
+        # Threat description based on probability (not inflated!)
+        if probability >= 75:
+            threat_desc = "Critical"
+        elif probability >= 50:
+            threat_desc = "High"
+        elif probability >= 25:
+            threat_desc = "Moderate"
+        else:
+            threat_desc = "Low"
+        
+        result = {
+            'success': True,
+            'probability': probability,  # PRIMARY: Just the strike probability!
+            'threat_description': threat_desc,
+            'momentum': momentum,
+            'shipping_incidents': shipping_incidents,
+            'total_articles': len(all_articles),
+            'recent_articles_48h': scoring_result['breakdown']['recent_articles_48h'],
+            'last_updated': datetime.now(timezone.utc).isoformat(),
+            'cached': False,
+            'version': '2.8.0'
+        }
+        
+        update_cache('houthis', result)
+        
+        print(f"[Houthis] Fresh scan complete: {probability}%")
+        return jsonify(result)
+        
+    except Exception as e:
+        print(f"Error in /api/houthis-threat: {e}")
+        import traceback
+        traceback.print_exc()
+        
+        cached = get_cached_result('houthis')
+        if cached:
+            print("[Houthis] Error occurred, returning cached data")
+            cached['error_fallback'] = True
+            return jsonify(cached)
+        
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'probability': 0,
+            'threat_description': 'Unknown'
+        }), 500
+
+
+@app.route('/api/syria-conflict', methods=['GET'])
+def api_syria_conflict():
+    """
+    Syria Strike Probability Endpoint
+    Returns cached data by default, only scans when refresh=true
+    """
+    try:
+        refresh = request.args.get('refresh', 'false').lower() == 'true'
+        days = int(request.args.get('days', 7))
+        
+        # Try cached data first
+        if not refresh:
+            cached = get_cached_result('syria')
+            if cached and is_cache_fresh(cached, max_age_hours=6):
+                print("[Syria] Returning cached data")
+                return jsonify(cached)
+        
+        print("[Syria] Performing fresh scan...")
+        
+        if not check_rate_limit():
+            cached = get_cached_result('syria')
+            if cached:
+                print("[Syria] Rate limited, returning stale cache")
+                cached['stale_cache'] = True
+                return jsonify(cached)
+            
+            return jsonify({
+                'success': False,
+                'error': 'Rate limit exceeded',
+                'probability': 0,
+                'rate_limited': True
+            }), 429
+        
+        # Fetch fresh data
+        syria_keywords = ['syria', 'syrian', 'damascus', 'assad', 'aleppo', 'idlib']
+        query = ' OR '.join(syria_keywords)
+        
+        articles_en = fetch_newsapi_articles(query, days)
+        articles_gdelt_en = fetch_gdelt_articles(query, days, 'eng')
+        articles_gdelt_ar = fetch_gdelt_articles(query, days, 'ara')
+        
+        articles_reddit = fetch_reddit_posts(
+            'iran',  # Use Iran subreddits as they cover Syria
+            ['Syria', 'Assad', 'Damascus', 'conflict', 'strike'],
+            days
+        )
+        
+        all_articles = (articles_en + articles_gdelt_en + articles_gdelt_ar + articles_reddit)
+        
+        # Calculate strike probability
+        scoring_result = calculate_threat_probability(all_articles, days, 'iran')  # Use Iran baseline
+        probability = scoring_result['probability']
+        momentum = scoring_result['momentum']
+        
+        # Calculate conflict intensity as secondary metric
+        intensity_score = 0
+        escalation_articles = 0
+        
+        for article in all_articles:
+            text = f"{article.get('title', '')} {article.get('description', '')}".lower()
+            
+            if any(word in text for word in ['strike', 'attack', 'bombing', 'airstrike', 'killed', 'casualties']):
+                escalation_articles += 1
+                intensity_score += 3
+            
+            try:
+                pub_date = article.get('publishedAt', '')
+                if pub_date:
+                    pub_dt = datetime.fromisoformat(pub_date.replace('Z', '+00:00'))
+                    age_hours = (datetime.now(timezone.utc) - pub_dt).total_seconds() / 3600
+                    if age_hours <= 48:
+                        intensity_score += 2
+            except:
+                pass
+        
+        intensity = min(100, int(intensity_score / max(len(all_articles), 1) * 10))
+        
+        if intensity >= 75:
+            intensity_desc = "Very High"
+        elif intensity >= 50:
+            intensity_desc = "High"
+        elif intensity >= 25:
+            intensity_desc = "Moderate"
+        else:
+            intensity_desc = "Low"
+        
+        result = {
+            'success': True,
+            'probability': probability,  # PRIMARY: Strike probability
+            'intensity': intensity,
+            'intensity_description': intensity_desc,
+            'momentum': momentum,
+            'total_articles': len(all_articles),
+            'escalation_articles': escalation_articles,
+            'last_updated': datetime.now(timezone.utc).isoformat(),
+            'cached': False,
+            'version': '2.8.0'
+        }
+        
+        update_cache('syria', result)
+        
+        print(f"[Syria] Fresh scan complete: {probability}%")
+        return jsonify(result)
+        
+    except Exception as e:
+        print(f"Error in /api/syria-conflict: {e}")
+        import traceback
+        traceback.print_exc()
+        
+        cached = get_cached_result('syria')
+        if cached:
+            print("[Syria] Error occurred, returning cached data")
+            cached['error_fallback'] = True
+            return jsonify(cached)
+        
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'probability': 0,
+            'intensity_description': 'Unknown'
+        }), 500
+
+
+# ========================================
+# CACHE MANAGEMENT ENDPOINT (OPTIONAL)
+# ========================================
+
+@app.route('/api/cache/status', methods=['GET'])
+def cache_status():
+    """View current cache status"""
+    cache = load_cache()
+    
+    status = {}
+    for target, data in cache.items():
+        if 'cached_at' in data:
+            cached_at = datetime.fromisoformat(data['cached_at'])
+            age_hours = (datetime.now(timezone.utc) - cached_at).total_seconds() / 3600
+            
+            status[target] = {
+                'probability': data.get('probability', 0),
+                'cached_at': data['cached_at'],
+                'age_hours': round(age_hours, 1),
+                'is_fresh': age_hours < 6
+            }
+    
+    return jsonify({
+        'success': True,
+        'cache_file': CACHE_FILE,
+        'targets': status,
+        'version': '2.8.0'
+    })
+
+
+@app.route('/api/cache/clear', methods=['POST'])
+def clear_cache():
+    """Clear all cached data (admin only)"""
+    try:
+        save_cache({})
+        return jsonify({
+            'success': True,
+            'message': 'Cache cleared'
+        })
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
 
 # ========================================
 # NEW: INDIVIDUAL COUNTRY ENDPOINTS
