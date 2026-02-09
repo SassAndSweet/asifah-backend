@@ -792,11 +792,11 @@ return {
         'source_weighting_applied': True,
         'formula': 'base(25) + adjustment + (weighted_score * 0.8)'
     },
-    'top_scoring_articles': top_articles  # ADD THIS LINE!
-        'top_contributors': sorted(article_details, 
-                                   key=lambda x: abs(x['contribution']), 
-                                   reverse=True)[:15]
-    }
+    'top_scoring_articles': top_articles,  # ADDED COMMA HERE!
+    'top_contributors': sorted(article_details, 
+                               key=lambda x: abs(x['contribution']), 
+                               reverse=True)[:15]
+}
 
 # ========================================
 # RATE LIMITING
