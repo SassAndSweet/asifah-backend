@@ -772,8 +772,33 @@ def calculate_threat_probability(articles, days_analyzed=7, target='iran'):
     else:
         probability = base_score + baseline_adjustment + (weighted_score * 0.8)
     
-    probability = int(probability)
+   probability = int(probability)
     probability = max(10, min(probability, 95))
+    
+    # BUILD top_articles from article_details
+    top_articles = []
+    top_contributors = sorted(article_details, key=lambda x: abs(x['contribution']), reverse=True)[:15]
+    
+    for contributor in top_contributors:
+        # Find matching article
+        matching_article = None
+        for article in articles:
+            if article.get('source', {}).get('name', '') == contributor['source']:
+                matching_article = article
+                break
+        
+        if matching_article:
+            top_articles.append({
+                'title': matching_article.get('title', 'No title'),
+                'source': contributor['source'],
+                'url': matching_article.get('url', ''),
+                'publishedAt': matching_article.get('publishedAt', ''),
+                'contribution': contributor['contribution'],
+                'severity': contributor['severity'],
+                'source_weight': contributor['source_weight'],
+                'time_decay': contributor['time_decay'],
+                'deescalation': contributor['deescalation']
+            })
     
     return {
         'probability': probability,
@@ -793,9 +818,7 @@ def calculate_threat_probability(articles, days_analyzed=7, target='iran'):
             'formula': 'base(25) + adjustment + (weighted_score * 0.8)'
         },
         'top_scoring_articles': top_articles,
-        'top_contributors': sorted(article_details, 
-                                   key=lambda x: abs(x['contribution']), 
-                                   reverse=True)[:15]
+        'top_contributors': top_contributors
     }
 # ========================================
 # RATE LIMITING
