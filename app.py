@@ -3359,20 +3359,21 @@ def api_iran_strike_probability():
         else:
             confidence = "Low"
         
-        # Build response
-        result = {
-            'success': True,
-            'probability': probability,
-            'timeline': timeline,
-            'confidence': confidence,
-            'momentum': momentum,
-            'total_articles': len(all_articles),
-            'unique_sources': unique_sources,
-            'recent_articles_48h': scoring_result['breakdown']['recent_articles_48h'],
-            'last_updated': datetime.now(timezone.utc).isoformat(),
-            'cached': False,
-            'version': '2.8.0'
-        }
+# Build response
+result = {
+    'success': True,
+    'probability': probability,
+    'timeline': timeline,
+    'confidence': confidence,
+    'momentum': momentum,
+    'total_articles': len(all_articles),
+    'unique_sources': unique_sources,
+    'recent_articles_48h': scoring_result['breakdown']['recent_articles_48h'],
+    'top_scoring_articles': scoring_result.get('top_scoring_articles', []),  # ADD THIS LINE!
+    'last_updated': datetime.now(timezone.utc).isoformat(),
+    'cached': False,
+    'version': '2.8.0'
+}
         
         # Update cache
         update_cache('iran', result)
@@ -3468,18 +3469,19 @@ def api_hezbollah_activity():
         else:
             activity_desc = "Low"
         
-        result = {
-            'success': True,
-            'probability': probability,  # PRIMARY: Strike probability
-            'activity_level': int(activity_level),
-            'activity_description': activity_desc,
-            'momentum': momentum,
-            'total_articles': len(all_articles),
-            'recent_articles_48h': scoring_result['breakdown']['recent_articles_48h'],
-            'last_updated': datetime.now(timezone.utc).isoformat(),
-            'cached': False,
-            'version': '2.8.0'
-        }
+result = {
+    'success': True,
+    'probability': probability,  # PRIMARY: Strike probability
+    'activity_level': int(activity_level),
+    'activity_description': activity_desc,
+    'momentum': momentum,
+    'total_articles': len(all_articles),
+    'recent_articles_48h': scoring_result['breakdown']['recent_articles_48h'],
+    'top_scoring_articles': scoring_result.get('top_scoring_articles', []),  # ADD THIS LINE!
+    'last_updated': datetime.now(timezone.utc).isoformat(),
+    'cached': False,
+    'version': '2.8.0'
+}
         
         update_cache('hezbollah', result)
         
@@ -3575,18 +3577,19 @@ def api_houthis_threat():
         else:
             threat_desc = "Low"
         
-        result = {
-            'success': True,
-            'probability': probability,  # PRIMARY: Just the strike probability!
-            'threat_description': threat_desc,
-            'momentum': momentum,
-            'shipping_incidents': shipping_incidents,
-            'total_articles': len(all_articles),
-            'recent_articles_48h': scoring_result['breakdown']['recent_articles_48h'],
-            'last_updated': datetime.now(timezone.utc).isoformat(),
-            'cached': False,
-            'version': '2.8.0'
-        }
+result = {
+    'success': True,
+    'probability': probability,  # PRIMARY: Just the strike probability!
+    'threat_description': threat_desc,
+    'momentum': momentum,
+    'shipping_incidents': shipping_incidents,
+    'total_articles': len(all_articles),
+    'recent_articles_48h': scoring_result['breakdown']['recent_articles_48h'],
+    'top_scoring_articles': scoring_result.get('top_scoring_articles', []),  # ADD THIS LINE!
+    'last_updated': datetime.now(timezone.utc).isoformat(),
+    'cached': False,
+    'version': '2.8.0'
+}
         
         update_cache('houthis', result)
         
@@ -3698,18 +3701,19 @@ def api_syria_conflict():
         else:
             intensity_desc = "Low"
         
-        result = {
-            'success': True,
-            'probability': probability,  # PRIMARY: Strike probability
-            'intensity': intensity,
-            'intensity_description': intensity_desc,
-            'momentum': momentum,
-            'total_articles': len(all_articles),
-            'escalation_articles': escalation_articles,
-            'last_updated': datetime.now(timezone.utc).isoformat(),
-            'cached': False,
-            'version': '2.8.0'
-        }
+result = {
+    'success': True,
+    'probability': probability,  # PRIMARY: Strike probability
+    'intensity': intensity,
+    'intensity_description': intensity_desc,
+    'momentum': momentum,
+    'total_articles': len(all_articles),
+    'escalation_articles': escalation_articles,
+    'top_scoring_articles': scoring_result.get('top_scoring_articles', []),  # ADD THIS LINE!
+    'last_updated': datetime.now(timezone.utc).isoformat(),
+    'cached': False,
+    'version': '2.8.0'
+}
         
         update_cache('syria', result)
         
