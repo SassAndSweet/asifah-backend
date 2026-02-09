@@ -3278,7 +3278,6 @@ def api_threat_matrix(target):
 
 # ========================================
 # INDIVIDUAL COUNTRY ENDPOINTS WITH CACHING
-# Add these AFTER your /api/threat/<target> endpoint
 # ========================================
 
 @app.route('/api/iran-strike-probability', methods=['GET'])
@@ -3359,21 +3358,21 @@ def api_iran_strike_probability():
         else:
             confidence = "Low"
         
-# Build response
-result = {
-    'success': True,
-    'probability': probability,
-    'timeline': timeline,
-    'confidence': confidence,
-    'momentum': momentum,
-    'total_articles': len(all_articles),
-    'unique_sources': unique_sources,
-    'recent_articles_48h': scoring_result['breakdown']['recent_articles_48h'],
-    'top_scoring_articles': scoring_result.get('top_scoring_articles', []),  # ADD THIS LINE!
-    'last_updated': datetime.now(timezone.utc).isoformat(),
-    'cached': False,
-    'version': '2.8.0'
-}
+        # Build response
+        result = {
+            'success': True,
+            'probability': probability,
+            'timeline': timeline,
+            'confidence': confidence,
+            'momentum': momentum,
+            'total_articles': len(all_articles),
+            'unique_sources': unique_sources,
+            'recent_articles_48h': scoring_result['breakdown']['recent_articles_48h'],
+            'top_scoring_articles': scoring_result.get('top_scoring_articles', []),
+            'last_updated': datetime.now(timezone.utc).isoformat(),
+            'cached': False,
+            'version': '2.8.0'
+        }
         
         # Update cache
         update_cache('iran', result)
@@ -3469,19 +3468,19 @@ def api_hezbollah_activity():
         else:
             activity_desc = "Low"
         
-result = {
-    'success': True,
-    'probability': probability,  # PRIMARY: Strike probability
-    'activity_level': int(activity_level),
-    'activity_description': activity_desc,
-    'momentum': momentum,
-    'total_articles': len(all_articles),
-    'recent_articles_48h': scoring_result['breakdown']['recent_articles_48h'],
-    'top_scoring_articles': scoring_result.get('top_scoring_articles', []),  # ADD THIS LINE!
-    'last_updated': datetime.now(timezone.utc).isoformat(),
-    'cached': False,
-    'version': '2.8.0'
-}
+        result = {
+            'success': True,
+            'probability': probability,
+            'activity_level': int(activity_level),
+            'activity_description': activity_desc,
+            'momentum': momentum,
+            'total_articles': len(all_articles),
+            'recent_articles_48h': scoring_result['breakdown']['recent_articles_48h'],
+            'top_scoring_articles': scoring_result.get('top_scoring_articles', []),
+            'last_updated': datetime.now(timezone.utc).isoformat(),
+            'cached': False,
+            'version': '2.8.0'
+        }
         
         update_cache('hezbollah', result)
         
@@ -3555,9 +3554,9 @@ def api_houthis_threat():
         
         all_articles = (articles_en + articles_gdelt_en + articles_gdelt_ar + articles_reddit)
         
-        # Calculate strike probability (NOT threat_level + probability!)
+        # Calculate strike probability
         scoring_result = calculate_threat_probability(all_articles, days, 'houthis')
-        probability = scoring_result['probability']  # JUST USE THIS!
+        probability = scoring_result['probability']
         momentum = scoring_result['momentum']
         
         # Shipping incidents as secondary metric
@@ -3567,7 +3566,7 @@ def api_houthis_threat():
             if any(word in text for word in ['shipping', 'red sea', 'attacked', 'strike', 'missile', 'drone']):
                 shipping_incidents += 1
         
-        # Threat description based on probability (not inflated!)
+        # Threat description based on probability
         if probability >= 75:
             threat_desc = "Critical"
         elif probability >= 50:
@@ -3577,19 +3576,19 @@ def api_houthis_threat():
         else:
             threat_desc = "Low"
         
-result = {
-    'success': True,
-    'probability': probability,  # PRIMARY: Just the strike probability!
-    'threat_description': threat_desc,
-    'momentum': momentum,
-    'shipping_incidents': shipping_incidents,
-    'total_articles': len(all_articles),
-    'recent_articles_48h': scoring_result['breakdown']['recent_articles_48h'],
-    'top_scoring_articles': scoring_result.get('top_scoring_articles', []),  # ADD THIS LINE!
-    'last_updated': datetime.now(timezone.utc).isoformat(),
-    'cached': False,
-    'version': '2.8.0'
-}
+        result = {
+            'success': True,
+            'probability': probability,
+            'threat_description': threat_desc,
+            'momentum': momentum,
+            'shipping_incidents': shipping_incidents,
+            'total_articles': len(all_articles),
+            'recent_articles_48h': scoring_result['breakdown']['recent_articles_48h'],
+            'top_scoring_articles': scoring_result.get('top_scoring_articles', []),
+            'last_updated': datetime.now(timezone.utc).isoformat(),
+            'cached': False,
+            'version': '2.8.0'
+        }
         
         update_cache('houthis', result)
         
@@ -3657,7 +3656,7 @@ def api_syria_conflict():
         articles_gdelt_ar = fetch_gdelt_articles(query, days, 'ara')
         
         articles_reddit = fetch_reddit_posts(
-            'iran',  # Use Iran subreddits as they cover Syria
+            'iran',
             ['Syria', 'Assad', 'Damascus', 'conflict', 'strike'],
             days
         )
@@ -3665,7 +3664,7 @@ def api_syria_conflict():
         all_articles = (articles_en + articles_gdelt_en + articles_gdelt_ar + articles_reddit)
         
         # Calculate strike probability
-        scoring_result = calculate_threat_probability(all_articles, days, 'iran')  # Use Iran baseline
+        scoring_result = calculate_threat_probability(all_articles, days, 'iran')
         probability = scoring_result['probability']
         momentum = scoring_result['momentum']
         
@@ -3701,19 +3700,19 @@ def api_syria_conflict():
         else:
             intensity_desc = "Low"
         
-result = {
-    'success': True,
-    'probability': probability,  # PRIMARY: Strike probability
-    'intensity': intensity,
-    'intensity_description': intensity_desc,
-    'momentum': momentum,
-    'total_articles': len(all_articles),
-    'escalation_articles': escalation_articles,
-    'top_scoring_articles': scoring_result.get('top_scoring_articles', []),  # ADD THIS LINE!
-    'last_updated': datetime.now(timezone.utc).isoformat(),
-    'cached': False,
-    'version': '2.8.0'
-}
+        result = {
+            'success': True,
+            'probability': probability,
+            'intensity': intensity,
+            'intensity_description': intensity_desc,
+            'momentum': momentum,
+            'total_articles': len(all_articles),
+            'escalation_articles': escalation_articles,
+            'top_scoring_articles': scoring_result.get('top_scoring_articles', []),
+            'last_updated': datetime.now(timezone.utc).isoformat(),
+            'cached': False,
+            'version': '2.8.0'
+        }
         
         update_cache('syria', result)
         
