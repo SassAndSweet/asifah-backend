@@ -775,23 +775,24 @@ def calculate_threat_probability(articles, days_analyzed=7, target='iran'):
     probability = int(probability)
     probability = max(10, min(probability, 95))
     
-    return {
-        'probability': probability,
-        'momentum': momentum,
-        'breakdown': {
-            'base_score': base_score,
-            'baseline_adjustment': baseline_adjustment,
-            'article_count': len(articles),
-            'recent_articles_48h': recent_articles,
-            'older_articles': older_articles,
-            'weighted_score': round(weighted_score, 2),
-            'momentum_multiplier': momentum_multiplier,
-            'deescalation_count': deescalation_count,
-            'adaptive_multiplier': 0.8,
-            'time_decay_applied': True,
-            'source_weighting_applied': True,
-            'formula': 'base(25) + adjustment + (weighted_score * 0.8)'
-        },
+return {
+    'probability': probability,
+    'momentum': momentum,
+    'breakdown': {
+        'base_score': base_score,
+        'baseline_adjustment': baseline_adjustment,
+        'article_count': len(articles),
+        'recent_articles_48h': recent_articles,
+        'older_articles': older_articles,
+        'weighted_score': round(weighted_score, 2),
+        'momentum_multiplier': momentum_multiplier,
+        'deescalation_count': deescalation_count,
+        'adaptive_multiplier': 0.8,
+        'time_decay_applied': True,
+        'source_weighting_applied': True,
+        'formula': 'base(25) + adjustment + (weighted_score * 0.8)'
+    },
+    'top_scoring_articles': top_articles  # ADD THIS LINE!
         'top_contributors': sorted(article_details, 
                                    key=lambda x: abs(x['contribution']), 
                                    reverse=True)[:15]
