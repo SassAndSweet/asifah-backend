@@ -772,7 +772,7 @@ def calculate_threat_probability(articles, days_analyzed=7, target='iran'):
     else:
         probability = base_score + baseline_adjustment + (weighted_score * 0.8)
     
-   probability = int(probability)
+    probability = int(probability)
     probability = max(10, min(probability, 95))
     
     # BUILD top_articles from article_details
