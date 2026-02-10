@@ -1368,7 +1368,7 @@ def extract_syria_conflict_data(articles):
     return conflict_data
 
 # ========================================
-# OIL PRICE FETCHING - CASCADING FALLBACK SYSTEM
+# OIL & GOLD PRICE FETCHING - CASCADING FALLBACK SYSTEM
 # ========================================
 def fetch_oil_eia():
     """
@@ -1622,6 +1622,279 @@ def fetch_oil_price():
     # All APIs failed
     print("[Oil Price] ❌ All APIs failed")
     return None
+
+
+# ========================================
+# GOLD PRICE FETCHING - CASCADING FALLBACK SYSTEM  
+# ========================================
+def fetch_gold_goldapi():
+    """
+    Try GoldAPI.io (Free tier: 1000 requests/month)
+    Most reliable for spot gold prices
+    """
+    try:
+        print("[Gold Price] Trying GoldAPI.io...")
+        
+        # GoldAPI free endpoint
+        url = "https://www.goldapi.io/api/XAU/USD"
+        
+        # Demo key works for testing (limited requests)
+        # Get free key at: https://www.goldapi.io/
+        headers = {
+            'x-access-token': 'goldapi-demo',
+            'Content-Type': 'application/json'
+        }
+        
+        response = requests.get(url, headers=headers, timeout=10)
+        
+        if response.status_code != 200:
+            print(f"[Gold Price] GoldAPI HTTP error: {response.status_code}")
+            return None
+        
+        data = response.json()
+        
+        # GoldAPI returns: {"price": 2650.50, "timestamp": ...}
+        price = float(data.get('price', 0))
+        
+        if price > 1000 and price < 10000:  # Sanity check
+            print(f"[Gold Price] ✅ GoldAPI.io: ${price:.2f}/oz")
+            
+            return {
+                'price': round(price, 2),
+                'currency': 'USD',
+                'unit': 'troy_oz',
+                'source': 'GoldAPI.io',
+                'timestamp': datetime.now(timezone.utc).isoformat()
+            }
+        
+        print(f"[Gold Price] GoldAPI suspicious price: {price}")
+        return None
+        
+    except Exception as e:
+        print(f"[Gold Price] GoldAPI error: {str(e)[:100]}")
+        return None
+
+
+def fetch_gold_goldprice_org():
+    """
+    Try GoldPrice.org JSON endpoint (FREE, no auth required)
+    Very reliable, no API key needed
+    """
+    try:
+        print("[Gold Price] Trying GoldPrice.org...")
+        
+        url = "https://data-asg.goldprice.org/dbXRates/USD"
+        
+        response = requests.get(url, timeout=10, headers={
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        })
+        
+        if response.status_code != 200:
+            print(f"[Gold Price] GoldPrice.org HTTP error: {response.status_code}")
+            return None
+        
+        data = response.json()
+        
+        # GoldPrice.org structure: {"items": [{"xauPrice": 2650.50, ...}]}
+        if 'items' in data and len(data['items']) > 0:
+            price = float(data['items'][0].get('xauPrice', 0))
+            
+            if price > 1000 and price < 10000:
+                print(f"[Gold Price] ✅ GoldPrice.org: ${price:.2f}/oz")
+                
+                return {
+                    'price': round(price, 2),
+                    'currency': 'USD',
+                    'unit': 'troy_oz',
+                    'source': 'GoldPrice.org',
+                    'timestamp': datetime.now(timezone.utc).isoformat()
+                }
+        
+        print(f"[Gold Price] GoldPrice.org: No valid data")
+        return None
+        
+    except Exception as e:
+        print(f"[Gold Price] GoldPrice.org error: {str(e)[:100]}")
+        return None
+
+
+def fetch_gold_metals_api():
+    """
+    Try Metals-API (Free tier: 50 requests/month)
+    Backup option, requires API key
+    """
+    try:
+        print("[Gold Price] Trying Metals-API...")
+        
+        # Get free key at: https://metals-api.com/
+        # For demo, using public endpoint
+        url = "https://api.metals.dev/v1/latest?api_key=demo&currency=USD&unit=toz"
+        
+        response = requests.get(url, timeout=10)
+        
+        if response.status_code != 200:
+            print(f"[Gold Price] Metals-API HTTP error: {response.status_code}")
+            return None
+        
+        data = response.json()
+        
+        # Metals-API returns: {"rates": {"XAU": 0.000377}, ...}
+        # This is inverted (USD per XAU), so we need 1/rate
+        if 'rates' in data and 'XAU' in data['rates']:
+            rate = float(data['rates']['XAU'])
+            price = 1 / rate if rate > 0 else 0
+            
+            if price > 1000 and price < 10000:
+                print(f"[Gold Price] ✅ Metals-API: ${price:.2f}/oz")
+                
+                return {
+                    'price': round(price, 2),
+                    'currency': 'USD',
+                    'unit': 'troy_oz',
+                    'source': 'Metals-API',
+                    'timestamp': datetime.now(timezone.utc).isoformat()
+                }
+        
+        print(f"[Gold Price] Metals-API: Invalid data structure")
+        return None
+        
+    except Exception as e:
+        print(f"[Gold Price] Metals-API error: {str(e)[:100]}")
+        return None
+
+
+def fetch_gold_price():
+    """
+    Fetch spot gold price (XAU/USD) using cascading free APIs
+    
+    Tries 3 free APIs in order of reliability:
+    1. GoldPrice.org - FREE, no auth, very reliable
+    2. GoldAPI.io - FREE tier 1000/month (demo key works)
+    3. Metals-API - FREE tier 50/month
+    4. Fallback - Recent market estimate
+    
+    Returns price per troy ounce in USD
+    """
+    print("[Gold Price] Starting cascade...")
+    
+    # Try GoldPrice.org first (most reliable, no auth)
+    result = fetch_gold_goldprice_org()
+    if result:
+        return result
+    
+    print("[Gold Price] Trying fallback: GoldAPI.io...")
+    
+    # Try GoldAPI
+    result = fetch_gold_goldapi()
+    if result:
+        return result
+    
+    print("[Gold Price] Trying fallback: Metals-API...")
+    
+    # Try Metals-API
+    result = fetch_gold_metals_api()
+    if result:
+        return result
+    
+    # All APIs failed - use fallback estimate
+    print("[Gold Price] ❌ All APIs failed, using fallback estimate")
+    
+    # As of Feb 2026, gold trading around $2,650-2,850/oz
+    # Use conservative midpoint
+    fallback_price = 2750
+    
+    return {
+        'price': fallback_price,
+        'currency': 'USD',
+        'unit': 'troy_oz',
+        'source': 'Estimated',
+        'estimated': True,
+        'timestamp': datetime.now(timezone.utc).isoformat(),
+        'note': 'Approximate - all gold APIs unavailable'
+    }
+
+
+def calculate_lebanon_gold_reserves():
+    """
+    Calculate current market value of Lebanon's gold reserves
+    
+    Lebanon holds 286.8 metric tons (9.22 million troy oz)
+    - Held since 1960s, protected by 1986 law
+    - 2nd largest reserves in Middle East after Saudi Arabia
+    - Never been touched despite multiple wars & economic collapse
+    
+    Returns current USD valuation based on spot gold price
+    """
+    try:
+        print("[Lebanon Gold] Calculating reserve value...")
+        
+        # Lebanon's fixed gold holdings (unchanged since 1960s)
+        LEBANON_GOLD_TONS = 286.8
+        TROY_OZ_PER_METRIC_TON = 32150.7466  # Exact conversion
+        
+        total_troy_oz = LEBANON_GOLD_TONS * TROY_OZ_PER_METRIC_TON
+        
+        print(f"[Lebanon Gold] Holdings: {LEBANON_GOLD_TONS} tons = {total_troy_oz:,.0f} troy oz")
+        
+        # Fetch current gold price
+        gold_price_data = fetch_gold_price()
+        
+        if gold_price_data:
+            price_per_oz = gold_price_data['price']
+            
+            # Calculate total value
+            total_value_usd = total_troy_oz * price_per_oz
+            total_value_billions = total_value_usd / 1_000_000_000
+            
+            # Calculate as % of Lebanon GDP (~$20B in 2026)
+            LEBANON_GDP_BILLIONS = 20
+            gdp_percentage = (total_value_billions / LEBANON_GDP_BILLIONS) * 100
+            
+            print(f"[Lebanon Gold] Value: ${total_value_billions:.1f}B @ ${price_per_oz:.2f}/oz")
+            print(f"[Lebanon Gold] = {gdp_percentage:.0f}% of GDP")
+            
+            return {
+                'tons': LEBANON_GOLD_TONS,
+                'troy_ounces': int(total_troy_oz),
+                'price_per_oz': price_per_oz,
+                'total_value_usd': int(total_value_usd),
+                'total_value_billions': round(total_value_billions, 1),
+                'display_value': f"${total_value_billions:.1f}B",
+                'gdp_percentage': int(gdp_percentage),
+                'source': gold_price_data.get('source', 'Unknown'),
+                'last_updated': gold_price_data.get('timestamp', ''),
+                'estimated': gold_price_data.get('estimated', False),
+                'rank_middle_east': 2,
+                'protected_by_law': True,
+                'law_year': 1986,
+                'held_since': '1960s',
+                'note': '60% in Beirut vaults, 40% in USA'
+            }
+        
+        # Fallback if gold price fetch failed
+        print("[Lebanon Gold] Using estimated value (price fetch failed)")
+        
+        return {
+            'tons': LEBANON_GOLD_TONS,
+            'troy_ounces': int(total_troy_oz),
+            'total_value_billions': 45,  # Conservative midpoint
+            'display_value': '~$40-50B',
+            'estimated': True,
+            'note': 'Value estimated - gold price unavailable',
+            'rank_middle_east': 2,
+            'protected_by_law': True
+        }
+        
+    except Exception as e:
+        print(f"[Lebanon Gold] ❌ Error: {str(e)}")
+        
+        # Minimal fallback
+        return {
+            'tons': 286.8,
+            'display_value': '~$40-50B',
+            'estimated': True,
+            'error': str(e)[:100]
+        }
 
 # ========================================
 # IRAN REGIME STABILITY TRACKER
@@ -2281,8 +2554,8 @@ def calculate_lebanon_stability(currency_data, bond_data, hezbollah_data):
     # ========================================
     election_bonus = 0
     
-    # Parliamentary elections scheduled for May 3, 2026
-    election_date = datetime(2026, 5, 3, tzinfo=timezone.utc)
+    # Parliamentary elections scheduled for May 10, 2026
+    election_date = datetime(2026, 5, 10, tzinfo=timezone.utc)
     days_until_election = (election_date - datetime.now(timezone.utc)).days
     
     if 0 <= days_until_election <= 90:
@@ -2924,7 +3197,7 @@ def save_lebanon_cache(cache_data):
         print(f"[Lebanon Cache] Error saving cache: {str(e)}")
 
 
-def update_lebanon_cache(currency_data, bond_data, hezbollah_data, stability_score):
+def update_lebanon_cache(currency_data, bond_data, hezbollah_data, stability_score, gold_data=None):
     """Update cache with today's Lebanon stability snapshot"""
     try:
         cache = load_lebanon_cache()
@@ -2936,6 +3209,8 @@ def update_lebanon_cache(currency_data, bond_data, hezbollah_data, stability_sco
             'bond_yield': bond_data.get('yield', 0) if bond_data else 0,
             'hezbollah_activity': hezbollah_data.get('activity_score', 0) if hezbollah_data else 0,
             'stability_score': stability_score,
+            'gold_price_per_oz': gold_data.get('price_per_oz', 0) if gold_data else 0,  # ← NEW!
+            'gold_value_billions': gold_data.get('total_value_billions', 0) if gold_data else 0,  # ← NEW!
             'timestamp': datetime.now(timezone.utc).isoformat()
         }
         
@@ -2951,7 +3226,6 @@ def update_lebanon_cache(currency_data, bond_data, hezbollah_data, stability_sco
     except Exception as e:
         print(f"[Lebanon Cache] Error updating cache: {str(e)}")
 
-
 def get_lebanon_trends(days=30):
     """
     Get trend data for Lebanon stability sparklines
@@ -2961,6 +3235,8 @@ def get_lebanon_trends(days=30):
     - Bond yield (%)
     - Hezbollah activity score
     - Overall stability score
+    - Gold price per oz (NEW!)
+    - Gold reserves value in billions (NEW!)
     """
     try:
         cache = load_lebanon_cache()
@@ -2982,7 +3258,9 @@ def get_lebanon_trends(days=30):
             'currency': [],
             'bonds': [],
             'hezbollah': [],
-            'stability': []
+            'stability': [],
+            'gold_price': [],      # ← NEW!
+            'gold_value': []       # ← NEW!
         }
         
         for date in sorted_dates:
@@ -2992,6 +3270,8 @@ def get_lebanon_trends(days=30):
             trends['bonds'].append(day_data.get('bond_yield', 0))
             trends['hezbollah'].append(day_data.get('hezbollah_activity', 0))
             trends['stability'].append(day_data.get('stability_score', 0))
+            trends['gold_price'].append(day_data.get('gold_price_per_oz', 0))       # ← NEW!
+            trends['gold_value'].append(day_data.get('gold_value_billions', 0))     # ← NEW!
         
         return {
             'success': True,
@@ -3922,6 +4202,7 @@ def scan_lebanon_stability():
     - Political stability (government formation, elections)
     - Economic stress (bond yields, currency collapse)
     - Hezbollah activity (rearmament, strikes)
+    - Gold reserves value (NEW!)
     - Security situation
     """
     try:
@@ -3934,16 +4215,18 @@ def scan_lebanon_stability():
         currency_data = fetch_lebanon_currency()
         bond_data = scrape_lebanon_bonds()
         hezbollah_data = track_hezbollah_activity(days=7)
+        gold_data = calculate_lebanon_gold_reserves()  # ← ADD THIS LINE
         
         # Calculate overall stability
         stability = calculate_lebanon_stability(currency_data, bond_data, hezbollah_data)
         
-        # NEW: Update cache with today's data
+        # Update cache with today's data (including gold)
         update_lebanon_cache(
             currency_data, 
             bond_data, 
             hezbollah_data, 
-            stability.get('score', 0)
+            stability.get('score', 0),
+            gold_data  # ← ADD THIS PARAMETER
         )
         
         return jsonify({
@@ -3952,15 +4235,16 @@ def scan_lebanon_stability():
             'currency': currency_data,
             'bonds': bond_data,
             'hezbollah': hezbollah_data,
+            'gold_reserves': gold_data,  # ← ADD THIS LINE
             'government': {
                 'has_president': True,
                 'president': 'Joseph Aoun',
                 'days_with_president': stability.get('days_with_president', 0),
                 'president_elected_date': '2025-01-09',
-                'parliamentary_election_date': '2026-05-03',
+                'parliamentary_election_date': '2026-05-10',  # Already fixed!
                 'days_until_election': stability.get('days_until_election', 0)
             },
-            'version': '2.7.0'
+            'version': '2.7.1'  # ← BUMP VERSION
         })
         
     except Exception as e:
