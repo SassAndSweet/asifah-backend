@@ -4202,7 +4202,7 @@ def scan_lebanon_stability():
     - Political stability (government formation, elections)
     - Economic stress (bond yields, currency collapse)
     - Hezbollah activity (rearmament, strikes)
-    - Gold reserves value (NEW!)
+    - Gold reserves value
     - Security situation
     """
     try:
@@ -4215,7 +4215,14 @@ def scan_lebanon_stability():
         currency_data = fetch_lebanon_currency()
         bond_data = scrape_lebanon_bonds()
         hezbollah_data = track_hezbollah_activity(days=7)
-        gold_data = calculate_lebanon_gold_reserves()  # ← ADD THIS LINE
+        
+        # Calculate gold reserves with error handling
+        try:
+            gold_data = calculate_lebanon_gold_reserves()
+            print(f"[Lebanon] ✅ Gold data calculated: {gold_data.get('display_value', 'N/A')}")
+        except Exception as e:
+            print(f"[Lebanon] ❌ Gold calculation failed: {str(e)}")
+            gold_data = None
         
         # Calculate overall stability
         stability = calculate_lebanon_stability(currency_data, bond_data, hezbollah_data)
@@ -4226,7 +4233,7 @@ def scan_lebanon_stability():
             bond_data, 
             hezbollah_data, 
             stability.get('score', 0),
-            gold_data  # ← ADD THIS PARAMETER
+            gold_data
         )
         
         return jsonify({
@@ -4235,20 +4242,22 @@ def scan_lebanon_stability():
             'currency': currency_data,
             'bonds': bond_data,
             'hezbollah': hezbollah_data,
-            'gold_reserves': gold_data,  # ← ADD THIS LINE
+            'gold_reserves': gold_data,
             'government': {
                 'has_president': True,
                 'president': 'Joseph Aoun',
                 'days_with_president': stability.get('days_with_president', 0),
                 'president_elected_date': '2025-01-09',
-                'parliamentary_election_date': '2026-05-10',  # Already fixed!
+                'parliamentary_election_date': '2026-05-10',
                 'days_until_election': stability.get('days_until_election', 0)
             },
-            'version': '2.7.1'  # ← BUMP VERSION
+            'version': '2.7.1'
         })
         
     except Exception as e:
         print(f"[Lebanon] ❌ Error: {str(e)}")
+        import traceback
+        traceback.print_exc()
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
