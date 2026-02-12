@@ -27,6 +27,7 @@ import re
 import math
 import json
 from pathlib import Path
+from iran_protests import get_iran_oil_data
 
 # Local imports last
 from rss_monitor import (
@@ -4573,6 +4574,21 @@ def scan_iran_protests():
         
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/iran-oil-data')
+def iran_oil_data_endpoint():
+    """
+    Returns Iran oil price + OPEC reserves data
+    Used by Iran Protests page
+    """
+    try:
+        data = get_iran_oil_data()
+        return jsonify(data)
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
 
 @app.route('/scan-lebanon-stability', methods=['GET'])
 def scan_lebanon_stability():
