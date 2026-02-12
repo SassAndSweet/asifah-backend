@@ -20,7 +20,7 @@ def get_brent_oil_price():
     try:
         # Alpha Vantage API - Free tier (500 calls/day)
         # Get your key at: https://www.alphavantage.co/support/#api-key
-        API_KEY = "YOUR_ALPHA_VANTAGE_KEY"  # Replace with your key
+        API_KEY = "NUW8NKIRMXNMRTD9"
         
         # Brent crude oil ticker: BZ=F (or use WTI if needed)
         url = f"https://www.alphavantage.co/query?function=CRUDE_OIL_BRENT&interval=daily&apikey={API_KEY}"
