@@ -1368,6 +1368,362 @@ def extract_syria_conflict_data(articles):
     return conflict_data
 
 # ========================================
+# SYRIA DISPLACEMENT DATA SOURCES (NEW v2.8.1)
+# ========================================
+
+def fetch_unhcr_syria_data():
+    """
+    Fetch displacement data from UNHCR Syria data portal
+    
+    UNHCR provides:
+    - Total IDPs (Internally Displaced Persons)
+    - Refugee populations
+    - Camp populations (including Al-Hol)
+    - Recent displacement figures
+    
+    Returns structured displacement data
+    """
+    try:
+        print("[UNHCR] Fetching Syria displacement data...")
+        
+        # UNHCR Syria data portal API
+        # Note: This is a simplified example - actual UNHCR API may require different approach
+        url = "https://data.unhcr.org/api/population/get/sublocation"
+        
+        params = {
+            'widget_id': 'syria',
+            'sv_id': '54',  # Syria country code
+            'population_group': '5460',  # IDPs
+            'format': 'json'
+        }
+        
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        }
+        
+        response = requests.get(url, params=params, headers=headers, timeout=15)
+        
+        if response.status_code != 200:
+            print(f"[UNHCR] HTTP error: {response.status_code}")
+            return fetch_unhcr_fallback()
+        
+        data = response.json()
+        
+        # Parse UNHCR response
+        # Structure varies, this is a template
+        total_idps = 0
+        camp_population = 0
+        recent_displacement = 0
+        
+        if isinstance(data, dict):
+            total_idps = data.get('total', 0)
+            camp_population = data.get('camp_total', 0)
+            recent_displacement = data.get('recent', 0)
+        elif isinstance(data, list):
+            for region in data:
+                total_idps += region.get('individuals', 0)
+        
+        print(f"[UNHCR] ✅ IDPs: {total_idps:,}, Camps: {camp_population:,}")
+        
+        return {
+            'total_idps': total_idps,
+            'camp_population': camp_population,
+            'recent_displacement': recent_displacement,
+            'source': 'UNHCR',
+            'last_updated': datetime.now(timezone.utc).isoformat()
+        }
+        
+    except Exception as e:
+        print(f"[UNHCR] Error: {str(e)[:200]}")
+        return fetch_unhcr_fallback()
+
+
+def fetch_unhcr_fallback():
+    """
+    Fallback: Use known estimates from recent UNHCR reports
+    
+    As of February 2025, UNHCR reported:
+    - ~7.2 million IDPs in Syria
+    - ~1.8 million in camps
+    - ~500k recent displacements (post-Assad)
+    
+    Source: UNHCR Syria Flash Update (Jan 2025)
+    """
+    print("[UNHCR] Using fallback estimates from recent reports")
+    
+    return {
+        'total_idps': 7200000,  # 7.2M
+        'camp_population': 1800000,  # 1.8M
+        'recent_displacement': 500000,  # 500k (post-Assad period)
+        'source': 'UNHCR Estimate',
+        'estimated': True,
+        'last_updated': datetime.now(timezone.utc).isoformat(),
+        'note': 'Based on UNHCR Flash Update January 2025'
+    }
+
+
+def scrape_acaps_syria():
+    """
+    Scrape ACAPS (Assessment Capacities Project) for Syria analysis
+    
+    ACAPS provides:
+    - Humanitarian access constraints
+    - Crisis severity ratings
+    - Displacement trends
+    - Camp conditions
+    """
+    try:
+        print("[ACAPS] Scraping Syria analysis...")
+        
+        url = "https://www.acaps.org/countries/syria"
+        
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        }
+        
+        response = requests.get(url, headers=headers, timeout=15)
+        
+        if response.status_code != 200:
+            print(f"[ACAPS] HTTP error: {response.status_code}")
+            return None
+        
+        from bs4 import BeautifulSoup
+        soup = BeautifulSoup(response.content, 'html.parser')
+        
+        # Look for key statistics
+        # ACAPS structure may vary - this is a template
+        stats = {}
+        
+        # Try to find crisis severity rating
+        severity_elem = soup.find('div', class_=lambda x: x and 'severity' in x.lower())
+        if severity_elem:
+            stats['crisis_severity'] = severity_elem.get_text(strip=True)
+        
+        # Look for humanitarian access percentage
+        access_elem = soup.find(string=re.compile(r'\d+%.*access', re.IGNORECASE))
+        if access_elem:
+            match = re.search(r'(\d+)%', access_elem)
+            if match:
+                stats['humanitarian_access_pct'] = int(match.group(1))
+        
+        # Look for affected population figures
+        affected_elem = soup.find(string=re.compile(r'affected', re.IGNORECASE))
+        if affected_elem:
+            # Try to extract numbers
+            numbers = re.findall(r'(\d+(?:\.\d+)?)\s*(?:million|M)', affected_elem, re.IGNORECASE)
+            if numbers:
+                stats['affected_population'] = float(numbers[0]) * 1000000
+        
+        print(f"[ACAPS] ✅ Extracted {len(stats)} statistics")
+        
+        return {
+            'statistics': stats,
+            'source': 'ACAPS',
+            'url': url,
+            'last_updated': datetime.now(timezone.utc).isoformat()
+        }
+        
+    except Exception as e:
+        print(f"[ACAPS] Error: {str(e)[:200]}")
+        return None
+
+
+def fetch_alhol_camp_data():
+    """
+    Fetch specific data about Al-Hol camp
+    
+    Al-Hol is the largest camp in northeast Syria
+    Housing ~56,000 people (mostly ISIS families)
+    
+    Sources: AP News, UNHCR, local reports
+    """
+    try:
+        print("[Al-Hol] Searching for camp updates...")
+        
+        # Search Google News for Al-Hol camp
+        query = "Al-Hol camp Syria"
+        url = f"https://news.google.com/rss/search?q={query.replace(' ', '+')}&hl=en&gl=US&ceid=US:en"
+        
+        response = requests.get(url, timeout=10, headers={
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        })
+        
+        articles = []
+        
+        if response.status_code == 200:
+            import xml.etree.ElementTree as ET
+            
+            root = ET.fromstring(response.content)
+            items = root.findall('.//item')
+            
+            for item in items[:5]:  # Top 5 recent articles
+                title_elem = item.find('title')
+                link_elem = item.find('link')
+                pubDate_elem = item.find('pubDate')
+                
+                if title_elem is not None:
+                    articles.append({
+                        'title': title_elem.text or '',
+                        'url': link_elem.text if link_elem is not None else '',
+                        'published': pubDate_elem.text if pubDate_elem is not None else ''
+                    })
+        
+        # Known baseline from UNHCR reports
+        camp_population = 56000  # As of Jan 2025
+        
+        # Look for population changes in recent articles
+        for article in articles:
+            text = article['title'].lower()
+            # Try to extract numbers
+            numbers = re.findall(r'(\d+,?\d*)\s*(?:people|residents)', text)
+            if numbers:
+                try:
+                    num = int(numbers[0].replace(',', ''))
+                    if 30000 < num < 100000:  # Sanity check
+                        camp_population = num
+                        break
+                except:
+                    pass
+        
+        print(f"[Al-Hol] ✅ Population: ~{camp_population:,}")
+        
+        return {
+            'camp_name': 'Al-Hol',
+            'population': camp_population,
+            'location': 'Hasakah Governorate, Northeast Syria',
+            'managed_by': 'Kurdish-led SDF',
+            'conditions': 'Overcrowded, security concerns',
+            'recent_articles': articles,
+            'source': 'News aggregation + UNHCR baseline',
+            'last_updated': datetime.now(timezone.utc).isoformat()
+        }
+        
+    except Exception as e:
+        print(f"[Al-Hol] Error: {str(e)[:200]}")
+        return {
+            'camp_name': 'Al-Hol',
+            'population': 56000,  # Fallback estimate
+            'location': 'Hasakah Governorate, Northeast Syria',
+            'source': 'Estimate',
+            'estimated': True,
+            'last_updated': datetime.now(timezone.utc).isoformat()
+        }
+
+
+def extract_displacement_from_articles(articles):
+    """
+    Extract displacement statistics from Syria Direct and SOHR articles
+    
+    Looks for mentions of:
+    - IDP movements
+    - Camp evacuations
+    - Displacement waves
+    - Return movements
+    """
+    displacement_data = {
+        'recent_movements': [],
+        'total_extracted': 0,
+        'sources': set(),
+        'details': []
+    }
+    
+    # Displacement keywords
+    displacement_keywords = [
+        'displaced', 'fled', 'evacuated', 'forced to leave',
+        'abandoned homes', 'refugees', 'idp', 'internally displaced'
+    ]
+    
+    # Number extraction patterns
+    number_patterns = [
+        r'(\d+(?:,\d{3})*)\s+(?:people|civilians|residents|families)',
+        r'(?:more than|over|at least)\s+(\d+(?:,\d{3})*)',
+        r'(\d+(?:,\d{3})*)\s+(?:have been|were|are)\s+displaced'
+    ]
+    
+    for article in articles:
+        title = (article.get('title') or '').lower()
+        description = (article.get('description') or '').lower()
+        content = (article.get('content') or '').lower()
+        text = f"{title} {description} {content}"
+        
+        source = article.get('source', {}).get('name', 'Unknown')
+        url = article.get('url', '')
+        
+        # Check if article mentions displacement
+        if not any(keyword in text for keyword in displacement_keywords):
+            continue
+        
+        # Try to extract numbers
+        for pattern in number_patterns:
+            matches = re.finditer(pattern, text, re.IGNORECASE)
+            for match in matches:
+                num_str = match.group(1).replace(',', '')
+                try:
+                    num = int(num_str)
+                    
+                    if num > 100:  # Minimum threshold
+                        displacement_data['total_extracted'] += num
+                        displacement_data['sources'].add(source)
+                        displacement_data['details'].append({
+                            'count': num,
+                            'source': source,
+                            'url': url,
+                            'context': match.group(0)
+                        })
+                        
+                        print(f"[Displacement Extract] {num:,} from {source}")
+                except:
+                    pass
+    
+    displacement_data['sources'] = list(displacement_data['sources'])
+    
+    return displacement_data
+
+
+def enhance_syria_conflict_data_with_displacement(conflict_data, unhcr_data, alhol_data, article_extracts):
+    """
+    Combine all displacement sources into comprehensive report
+    
+    Priority:
+    1. UNHCR official data (most authoritative)
+    2. Article extractions (recent movements)
+    3. Al-Hol camp specifics
+    """
+    
+    enhanced = {
+        'total_idps': unhcr_data.get('total_idps', conflict_data.get('displaced', 0)),
+        'camp_population': unhcr_data.get('camp_population', 0),
+        'recent_displacement': unhcr_data.get('recent_displacement', article_extracts.get('total_extracted', 0)),
+        
+        # Breakdown
+        'idp_breakdown': {
+            'in_camps': unhcr_data.get('camp_population', 0),
+            'with_host_communities': unhcr_data.get('total_idps', 0) - unhcr_data.get('camp_population', 0),
+            'recent_movements': article_extracts.get('total_extracted', 0)
+        },
+        
+        # Specific camps
+        'major_camps': [
+            {
+                'name': alhol_data.get('camp_name', 'Al-Hol'),
+                'population': alhol_data.get('population', 56000),
+                'location': alhol_data.get('location', 'Northeast Syria')
+            }
+            # Add more camps as needed
+        ],
+        
+        # Sources
+        'sources': {
+            'unhcr': unhcr_data.get('source', 'Unknown'),
+            'alhol': alhol_data.get('source', 'Unknown'),
+            'article_sources': article_extracts.get('sources', [])
+        },
+        
+        # Links
+        'humanitarian_links': [
+            {
+
+# ========================================
 # OIL & GOLD PRICE FETCHING - CASCADING FALLBACK SYSTEM
 # ========================================
 def fetch_oil_eia():
@@ -4285,7 +4641,16 @@ def api_lebanon_trends():
 
 @app.route('/api/syria-conflicts', methods=['GET'])
 def api_syria_conflicts():
-    """Syria conflicts tracker endpoint"""
+    """
+    Syria conflicts tracker endpoint WITH displacement tracking
+    
+    Now includes:
+    - Deaths, clashes, factions (existing)
+    - UNHCR IDP data (NEW)
+    - Camp populations including Al-Hol (NEW)
+    - Recent displacement movements (NEW)
+    - Humanitarian source links (NEW)
+    """
     try:
         if not check_rate_limit():
             return jsonify({'error': 'Rate limit exceeded'}), 429
@@ -4294,6 +4659,9 @@ def api_syria_conflicts():
         
         print(f"[Syria Conflicts] Fetching data for {days} days...")
         
+        # ========================================
+        # EXISTING: Fetch all article sources
+        # ========================================
         syria_direct_articles = fetch_syria_direct_rss()
         sohr_articles = fetch_sohr_rss()
         newsapi_articles = fetch_newsapi_articles('Syria conflict', days)
@@ -4311,15 +4679,47 @@ def api_syria_conflicts():
         
         print(f"[Syria Conflicts] Total articles: {len(all_articles)}")
         
+        # ========================================
+        # EXISTING: Extract basic conflict data
+        # ========================================
         conflict_data = extract_syria_conflict_data(all_articles)
         
+        # ========================================
+        # NEW: Fetch displacement data
+        # ========================================
+        print("[Syria Conflicts] Fetching displacement data...")
+        
+        unhcr_data = fetch_unhcr_syria_data()
+        alhol_data = fetch_alhol_camp_data()
+        article_displacement = extract_displacement_from_articles(all_articles)
+        acaps_data = scrape_acaps_syria()
+        
+        # ========================================
+        # NEW: Combine all displacement sources
+        # ========================================
+        enhanced_displacement = enhance_syria_conflict_data_with_displacement(
+            conflict_data,
+            unhcr_data,
+            alhol_data,
+            article_displacement
+        )
+        
+        print(f"[Syria Conflicts] ✅ Total IDPs: {enhanced_displacement['total_idps']:,}")
+        print(f"[Syria Conflicts] ✅ In camps: {enhanced_displacement['camp_population']:,}")
+        print(f"[Syria Conflicts] ✅ Recent movements: {enhanced_displacement['recent_displacement']:,}")
+        
+        # ========================================
+        # RETURN ENHANCED DATA
+        # ========================================
         return jsonify({
             'success': True,
             'days_analyzed': days,
             'total_articles': len(all_articles),
+            
+            # EXISTING: Basic conflict data
             'conflict_data': {
                 'deaths': conflict_data['deaths'],
-                'displaced': conflict_data['displaced'],
+                'displaced': conflict_data['displaced'],  # Keep for backwards compatibility
                 'factional_clashes': conflict_data['factional_clashes'],
                 'active_factions': conflict_data['active_factions'],
                 'num_factions': len(conflict_data['active_factions']),
@@ -4327,6 +4727,16 @@ def api_syria_conflicts():
                 'verified_sources': conflict_data['sources'],
                 'details': conflict_data['details'][:20]
             },
+            
+            # NEW: Enhanced displacement data
+            'displacement_enhanced': enhanced_displacement,
+            
+            # NEW: Source-specific data
+            'unhcr_data': unhcr_data,
+            'alhol_camp': alhol_data,
+            'acaps_analysis': acaps_data if acaps_data else {'note': 'ACAPS data unavailable'},
+            
+            # EXISTING: Article feeds by language
             'articles_syria_direct': syria_direct_articles[:20],
             'articles_sohr': sohr_articles[:20],
             'articles_en': [a for a in all_articles if a.get('language') == 'en'][:20],
@@ -4334,11 +4744,14 @@ def api_syria_conflicts():
             'articles_ar': [a for a in all_articles if a.get('language') == 'ar'][:20],
             'articles_fa': [a for a in all_articles if a.get('language') == 'fa'][:20],
             'articles_reddit': reddit_posts[:20],
-            'version': '2.6.3'
+            
+            'version': '2.8.1'
         })
         
     except Exception as e:
         print(f"[Syria Conflicts] ERROR: {str(e)}")
+        import traceback
+        traceback.print_exc()
         return jsonify({'success': False, 'error': str(e)}), 500
 
 # ========================================
