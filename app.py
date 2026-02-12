@@ -1722,6 +1722,31 @@ def enhance_syria_conflict_data_with_displacement(conflict_data, unhcr_data, alh
         # Links
         'humanitarian_links': [
             {
+                'name': 'UNHCR Syria Portal',
+                'url': 'https://data.unhcr.org/en/country/syr',
+                'description': 'Official displacement data'
+            },
+            {
+                'name': 'ACAPS Syria',
+                'url': 'https://www.acaps.org/countries/syria',
+                'description': 'Crisis analysis'
+            },
+            {
+                'name': 'AP News - Al-Hol',
+                'url': 'https://apnews.com/hub/syria',
+                'description': 'Camp reporting'
+            },
+            {
+                'name': 'ReliefWeb',
+                'url': 'https://reliefweb.int/country/syr',
+                'description': 'UN coordination'
+            }
+        ],
+        
+        'last_updated': datetime.now(timezone.utc).isoformat()
+    }
+    
+    return enhanced
 
 # ========================================
 # OIL & GOLD PRICE FETCHING - CASCADING FALLBACK SYSTEM
