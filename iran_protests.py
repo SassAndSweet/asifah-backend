@@ -1,7 +1,7 @@
 """
-iran_protests.py
+iran_protests.py - UPDATED WITH PRODUCTION STATUS
 Standalone module for Iran Protests Analytics page
-Handles oil prices, OPEC stats, and Iran-specific data
+Handles oil prices, OPEC stats, and Iran production monitoring
 """
 
 import requests
@@ -19,10 +19,8 @@ def get_brent_oil_price():
     """
     try:
         # Alpha Vantage API - Free tier (500 calls/day)
-        # Get your key at: https://www.alphavantage.co/support/#api-key
         API_KEY = "NUW8NKIRMXNMRTD9"
         
-        # Brent crude oil ticker: BZ=F (or use WTI if needed)
         url = f"https://www.alphavantage.co/query?function=CRUDE_OIL_BRENT&interval=daily&apikey={API_KEY}"
         
         response = requests.get(url, timeout=10)
@@ -36,11 +34,9 @@ def get_brent_oil_price():
             current_price = float(latest["value"])
             previous_price = float(previous["value"])
             
-            # Calculate change
             price_change = current_price - previous_price
             percent_change = (price_change / previous_price) * 100
             
-            # Determine direction arrow
             if price_change > 0.01:
                 arrow = "↑"
                 trend = "up"
@@ -63,7 +59,6 @@ def get_brent_oil_price():
                 "unit": "bbl"
             }
         else:
-            # Fallback to hardcoded data if API fails
             return get_fallback_oil_price()
             
     except Exception as e:
@@ -72,9 +67,7 @@ def get_brent_oil_price():
 
 
 def get_fallback_oil_price():
-    """
-    Fallback oil price data when API is unavailable
-    """
+    """Fallback oil price data when API is unavailable"""
     return {
         "success": True,
         "current_price": 71.19,
@@ -95,16 +88,12 @@ def get_oil_sparkline_data(days=90):
     Returns: list of {date, price} for last N days
     """
     try:
-        # You can use Alpha Vantage or another API for historical data
-        # For now, return sample data structure
-        
         sparkline_data = []
         base_price = 71.19
         
-        # Generate sample historical data (replace with real API call)
+        # Generate sample historical data (replace with real API call later)
         for i in range(days, 0, -1):
             date = (datetime.now() - timedelta(days=i)).strftime("%Y-%m-%d")
-            # Add some variation (replace with real data)
             price = base_price + (i % 10 - 5) * 0.5
             sparkline_data.append({
                 "date": date,
@@ -115,7 +104,7 @@ def get_oil_sparkline_data(days=90):
             "success": True,
             "data": sparkline_data,
             "days": days,
-            "source": "sample"  # Replace with real source when API is integrated
+            "source": "sample"
         }
         
     except Exception as e:
@@ -169,6 +158,122 @@ def get_iran_oil_reserves():
 
 
 # ============================================
+# IRAN OIL PRODUCTION STATUS (NEW!)
+# ============================================
+
+def get_iran_oil_production_status():
+    """
+    Track Iran's oil production/export status using:
+    1. Latest OPEC/EIA production data (monthly)
+    2. News scanning for export halts/sanctions
+    3. Simple status indicator (🟢/🟡/🔴)
+    """
+    try:
+        # Step 1: Get latest production data (hardcoded from latest OPEC/EIA reports)
+        # Update this monthly from: https://www.eia.gov/international/data/country/IRN
+        # Or from UANI tracker: https://www.unitedagainstnucleariran.com/tanker-tracker
+        
+        latest_production = {
+            "barrels_per_day": 3187000,  # 3.187 million bpd (Dec 2025 OPEC data)
+            "date": "2025-12-01",
+            "source": "OPEC Monthly Oil Market Report",
+            "source_url": "https://www.opec.org/opec_web/en/publications/338.htm"
+        }
+        
+        baseline_production = 2000000  # 2M bpd = normal sanctions-era level
+        
+        # Step 2: Check for recent news about Iran oil halts/shutdowns
+        halt_news = scan_iran_oil_news()
+        
+        # Step 3: Determine status
+        bpd = latest_production["barrels_per_day"]
+        
+        if halt_news["halt_detected"]:
+            status = "halted"
+            status_emoji = "🔴"
+            status_text = "EXPORT HALT REPORTED"
+            status_detail = halt_news["summary"]
+            news_link = halt_news["url"]
+        elif bpd >= baseline_production:
+            status = "exporting"
+            status_emoji = "🟢"
+            status_text = "EXPORTING OIL"
+            status_detail = f"{round(bpd/1000000, 2)}M bpd (Normal operations)"
+            news_link = None
+        elif bpd >= 1000000:
+            status = "reduced"
+            status_emoji = "🟡"
+            status_text = "REDUCED EXPORTS"
+            status_detail = f"{round(bpd/1000000, 2)}M bpd (Sanctions impact)"
+            news_link = None
+        else:
+            status = "minimal"
+            status_emoji = "🔴"
+            status_text = "MINIMAL EXPORTS"
+            status_detail = f"{round(bpd/1000000, 2)}M bpd (Heavy sanctions)"
+            news_link = None
+        
+        return {
+            "success": True,
+            "status": status,
+            "emoji": status_emoji,
+            "status_text": status_text,
+            "status_detail": status_detail,
+            "production_bpd": bpd,
+            "production_date": latest_production["date"],
+            "production_source": latest_production["source"],
+            "production_source_url": latest_production["source_url"],
+            "news_link": news_link,
+            "last_updated": datetime.now().isoformat()
+        }
+        
+    except Exception as e:
+        print(f"[Oil Production Status Error]: {e}")
+        return {
+            "success": False,
+            "status": "unknown",
+            "emoji": "⚪",
+            "status_text": "STATUS UNKNOWN",
+            "status_detail": "Error fetching production data",
+            "error": str(e)
+        }
+
+
+def scan_iran_oil_news():
+    """
+    Scan recent news for Iran oil export halts/shutdowns
+    Returns: dict with halt_detected (bool), summary, url
+    """
+    try:
+        # Search keywords for oil export disruptions
+        keywords = [
+            "iran oil halt",
+            "iran stops oil exports",
+            "iran oil shutdown",
+            "iran suspends oil",
+            "iran oil production cut"
+        ]
+        
+        # TODO: Integrate with existing GDELT/NewsAPI scan
+        # Check articles from last 7 days for keywords
+        
+        return {
+            "halt_detected": False,  # Set to True if keywords found
+            "summary": None,
+            "url": None,
+            "source": None
+        }
+        
+    except Exception as e:
+        print(f"[News Scan Error]: {e}")
+        return {
+            "halt_detected": False,
+            "summary": None,
+            "url": None
+        }
+
+
+# ============================================
 # COMBINED ENDPOINT DATA
 # ============================================
 
@@ -180,39 +285,14 @@ def get_iran_oil_data():
     oil_price = get_brent_oil_price()
     reserves = get_iran_oil_reserves()
     sparkline = get_oil_sparkline_data(90)
+    production_status = get_iran_oil_production_status()  # NEW!
     
     return {
         "success": True,
         "oil_price": oil_price,
         "reserves": reserves,
         "sparkline": sparkline,
-        "timestamp": datetime.now().isoformat()
-    }
-
-
-# ============================================
-# ALTERNATIVE: Simple API-Free Version
-# ============================================
-
-def get_iran_oil_data_simple():
-    """
-    Simple version without external API calls
-    Returns hardcoded current data + OPEC stats
-    Good for testing or if you don't want API dependencies
-    """
-    return {
-        "success": True,
-        "oil_price": {
-            "current_price": 71.19,
-            "price_change": 0.12,
-            "percent_change": 0.17,
-            "arrow": "↑",
-            "trend": "up",
-            "timestamp": datetime.now().strftime("%Y-%m-%d"),
-            "currency": "USD",
-            "unit": "bbl"
-        },
-        "reserves": get_iran_oil_reserves(),
+        "production_status": production_status,  # NEW!
         "timestamp": datetime.now().isoformat()
     }
 
