@@ -469,6 +469,177 @@ def detect_deescalation(text):
     
     return False
 
+# ========================================
+# MAIN THREAT PROBABILITY CALCULATOR
+# ========================================
+def calculate_threat_probability(articles, days_analyzed=7, target='iran'):
+    """
+    Calculate sophisticated threat probability score
+    
+    Used by all 4 threat cards (Iran, Hezbollah, Houthis, Syria)
+    Supports dynamic time windows (24h, 48h, 7d, 30d)
+    
+    Returns:
+    - probability: 0-100 score
+    - momentum: increasing/decreasing/stable
+    - breakdown: detailed scoring components
+    - top_contributors: articles ranked by impact
+    """
+    
+    # Handle empty articles case
+    if not articles:
+        baseline_adjustment = TARGET_BASELINES.get(target, {}).get('base_adjustment', 0)
+        return {
+            'probability': min(25 + baseline_adjustment, 99),
+            'momentum': 'stable',
+            'breakdown': {
+                'base_score': 25,
+                'baseline_adjustment': baseline_adjustment,
+                'article_count': 0,
+                'weighted_score': 0,
+                'recent_articles_48h': 0,
+                'older_articles': 0
+            },
+            'top_contributors': []
+        }
+    
+    current_time = datetime.now(timezone.utc)
+    
+    weighted_score = 0
+    deescalation_count = 0
+    recent_articles = 0
+    older_articles = 0
+    
+    article_details = []
+    
+    # ========================================
+    # ARTICLE SCORING LOOP
+    # ========================================
+    for article in articles:
+        title = article.get('title', '')
+        description = article.get('description', '')
+        content = article.get('content', '')
+        full_text = f"{title} {description} {content}"
+        
+        source_name = article.get('source', {}).get('name', 'Unknown')
+        published_date = article.get('publishedAt', '')
+        
+        # Calculate article weight components
+        time_decay = calculate_time_decay(published_date, current_time)
+        source_weight = get_source_weight(source_name)
+        severity_multiplier = detect_keyword_severity(full_text)
+        is_deescalation = detect_deescalation(full_text)
+        
+        # NEW: Apply leadership multiplier if present
+        leadership_data = article.get('leadership', {})
+        if leadership_data.get('has_leadership', False):
+            leadership_multiplier = leadership_data.get('weight_multiplier', 1.0)
+            severity_multiplier *= leadership_multiplier
+        
+        # Calculate article contribution
+        if is_deescalation:
+            article_contribution = -3 * time_decay * source_weight
+            deescalation_count += 1
+        else:
+            article_contribution = time_decay * source_weight * severity_multiplier
+        
+        weighted_score += article_contribution
+        
+        # Track recency
+        try:
+            pub_dt = datetime.fromisoformat(published_date.replace('Z', '+00:00'))
+            age_hours = (current_time - pub_dt).total_seconds() / 3600
+            
+            if age_hours <= 48:
+                recent_articles += 1
+            else:
+                older_articles += 1
+        except:
+            older_articles += 1
+        
+        # Store article details for top contributors
+        article_details.append({
+            'source': source_name,
+            'source_weight': source_weight,
+            'time_decay': round(time_decay, 3),
+            'severity': severity_multiplier,
+            'deescalation': is_deescalation,
+            'contribution': round(article_contribution, 2),
+            'title': title[:100]  # Truncate for display
+        })
+    
+    # ========================================
+    # MOMENTUM CALCULATION
+    # ========================================
+    if recent_articles > 0 and older_articles > 0:
+        recent_density = recent_articles / 2.0  # Articles per day in last 48h
+        older_density = older_articles / max((days_analyzed - 2), 1)  # Articles per day before that
+        
+        momentum_ratio = recent_density / older_density if older_density > 0 else 2.0
+        
+        if momentum_ratio > 1.5:
+            momentum = 'increasing'
+            momentum_multiplier = 1.2
+        elif momentum_ratio < 0.7:
+            momentum = 'decreasing'
+            momentum_multiplier = 0.8
+        else:
+            momentum = 'stable'
+            momentum_multiplier = 1.0
+    else:
+        momentum = 'stable'
+        momentum_multiplier = 1.0
+    
+    weighted_score *= momentum_multiplier
+    
+    # ========================================
+    # FINAL PROBABILITY CALCULATION
+    # ========================================
+    base_score = 25
+    baseline_adjustment = TARGET_BASELINES.get(target, {}).get('base_adjustment', 0)
+    
+    # Apply weighted score with dampening factor
+    if weighted_score < 0:
+        # De-escalation scenario
+        probability = max(10, base_score + baseline_adjustment + weighted_score)
+    else:
+        # Escalation scenario (0.8 dampening factor)
+        probability = base_score + baseline_adjustment + (weighted_score * 0.8)
+    
+    # Clamp to valid range
+    probability = int(probability)
+    probability = max(10, min(probability, 95))
+    
+    # ========================================
+    # BUILD RESPONSE
+    # ========================================
+    return {
+        'probability': probability,
+        'momentum': momentum,
+        'breakdown': {
+            'base_score': base_score,
+            'baseline_adjustment': baseline_adjustment,
+            'article_count': len(articles),
+            'recent_articles_48h': recent_articles,
+            'older_articles': older_articles,
+            'weighted_score': round(weighted_score, 2),
+            'momentum_multiplier': momentum_multiplier,
+            'deescalation_count': deescalation_count,
+            'adaptive_multiplier': 0.8,
+            'time_decay_applied': True,
+            'source_weighting_applied': True,
+            'formula': 'base(25) + adjustment + (weighted_score * 0.8)'
+        },
+        'top_contributors': sorted(
+            article_details, 
+            key=lambda x: abs(x['contribution']), 
+            reverse=True
+        )[:15]  # Top 15 contributing articles
+    }
+
+# ========================================
+# US STRIKE PROBABILITY (SPECIALIZED)
+# ========================================
 def calculate_us_strike_probability(articles, days_analyzed=7, target='iran'):
     """
     Calculate US strike probability with US-specific indicators
@@ -538,7 +709,9 @@ def calculate_us_strike_probability(articles, days_analyzed=7, target='iran'):
         'source': 'us_specific_algorithm'
     }
 
-
+# ========================================
+# COORDINATION DETECTION
+# ========================================
 def detect_coordination_signals(israel_prob, us_prob, all_articles):
     """
     Detect coordination signals between US and Israel
@@ -604,7 +777,9 @@ def detect_coordination_signals(israel_prob, us_prob, all_articles):
         'indicators': detected_indicators[:3]  # Top 3
     }
 
-
+# ========================================
+# COMBINED PROBABILITY
+# ========================================
 def calculate_combined_probability(israel_prob, us_prob, coordination):
     """
     Calculate combined probability using independent events + coordination
@@ -636,7 +811,9 @@ def calculate_combined_probability(israel_prob, us_prob, coordination):
         'formula': 'independent_events_with_coordination'
     }
 
-
+# ========================================
+# REVERSE THREAT CALCULATION
+# ========================================
 def calculate_reverse_threat(articles, source_actor='iran', target_actor='israel', israel_prob=0, us_prob=0):
     """
     Calculate probability of source actor attacking target
