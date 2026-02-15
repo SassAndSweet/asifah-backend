@@ -628,209 +628,201 @@ def calculate_combined_probability(israel_prob, us_prob, coordination):
     }
 
 
-def calculate_reverse_threat(articles, source_actor='iran', target_actor='israel'):
+def calculate_reverse_threat(articles, source_actor='iran', target_actor='israel', israel_prob=0, us_prob=0):
     """
     Calculate probability of source actor attacking target
     (e.g., Iran -> Israel, Hezbollah -> Israel)
+    
+    Enhanced with:
+    - 40+ keywords across 6 categories
+    - Weighted scoring by threat type
+    - Proxy warfare detection
+    - Asymmetric threat detection
+    - Retaliation trigger bonus (when Israel/US prob high)
     """
     
+    # ========================================
+    # EXPANDED REVERSE THREAT KEYWORDS (40+)
+    # ========================================
     REVERSE_THREAT_KEYWORDS = {
-        'iran_threats': [
-            'iran threatens', 'irgc warns', 'khamenei threatens', 'tehran vows',
-            'retaliation', 'revenge attack', 'severe response'
+        # Direct threats from state actors
+        'iran_direct_threats': [
+            'iran threatens', 'iran warns', 'iran vows', 'tehran threatens',
+            'irgc warns', 'irgc threatens', 'khamenei threatens', 'khamenei warns',
+            'revolutionary guard threatens', 'quds force threatens', 'tehran vows',
+            'iran pledges retaliation', 'iran promises revenge', 'iran will strike',
+            'supreme leader warns', 'ayatollah threatens'
         ],
-        'hezbollah_threats': [
-            'nasrallah threatens', 'hezbollah warns', 'resistance axis',
-            'rocket fire', 'cross-border attack'
+        
+        # Retaliation language (key for reverse threats)
+        'retaliation_threats': [
+            'retaliation', 'retaliate', 'revenge attack', 'avenge', 'payback',
+            'severe response', 'crushing response', 'devastating response',
+            'will respond', 'will strike back', 'will pay the price',
+            'consequences', 'severe consequences', 'pay dearly', 'answer for',
+            'punishment', 'punish', 'will not go unanswered'
         ],
-        'proxy_mobilization': [
-            'militia deployment', 'proxy forces', 'armed groups mobilize',
-            'shiite militias', 'hashd forces'
-        ],
-        'missile_tests': [
+        
+        # Military posturing & signals
+        'military_signals': [
             'missile test', 'ballistic missile', 'cruise missile launch',
-            'weapons test', 'military drill'
+            'military drill', 'military exercise', 'naval drill', 'war games',
+            'weapons test', 'combat readiness', 'forces on alert', 'high alert',
+            'irgc exercise', 'naval exercise', 'air defense drill',
+            'mobilization', 'troop deployment', 'forces deployed'
+        ],
+        
+        # Proxy mobilization (Hezbollah, Houthis, Iraqi militias)
+        'proxy_threats': [
+            'hezbollah warns', 'hezbollah threatens', 'nasrallah warns', 'nasrallah threatens',
+            'houthi attack', 'houthi strike', 'houthi threatens', 'ansarallah warns',
+            'militia deployment', 'proxy forces', 'armed groups mobilize',
+            'shiite militias', 'hashd forces', 'iraqi militia', 'pmu forces',
+            'resistance axis', 'axis of resistance', 'rocket fire', 'cross-border attack'
+        ],
+        
+        # Asymmetric warfare indicators
+        'asymmetric_threats': [
+            'strait of hormuz', 'close strait', 'block shipping', 'shipping lanes',
+            'cyber attack', 'cyberattack', 'hack', 'infrastructure attack',
+            'oil facilities', 'tanker attack', 'shipping disruption', 'pipeline',
+            'refinery attack', 'energy infrastructure', 'sabotage'
+        ],
+        
+        # Specific target mentions (highest weight when combined)
+        'target_specific': [
+            'target israel', 'strike israel', 'attack israel', 'hit israel',
+            'target us', 'strike us', 'attack us', 'american bases',
+            'us interests', 'israeli targets', 'tel aviv', 'haifa',
+            'us forces', 'american troops', 'zionist regime', 'occupation forces'
         ]
     }
     
+    # ========================================
+    # RETALIATION TRIGGER DETECTION
+    # ========================================
+    def detect_retaliation_trigger(israel_probability, us_probability):
+        """
+        If Israel/US strike probability is high, reverse threat increases
+        
+        Logic: Iran is MORE likely to threaten when under threat themselves
+        - If Israel prob > 60%, add +15% to reverse threat
+        - If US prob > 60%, add +15% to reverse threat
+        - Combined max bonus: +25%
+        """
+        bonus = 0
+        
+        if israel_probability > 0.60:
+            bonus += 0.15
+        elif israel_probability > 0.40:
+            bonus += 0.08
+        elif israel_probability > 0.20:
+            bonus += 0.03
+        
+        if us_probability > 0.60:
+            bonus += 0.15
+        elif us_probability > 0.40:
+            bonus += 0.08
+        elif us_probability > 0.20:
+            bonus += 0.03
+        
+        return min(bonus, 0.25)  # Cap at +25%
+    
+    # ========================================
+    # SCORE CALCULATION WITH WEIGHTED CATEGORIES
+    # ========================================
     threat_score = 0
     indicators = []
+    proxy_detected = False
+    asymmetric_detected = False
+    target_mentioned_count = 0
     
     for article in articles:
         content = f"{article.get('title', '')} {article.get('description', '')} {article.get('content', '')}".lower()
         
-        # Check for threat keywords
+        # Track if target is mentioned in this article
+        target_in_content = target_actor.lower() in content
+        
+        # Check ALL keyword categories
         for category, phrases in REVERSE_THREAT_KEYWORDS.items():
+            category_matched = False
+            
             for phrase in phrases:
-                if phrase in content and target_actor in content:
-                    threat_score += 2
+                if phrase in content:
+                    # ========================================
+                    # CATEGORY-BASED WEIGHTING
+                    # ========================================
+                    if 'direct_threats' in category:
+                        weight = 3  # Highest weight for state threats
+                    elif 'target_specific' in category and target_in_content:
+                        weight = 4  # HIGHEST when target explicitly mentioned
+                        target_mentioned_count += 1
+                    elif 'retaliation' in category:
+                        weight = 2.5  # High weight for retaliation language
+                    elif 'military_signals' in category:
+                        weight = 2  # Medium-high for military posturing
+                    elif 'proxy' in category:
+                        weight = 2.5  # High weight for proxy threats
+                        proxy_detected = True
+                    elif 'asymmetric' in category:
+                        weight = 2  # Medium-high for asymmetric warfare
+                        asymmetric_detected = True
+                    else:
+                        weight = 1  # Base weight
+                    
+                    # BONUS: If target mentioned in article, increase weight
+                    if target_in_content and 'target_specific' not in category:
+                        weight *= 1.3
+                    
+                    threat_score += weight
+                    
                     indicators.append({
-                        'type': category,
+                        'type': category.replace('_', ' ').title(),
                         'phrase': phrase,
-                        'article': article.get('title', '')[:80]
+                        'weight': weight,
+                        'article': article.get('title', '')[:80],
+                        'target_mentioned': target_in_content
                     })
+                    
+                    category_matched = True
+                    break  # One match per category per article
+            
+            if category_matched:
+                continue  # Move to next category
     
-    # Convert to probability (cap at 60% - reverse threats typically lower)
-    probability = min(threat_score / 50.0, 0.60)
+    # ========================================
+    # CALCULATE BASE PROBABILITY
+    # ========================================
+    # Adjusted formula: More lenient scoring (divide by 40 instead of 50)
+    base_probability = min(threat_score / 40.0, 0.60)
     
+    # ========================================
+    # APPLY RETALIATION TRIGGER BONUS
+    # ========================================
+    retaliation_bonus = detect_retaliation_trigger(israel_prob, us_prob)
+    
+    # ========================================
+    # FINAL PROBABILITY
+    # ========================================
+    final_probability = min(base_probability + retaliation_bonus, 0.65)  # Cap at 65% (slightly higher than before)
+    
+    # ========================================
+    # BUILD RESPONSE
+    # ========================================
     return {
-        'probability': probability,
+        'probability': final_probability,
         'source': source_actor,
         'target': target_actor,
-        'indicators': indicators[:5],
-        'risk_level': 'high' if probability > 0.40 else 'moderate' if probability > 0.20 else 'low'
-    }
-
-
-def calculate_threat_probability(articles, days_analyzed=7, target='iran'):
-    """Calculate sophisticated threat probability score"""
-    
-    if not articles:
-        baseline_adjustment = TARGET_BASELINES.get(target, {}).get('base_adjustment', 0)
-        return {
-            'probability': min(25 + baseline_adjustment, 99),
-            'momentum': 'stable',
-            'breakdown': {
-                'base_score': 25,
-                'baseline_adjustment': baseline_adjustment,
-                'article_count': 0,
-                'weighted_score': 0
-            }
-        }
-    
-    current_time = datetime.now(timezone.utc)
-    
-    weighted_score = 0
-    deescalation_count = 0
-    recent_articles = 0
-    older_articles = 0
-    
-    article_details = []
-    
-    for article in articles:
-        title = article.get('title', '')
-        description = article.get('description', '')
-        content = article.get('content', '')
-        full_text = f"{title} {description} {content}"
-        
-        source_name = article.get('source', {}).get('name', 'Unknown')
-        published_date = article.get('publishedAt', '')
-        
-        time_decay = calculate_time_decay(published_date, current_time)
-        source_weight = get_source_weight(source_name)
-        severity_multiplier = detect_keyword_severity(full_text)
-        is_deescalation = detect_deescalation(full_text)
-        
-        if is_deescalation:
-            article_contribution = -3 * time_decay * source_weight
-            deescalation_count += 1
-        else:
-            article_contribution = time_decay * source_weight * severity_multiplier
-        
-        # Apply leadership multiplier if present
-        article_contribution = apply_leadership_multiplier(article_contribution, article)
-        
-        weighted_score += article_contribution
-        
-        try:
-            pub_dt = datetime.fromisoformat(published_date.replace('Z', '+00:00'))
-            age_hours = (current_time - pub_dt).total_seconds() / 3600
-            
-            if age_hours <= 48:
-                recent_articles += 1
-            else:
-                older_articles += 1
-        except:
-            older_articles += 1
-        
-        article_details.append({
-            'source': source_name,
-            'source_weight': source_weight,
-            'time_decay': round(time_decay, 3),
-            'severity': severity_multiplier,
-            'deescalation': is_deescalation,
-            'contribution': round(article_contribution, 2)
-        })
-    
-    # Calculate momentum
-    if recent_articles > 0 and older_articles > 0:
-        recent_density = recent_articles / 2.0
-        # FIX: Prevent division by zero when days_analyzed <= 2
-        days_for_older = max(1, days_analyzed - 2)
-        older_density = older_articles / days_for_older
-        
-        momentum_ratio = recent_density / older_density if older_density > 0 else 2.0
-        
-        if momentum_ratio > 1.5:
-            momentum = 'increasing'
-            momentum_multiplier = 1.2
-        elif momentum_ratio < 0.7:
-            momentum = 'decreasing'
-            momentum_multiplier = 0.8
-        else:
-            momentum = 'stable'
-            momentum_multiplier = 1.0
-    else:
-        momentum = 'stable'
-        momentum_multiplier = 1.0
-    
-    weighted_score *= momentum_multiplier
-    
-    base_score = 25
-    baseline_adjustment = TARGET_BASELINES.get(target, {}).get('base_adjustment', 0)
-    
-    if weighted_score < 0:
-        probability = max(10, base_score + baseline_adjustment + weighted_score)
-    else:
-        probability = base_score + baseline_adjustment + (weighted_score * 0.8)
-    
-    probability = int(probability)
-    probability = max(10, min(probability, 95))
-    
-    # BUILD top_articles from article_details
-    top_articles = []
-    top_contributors = sorted(article_details, key=lambda x: abs(x['contribution']), reverse=True)[:15]
-    
-    for contributor in top_contributors:
-        # Find matching article
-        matching_article = None
-        for article in articles:
-            if article.get('source', {}).get('name', '') == contributor['source']:
-                matching_article = article
-                break
-        
-        if matching_article:
-            top_articles.append({
-                'title': matching_article.get('title', 'No title'),
-                'source': contributor['source'],
-                'url': matching_article.get('url', ''),
-                'publishedAt': matching_article.get('publishedAt', ''),
-                'contribution': contributor['contribution'],
-                'severity': contributor['severity'],
-                'source_weight': contributor['source_weight'],
-                'time_decay': contributor['time_decay'],
-                'deescalation': contributor['deescalation']
-            })
-    
-    return {
-        'probability': probability,
-        'momentum': momentum,
-        'breakdown': {
-            'base_score': base_score,
-            'baseline_adjustment': baseline_adjustment,
-            'article_count': len(articles),
-            'recent_articles_48h': recent_articles,
-            'older_articles': older_articles,
-            'weighted_score': round(weighted_score, 2),
-            'momentum_multiplier': momentum_multiplier,
-            'deescalation_count': deescalation_count,
-            'adaptive_multiplier': 0.8,
-            'time_decay_applied': True,
-            'source_weighting_applied': True,
-            'formula': 'base(25) + adjustment + (weighted_score * 0.8)'
-        },
-        'top_scoring_articles': top_articles,
-        'top_contributors': top_contributors
+        'threat_score': round(threat_score, 1),
+        'base_probability': round(base_probability, 3),
+        'retaliation_bonus': round(retaliation_bonus, 3),
+        'indicators': sorted(indicators, key=lambda x: x['weight'], reverse=True)[:5],  # Top 5 weighted
+        'total_indicators': len(indicators),
+        'target_explicitly_mentioned': target_mentioned_count,
+        'proxy_warfare_detected': proxy_detected,
+        'asymmetric_warfare_detected': asymmetric_detected,
+        'risk_level': 'high' if final_probability > 0.40 else 'moderate' if final_probability > 0.20 else 'low',
+        'calculation_method': 'weighted_keywords_with_retaliation_trigger'
     }
 # ========================================
 # RATE LIMITING
@@ -4098,9 +4090,10 @@ def api_threat_matrix(target):
         combined_result = calculate_combined_probability(israel_prob, us_prob, coordination)
         
         # Calculate reverse threats (target → Israel, target → US)
-        reverse_israel = calculate_reverse_threat(all_articles, target, 'israel')
-        reverse_us = calculate_reverse_threat(all_articles, target, 'us')
-        
+        # Pass Israel/US probabilities for retaliation trigger bonus
+        reverse_israel = calculate_reverse_threat(all_articles, target, 'israel', israel_prob, us_prob)
+        reverse_us = calculate_reverse_threat(all_articles, target, 'us', israel_prob, us_prob)
+
         # Build response
         response = {
             'success': True,
