@@ -5087,11 +5087,11 @@ def flight_cancellations():
         rss_disruptions = fetch_airline_disruptions()
         print(f"[Flight Cancellations] RSS monitor returned {len(rss_disruptions)} disruptions")
 
-# DEBUG: Print what we got
-if rss_disruptions:
-    print(f"[Flight Cancellations] First disruption: {rss_disruptions[0]}")
-else:
-    print("[Flight Cancellations] ⚠️ RSS monitor returned empty list!")
+        # DEBUG: Print what we got
+        if rss_disruptions:
+            print(f"[Flight Cancellations] First disruption: {rss_disruptions[0]}")
+        else:
+            print("[Flight Cancellations] ⚠️ RSS monitor returned empty list!")
         
         # Search queries for Google News - Comprehensive Middle East coverage
         destinations = [
