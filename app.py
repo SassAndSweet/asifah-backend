@@ -814,6 +814,114 @@ def calculate_combined_probability(israel_prob, us_prob, coordination):
 # ========================================
 # REVERSE THREAT CALCULATION
 # ========================================
+def build_recent_headlines(israel_contributors, us_indicators, reverse_israel_indicators, reverse_us_indicators, all_articles):
+    """
+    Build unified recent headlines list for threat matrix display
+    Combines top articles from all threat calculations with weights
+    
+    Returns list of articles with:
+    - title, url, source, date
+    - threat_type (Israel Strike / US Strike / Reverse Threat)
+    - weight (contribution score)
+    - why_included (reason for inclusion)
+    """
+    
+    headlines = []
+    seen_urls = set()
+    
+    # ========================================
+    # 1. ISRAEL STRIKE CONTRIBUTORS
+    # ========================================
+    for contributor in israel_contributors[:5]:  # Top 5
+        # Find matching article
+        matching_article = None
+        for article in all_articles:
+            if article.get('source', {}).get('name', '') == contributor.get('source', ''):
+                if article.get('url') not in seen_urls:
+                    matching_article = article
+                    break
+        
+        if matching_article:
+            seen_urls.add(matching_article.get('url', ''))
+            
+            headlines.append({
+                'title': matching_article.get('title', 'No title')[:120],
+                'url': matching_article.get('url', ''),
+                'source': contributor.get('source', 'Unknown'),
+                'published': matching_article.get('publishedAt', ''),
+                'threat_type': 'Israel Strike',
+                'weight': abs(contributor.get('contribution', 0)),
+                'severity': contributor.get('severity', 1.0),
+                'why_included': f"High severity ({contributor.get('severity', 1.0)}x multiplier)",
+                'color': 'red'
+            })
+    
+    # ========================================
+    # 2. US STRIKE INDICATORS
+    # ========================================
+    for indicator in us_indicators[:5]:  # Top 5
+        article_title = indicator.get('article', '')
+        
+        # Find matching article by title
+        matching_article = None
+        for article in all_articles:
+            if article.get('title', '').lower().startswith(article_title.lower()[:40]):
+                if article.get('url') not in seen_urls:
+                    matching_article = article
+                    break
+        
+        if matching_article:
+            seen_urls.add(matching_article.get('url', ''))
+            
+            headlines.append({
+                'title': matching_article.get('title', 'No title')[:120],
+                'url': matching_article.get('url', ''),
+                'source': matching_article.get('source', {}).get('name', 'Unknown'),
+                'published': matching_article.get('publishedAt', ''),
+                'threat_type': 'US Strike',
+                'weight': abs(indicator.get('weight', 0)),
+                'phrase': indicator.get('phrase', ''),
+                'why_included': f"US-specific signal: '{indicator.get('phrase', '')}'",
+                'color': 'blue'
+            })
+    
+    # ========================================
+    # 3. REVERSE THREAT INDICATORS (Iran → Israel/US)
+    # ========================================
+    for indicator in (reverse_israel_indicators + reverse_us_indicators)[:5]:  # Top 5 combined
+        # Find article by title
+        article_title = indicator.get('article', '')
+        
+        matching_article = None
+        for article in all_articles:
+            if article.get('title', '').lower().startswith(article_title.lower()[:40]):
+                if article.get('url') not in seen_urls:
+                    matching_article = article
+                    break
+        
+        if matching_article:
+            seen_urls.add(matching_article.get('url', ''))
+            
+            headlines.append({
+                'title': matching_article.get('title', 'No title')[:120],
+                'url': matching_article.get('url', ''),
+                'source': matching_article.get('source', {}).get('name', 'Unknown'),
+                'published': matching_article.get('publishedAt', ''),
+                'threat_type': 'Reverse Threat',
+                'weight': abs(indicator.get('weight', 0)),
+                'phrase': indicator.get('phrase', ''),
+                'why_included': f"Threat phrase: '{indicator.get('phrase', '')}'",
+                'color': 'orange'
+            })
+    
+    # ========================================
+    # SORT BY WEIGHT (highest first)
+    # ========================================
+    headlines.sort(key=lambda x: x['weight'], reverse=True)
+    
+    # Return top 15 headlines
+    return headlines[:15]
+    
 def calculate_reverse_threat(articles, source_actor='iran', target_actor='israel', israel_prob=0, us_prob=0):
     """
     Calculate probability of source actor attacking target
@@ -4343,6 +4451,17 @@ def api_threat_matrix(target):
                 'signals_detected': coordination['signals_detected'],
                 'indicators': coordination.get('indicators', [])
             },
+            
+            # ========================================
+            # TOP ARTICLES FOR "RECENT HEADLINES" DISPLAY
+            # ========================================
+            'recent_headlines': build_recent_headlines(
+                israel_result.get('top_contributors', []),
+                us_result.get('us_indicators', []),
+                reverse_israel.get('indicators', []),
+                reverse_us.get('indicators', []),
+                all_articles
+            ),
             
             'version': '2.8.0-multi-actor'
         }
