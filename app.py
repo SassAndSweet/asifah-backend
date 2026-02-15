@@ -15,12 +15,13 @@ All endpoints working:
 # ========================================
 # IMPORTS
 # ========================================
-
 # Standard library imports first
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 import requests
+import xml.etree.ElementTree as ET
 from datetime import datetime, timezone, timedelta
+from email.utils import parsedate_to_datetime
 import os
 import time
 import re
@@ -3679,7 +3680,226 @@ def get_lebanon_trends(days=30):
             'message': str(e),
             'days_collected': 0
         }
+        
+# ========================================
+# AIRLINE DISRUPTIONS TRACKER
+# ========================================
 
+def fetch_airline_disruptions():
+    """
+    Fetch airline disruptions from Google News RSS
+    Searches for flight cancellations to Middle East destinations
+    
+    Returns list of disruption objects with:
+    - airline, route, origin, destination, date, duration, status, source_url, headline
+    """
+    
+    print("[RSS Monitor - Airline Disruptions] Starting scan...")
+    
+    # Middle East destinations to monitor
+    destinations = [
+        # High priority (conflict zones)
+        'Tel Aviv', 'Israel', 'Beirut', 'Lebanon', 'Damascus', 'Syria',
+        'Tehran', 'Iran', 'Baghdad', 'Iraq',
+        # Regional capitals
+        'Amman', 'Jordan', 'Dubai', 'UAE', 'Riyadh', 'Saudi Arabia',
+        'Cairo', 'Egypt', 'Istanbul', 'Turkey', 'Doha', 'Qatar'
+    ]
+    
+    keywords = [
+        'airline suspended flights',
+        'airline cancelled flights',
+        'flight cancellation',
+        'suspend service',
+        'cancel flights'
+    ]
+    
+    all_disruptions = []
+    seen_urls = set()
+    
+    # Search each destination (limit to prevent slowness)
+    for destination in destinations[:8]:  # Top 8 destinations
+        for keyword in keywords[:2]:  # Top 2 keywords per destination
+            query = f'{keyword} {destination}'
+            
+            try:
+                # Google News RSS endpoint
+                url = f"https://news.google.com/rss/search?q={query.replace(' ', '+')}&hl=en&gl=US&ceid=US:en"
+                
+                response = requests.get(url, timeout=10, headers={
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                })
+                
+                if response.status_code != 200:
+                    continue
+                
+                # Parse RSS XML
+                import xml.etree.ElementTree as ET
+                
+                try:
+                    root = ET.fromstring(response.content)
+                except ET.ParseError:
+                    continue
+                
+                items = root.findall('.//item')
+                
+                # Process top 3 results per query
+                for item in items[:3]:
+                    title_elem = item.find('title')
+                    link_elem = item.find('link')
+                    pubDate_elem = item.find('pubDate')
+                    
+                    if title_elem is None or link_elem is None:
+                        continue
+                    
+                    title = title_elem.text or ''
+                    link = link_elem.text or ''
+                    pub_date = pubDate_elem.text if pubDate_elem is not None else ''
+                    
+                    # Skip duplicates
+                    if link in seen_urls:
+                        continue
+                    
+                    seen_urls.add(link)
+                    
+                    # Parse disruption details
+                    disruption = {
+                        'airline': extract_airline_from_title(title),
+                        'route': f"Various → {destination}",
+                        'origin': 'Various',
+                        'destination': destination,
+                        'date': parse_rss_date(pub_date),
+                        'duration': extract_duration_from_title(title),
+                        'status': extract_status_from_title(title),
+                        'source_url': link,
+                        'headline': title[:150]  # Truncate long headlines
+                    }
+                    
+                    all_disruptions.append(disruption)
+                
+            except Exception as e:
+                print(f"[RSS Monitor] Error fetching {destination}: {str(e)[:100]}")
+                continue
+    
+    print(f"[RSS Monitor - Airline Disruptions] ✅ Found {len(all_disruptions)} disruptions")
+    return all_disruptions
+
+
+def extract_airline_from_title(title):
+    """Extract airline name from news headline"""
+    
+    # Comprehensive airline list (major carriers + Middle East carriers)
+    airlines = [
+        # Star Alliance
+        'Lufthansa', 'United Airlines', 'United', 'Air Canada', 'Turkish Airlines',
+        'Swiss', 'SWISS', 'Austrian Airlines', 'Austrian', 'Singapore Airlines',
+        
+        # SkyTeam
+        'Air France', 'KLM', 'Delta', 'Delta Airlines', 'Korean Air',
+        
+        # Oneworld
+        'British Airways', 'American Airlines', 'American', 'Cathay Pacific',
+        'Qantas', 'Qatar Airways', 'Iberia',
+        
+        # Middle East carriers
+        'Emirates', 'Etihad', 'flydubai', 'Air Arabia', 'Saudia',
+        'Gulf Air', 'Kuwait Airways', 'Royal Jordanian', 'Oman Air',
+        'Middle East Airlines', 'MEA',
+        
+        # Israeli carriers
+        'El Al', 'Arkia', 'Israir',
+        
+        # Low-cost carriers
+        'Wizz Air', 'Ryanair', 'EasyJet', 'Pegasus Airlines',
+        
+        # Other major carriers
+        'Air New Zealand', 'Ethiopian Airlines', 'EgyptAir', 'Egypt Air'
+    ]
+    
+    title_lower = title.lower()
+    
+    # Check each airline
+    for airline in airlines:
+        if airline.lower() in title_lower:
+            return airline
+    
+    # Try to extract from sentence structure
+    # Pattern: "[Airline] suspends/cancels/resumes"
+    import re
+    pattern = re.search(r'([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\s+(?:suspend|cancel|halt|resume)', title, re.IGNORECASE)
+    if pattern:
+        potential = pattern.group(1)
+        if len(potential) > 3 and potential not in ['United States', 'Middle East']:
+            return potential
+    
+    return "Unknown Airline"
+
+
+def extract_status_from_title(title):
+    """Extract flight status (Suspended/Cancelled/Resumed)"""
+    
+    title_lower = title.lower()
+    
+    if 'resume' in title_lower or 'restart' in title_lower or 'return' in title_lower:
+        return 'Resumed'
+    elif 'cancel' in title_lower:
+        return 'Cancelled'
+    elif 'suspend' in title_lower or 'halt' in title_lower or 'stop' in title_lower:
+        return 'Suspended'
+    else:
+        return 'Disrupted'
+
+
+def extract_duration_from_title(title):
+    """Extract duration (Until March, For 3 weeks, Indefinite, etc.)"""
+    
+    import re
+    
+    # Look for "until [date]"
+    until_match = re.search(r'until\s+([A-Za-z]+\s+\d{1,2}(?:,?\s+\d{4})?)', title, re.IGNORECASE)
+    if until_match:
+        return f"Until {until_match.group(1)}"
+    
+    # Look for specific months
+    months = ['January', 'February', 'March', 'April', 'May', 'June',
+              'July', 'August', 'September', 'October', 'November', 'December']
+    for month in months:
+        if month.lower() in title.lower():
+            year_match = re.search(r'\b(202[4-9])\b', title)
+            if year_match:
+                return f"Until {month} {year_match.group(1)}"
+            else:
+                return f"Until {month}"
+    
+    # Look for "for X days/weeks/months"
+    for_match = re.search(r'for\s+(\d+)\s+(day|week|month)s?', title, re.IGNORECASE)
+    if for_match:
+        num = for_match.group(1)
+        unit = for_match.group(2)
+        return f"For {num} {unit}{'s' if int(num) > 1 else ''}"
+    
+    # Look for "indefinite"
+    if 'indefinite' in title.lower():
+        return 'Indefinite'
+    
+    return 'Unknown'
+
+
+def parse_rss_date(pub_date):
+    """Parse RSS pub date to ISO format"""
+    
+    try:
+        if pub_date:
+            # RSS uses RFC 2822 format
+            from email.utils import parsedate_to_datetime
+            date_obj = parsedate_to_datetime(pub_date)
+            return date_obj.isoformat()
+    except:
+        pass
+    
+    # Fallback to current time
+    return datetime.now(timezone.utc).isoformat()
+    
 # ========================================
 # API ENDPOINTS
 # ========================================
@@ -4862,10 +5082,16 @@ def flight_cancellations():
     try:
         print("[Flight Cancellations] Starting scan...")
         
-        # NEW: Fetch airline disruptions from RSS monitor (Google News search for specific airlines)
+        # NEW: Fetch airline disruptions from RSS monitor
         print("[Flight Cancellations] Calling fetch_airline_disruptions()...")
         rss_disruptions = fetch_airline_disruptions()
         print(f"[Flight Cancellations] RSS monitor returned {len(rss_disruptions)} disruptions")
+
+# DEBUG: Print what we got
+if rss_disruptions:
+    print(f"[Flight Cancellations] First disruption: {rss_disruptions[0]}")
+else:
+    print("[Flight Cancellations] ⚠️ RSS monitor returned empty list!")
         
         # Search queries for Google News - Comprehensive Middle East coverage
         destinations = [
