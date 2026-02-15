@@ -692,7 +692,8 @@ def calculate_us_strike_probability(articles, days_analyzed=7, target='iran'):
                         'category': category,
                         'phrase': phrase,
                         'weight': weight,
-                        'article': title[:80]
+                        'article': title[:80],
+                        'article_url': article.get('url', '')  # ← ADD THIS!
                     })
     
     # Normalize US bonus (cap at ±20%)
@@ -857,15 +858,16 @@ def build_recent_headlines(israel_contributors, us_indicators, reverse_israel_in
             })
     
     # ========================================
+    # ========================================
     # 2. US STRIKE INDICATORS
     # ========================================
     for indicator in us_indicators[:5]:  # Top 5
-        article_title = indicator.get('article', '')
-        
-        # Find matching article by title
+        indicator_url = indicator.get('article_url', '')
+    
+        # Find matching article by URL (more reliable than title)
         matching_article = None
         for article in all_articles:
-            if article.get('title', '').lower().startswith(article_title.lower()[:40]):
+            if article.get('url') == indicator_url:
                 if article.get('url') not in seen_urls:
                     matching_article = article
                     break
@@ -889,13 +891,13 @@ def build_recent_headlines(israel_contributors, us_indicators, reverse_israel_in
     # 3. REVERSE THREAT INDICATORS (Iran → Israel/US)
     # ========================================
     for indicator in (reverse_israel_indicators + reverse_us_indicators)[:5]:  # Top 5 combined
-        # Find article by title
-        article_title = indicator.get('article', '')
-        
+        indicator_url = indicator.get('article_url', '')
+    
+        # Find matching article by URL (more reliable than title)
         matching_article = None
         for article in all_articles:
-            if article.get('title', '').lower().startswith(article_title.lower()[:40]):
-                if article.get('url') not in seen_urls:
+            if article.get('url') == indicator_url:
+               if article.get('url') not in seen_urls:
                     matching_article = article
                     break
         
@@ -1045,6 +1047,7 @@ def calculate_reverse_threat(articles, source_actor='iran', target_actor='israel
                         'phrase': phrase,
                         'weight': weight,
                         'article': article.get('title', '')[:80],
+                        'article_url': article.get('url', ''),  # ← ADD THIS!
                         'target_mentioned': target_in_content
                     })
                     
