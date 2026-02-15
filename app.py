@@ -121,6 +121,15 @@ CORS(app, resources={
         ],
         "methods": ["GET", "POST", "OPTIONS"],
         "allow_headers": ["Content-Type"]
+    },
+    r"/flight-cancellations": {  # ← ADD THIS!
+        "origins": [
+            "https://asifahanalytics.com",
+            "https://www.asifahanalytics.com",
+            "http://localhost:*"
+        ],
+        "methods": ["GET", "OPTIONS"],
+        "allow_headers": ["Content-Type"]
     }
 })
 
@@ -699,36 +708,6 @@ def calculate_reverse_threat(articles, source_actor='iran', target_actor='israel
     }
     
     # ========================================
-    # RETALIATION TRIGGER DETECTION
-    # ========================================
-    def detect_retaliation_trigger(israel_probability, us_probability):
-        """
-        If Israel/US strike probability is high, reverse threat increases
-        
-        Logic: Iran is MORE likely to threaten when under threat themselves
-        - If Israel prob > 60%, add +15% to reverse threat
-        - If US prob > 60%, add +15% to reverse threat
-        - Combined max bonus: +25%
-        """
-        bonus = 0
-        
-        if israel_probability > 0.60:
-            bonus += 0.15
-        elif israel_probability > 0.40:
-            bonus += 0.08
-        elif israel_probability > 0.20:
-            bonus += 0.03
-        
-        if us_probability > 0.60:
-            bonus += 0.15
-        elif us_probability > 0.40:
-            bonus += 0.08
-        elif us_probability > 0.20:
-            bonus += 0.03
-        
-        return min(bonus, 0.25)  # Cap at +25%
-    
-    # ========================================
     # SCORE CALCULATION WITH WEIGHTED CATEGORIES
     # ========================================
     threat_score = 0
@@ -797,14 +776,30 @@ def calculate_reverse_threat(articles, source_actor='iran', target_actor='israel
     base_probability = min(threat_score / 40.0, 0.60)
     
     # ========================================
-    # APPLY RETALIATION TRIGGER BONUS
+    # RETALIATION TRIGGER CALCULATION (INLINE)
     # ========================================
-    retaliation_bonus = detect_retaliation_trigger(israel_prob, us_prob)
+    retaliation_bonus = 0
+    
+    if israel_prob > 0.60:
+        retaliation_bonus += 0.15
+    elif israel_prob > 0.40:
+        retaliation_bonus += 0.08
+    elif israel_prob > 0.20:
+        retaliation_bonus += 0.03
+    
+    if us_prob > 0.60:
+        retaliation_bonus += 0.15
+    elif us_prob > 0.40:
+        retaliation_bonus += 0.08
+    elif us_prob > 0.20:
+        retaliation_bonus += 0.03
+    
+    retaliation_bonus = min(retaliation_bonus, 0.25)  # Cap at +25%
     
     # ========================================
     # FINAL PROBABILITY
     # ========================================
-    final_probability = min(base_probability + retaliation_bonus, 0.65)  # Cap at 65% (slightly higher than before)
+    final_probability = min(base_probability + retaliation_bonus, 0.65)  # Cap at 65%
     
     # ========================================
     # BUILD RESPONSE
