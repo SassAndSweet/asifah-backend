@@ -4575,45 +4575,63 @@ def api_iran_strike_probability():
                        articles_gdelt_he + articles_gdelt_fa + articles_reddit)
         
         # Calculate probability
-        scoring_result = calculate_threat_probability(all_articles, days, 'iran')
-        probability = scoring_result['probability']
-        momentum = scoring_result['momentum']
-        
-        # Timeline
-        if probability < 30:
-            timeline = "180+ Days"
-        elif probability < 50:
-            timeline = "91-180 Days"
-        elif probability < 70:
-            timeline = "31-90 Days"
-        else:
-            timeline = "0-30 Days"
-        
-        # Confidence
-        unique_sources = len(set(a.get('source', {}).get('name', 'Unknown') for a in all_articles))
-        if len(all_articles) >= 20 and unique_sources >= 8:
-            confidence = "High"
-        elif len(all_articles) >= 10 and unique_sources >= 5:
-            confidence = "Medium"
-        else:
-            confidence = "Low"
-        
-        # Build response
-        result = {
-            'success': True,
-            'probability': probability,
-            'timeline': timeline,
-            'confidence': confidence,
-            'momentum': momentum,
-            'total_articles': len(all_articles),
-            'unique_sources': unique_sources,
-            'recent_articles_48h': scoring_result['breakdown']['recent_articles_48h'],
-            'top_scoring_articles': scoring_result.get('top_scoring_articles', []),
-            'last_updated': datetime.now(timezone.utc).isoformat(),
-            'cached': False,
-            'version': '2.8.0'
-        }
-        
+scoring_result = calculate_threat_probability(all_articles, days, 'iran')
+probability = scoring_result['probability']
+momentum = scoring_result['momentum']
+
+# Timeline
+if probability < 30:
+    timeline = "180+ Days"
+elif probability < 50:
+    timeline = "91-180 Days"
+elif probability < 70:
+    timeline = "31-90 Days"
+else:
+    timeline = "0-30 Days"
+
+# Confidence
+unique_sources = len(set(a.get('source', {}).get('name', 'Unknown') for a in all_articles))
+if len(all_articles) >= 20 and unique_sources >= 8:
+    confidence = "High"
+elif len(all_articles) >= 10 and unique_sources >= 5:
+    confidence = "Medium"
+else:
+    confidence = "Low"
+
+# Calculate US strike + reverse threats for headlines
+israel_prob = probability / 100.0
+us_result = calculate_us_strike_probability(all_articles, days, 'iran')
+us_prob = us_result['probability']
+
+reverse_israel = calculate_reverse_threat(all_articles, 'iran', 'israel', israel_prob, us_prob)
+reverse_us = calculate_reverse_threat(all_articles, 'iran', 'us', israel_prob, us_prob)
+
+# Build recent headlines
+recent_headlines = build_recent_headlines(
+    scoring_result.get('top_contributors', []),
+    us_result.get('us_indicators', []),
+    reverse_israel.get('indicators', []),
+    reverse_us.get('indicators', []),
+    all_articles
+)
+
+# Build response
+result = {
+    'success': True,
+    'probability': probability,
+    'timeline': timeline,
+    'confidence': confidence,
+    'momentum': momentum,
+    'total_articles': len(all_articles),
+    'unique_sources': unique_sources,
+    'recent_articles_48h': scoring_result['breakdown']['recent_articles_48h'],
+    'top_scoring_articles': scoring_result.get('top_scoring_articles', []),
+    'recent_headlines': recent_headlines,  # ← NEW!
+    'last_updated': datetime.now(timezone.utc).isoformat(),
+    'cached': False,
+    'version': '2.8.0'
+}
+       
         # Update cache
         update_cache('iran', result)
         
@@ -4692,35 +4710,53 @@ def api_hezbollah_activity():
                        articles_gdelt_he + articles_reddit)
         
         # Calculate strike probability
-        scoring_result = calculate_threat_probability(all_articles, days, 'hezbollah')
-        probability = scoring_result['probability']
-        momentum = scoring_result['momentum']
-        
-        # Activity level as secondary metric
-        activity_level = min(100, (len(all_articles) * 2) + scoring_result['breakdown']['recent_articles_48h'] * 3)
-        
-        if activity_level >= 75:
-            activity_desc = "Very High"
-        elif activity_level >= 50:
-            activity_desc = "High"
-        elif activity_level >= 25:
-            activity_desc = "Moderate"
-        else:
-            activity_desc = "Low"
-        
-        result = {
-            'success': True,
-            'probability': probability,
-            'activity_level': int(activity_level),
-            'activity_description': activity_desc,
-            'momentum': momentum,
-            'total_articles': len(all_articles),
-            'recent_articles_48h': scoring_result['breakdown']['recent_articles_48h'],
-            'top_scoring_articles': scoring_result.get('top_scoring_articles', []),
-            'last_updated': datetime.now(timezone.utc).isoformat(),
-            'cached': False,
-            'version': '2.8.0'
-        }
+scoring_result = calculate_threat_probability(all_articles, days, 'hezbollah')
+probability = scoring_result['probability']
+momentum = scoring_result['momentum']
+
+# Activity level as secondary metric
+activity_level = min(100, (len(all_articles) * 2) + scoring_result['breakdown']['recent_articles_48h'] * 3)
+
+if activity_level >= 75:
+    activity_desc = "Very High"
+elif activity_level >= 50:
+    activity_desc = "High"
+elif activity_level >= 25:
+    activity_desc = "Moderate"
+else:
+    activity_desc = "Low"
+
+# Calculate US strike + reverse threats for headlines
+israel_prob = probability / 100.0
+us_result = calculate_us_strike_probability(all_articles, days, 'hezbollah')
+us_prob = us_result['probability']
+
+reverse_israel = calculate_reverse_threat(all_articles, 'hezbollah', 'israel', israel_prob, us_prob)
+reverse_us = calculate_reverse_threat(all_articles, 'hezbollah', 'us', israel_prob, us_prob)
+
+# Build recent headlines
+recent_headlines = build_recent_headlines(
+    scoring_result.get('top_contributors', []),
+    us_result.get('us_indicators', []),
+    reverse_israel.get('indicators', []),
+    reverse_us.get('indicators', []),
+    all_articles
+)
+
+result = {
+    'success': True,
+    'probability': probability,
+    'activity_level': int(activity_level),
+    'activity_description': activity_desc,
+    'momentum': momentum,
+    'total_articles': len(all_articles),
+    'recent_articles_48h': scoring_result['breakdown']['recent_articles_48h'],
+    'top_scoring_articles': scoring_result.get('top_scoring_articles', []),
+    'recent_headlines': recent_headlines,  # ← NEW!
+    'last_updated': datetime.now(timezone.utc).isoformat(),
+    'cached': False,
+    'version': '2.8.0'
+}
         
         update_cache('hezbollah', result)
         
@@ -4795,40 +4831,41 @@ def api_houthis_threat():
         all_articles = (articles_en + articles_gdelt_en + articles_gdelt_ar + articles_reddit)
         
         # Calculate strike probability
-        scoring_result = calculate_threat_probability(all_articles, days, 'houthis')
-        probability = scoring_result['probability']
-        momentum = scoring_result['momentum']
-        
-        # Shipping incidents as secondary metric
-        shipping_incidents = 0
-        for article in all_articles:
-            text = f"{article.get('title', '')} {article.get('description', '')}".lower()
-            if any(word in text for word in ['shipping', 'red sea', 'attacked', 'strike', 'missile', 'drone']):
-                shipping_incidents += 1
-        
-        # Threat description based on probability
-        if probability >= 75:
-            threat_desc = "Critical"
-        elif probability >= 50:
-            threat_desc = "High"
-        elif probability >= 25:
-            threat_desc = "Moderate"
-        else:
-            threat_desc = "Low"
-        
-        result = {
-            'success': True,
-            'probability': probability,
-            'threat_description': threat_desc,
-            'momentum': momentum,
-            'shipping_incidents': shipping_incidents,
-            'total_articles': len(all_articles),
-            'recent_articles_48h': scoring_result['breakdown']['recent_articles_48h'],
-            'top_scoring_articles': scoring_result.get('top_scoring_articles', []),
-            'last_updated': datetime.now(timezone.utc).isoformat(),
-            'cached': False,
-            'version': '2.8.0'
-        }
+scoring_result = calculate_threat_probability(all_articles, days, 'houthis')
+probability = scoring_result['probability']
+momentum = scoring_result['momentum']
+
+# Shipping incidents as secondary metric
+shipping_incidents = 0
+for article in all_articles:
+    text = f"{article.get('title', '')} {article.get('description', '')}".lower()
+    if any(word in text for word in ['shipping', 'red sea', 'attacked', 'strike', 'missile', 'drone']):
+        shipping_incidents += 1
+
+# Threat description based on probability
+if probability >= 75:
+    threat_desc = "Critical"
+elif probability >= 50:
+    threat_desc = "High"
+elif probability >= 25:
+    threat_desc = "Moderate"
+else:
+    threat_desc = "Low"
+
+# Calculate US strike + reverse threats for headlines
+israel_prob = probability / 100.0
+us_result = calculate_us_strike_probability(all_articles, days, 'houthis')
+us_prob = us_result['probability']
+
+reverse_israel = calculate_reverse_threat(all_articles, 'houthis', 'israel', israel_prob, us_prob)
+# Note: Houthis don't have reverse_us threat (they don't directly threaten US)
+# But we'll include it for completeness in case the algorithm finds something
+reverse_us = calculate_reverse_threat(all_articles, 'houthis', 'us', israel_prob, us_prob)
+
+# Build recent headlines
+recent_headlines = build_recent_headlines(
+    scoring_result.get('top_contributors', []),
+    us
         
         update_cache('houthis', result)
         
@@ -4904,55 +4941,73 @@ def api_syria_conflict():
         all_articles = (articles_en + articles_gdelt_en + articles_gdelt_ar + articles_reddit)
         
         # Calculate strike probability
-        scoring_result = calculate_threat_probability(all_articles, days, 'iran')
-        probability = scoring_result['probability']
-        momentum = scoring_result['momentum']
-        
-        # Calculate conflict intensity as secondary metric
-        intensity_score = 0
-        escalation_articles = 0
-        
-        for article in all_articles:
-            text = f"{article.get('title', '')} {article.get('description', '')}".lower()
-            
-            if any(word in text for word in ['strike', 'attack', 'bombing', 'airstrike', 'killed', 'casualties']):
-                escalation_articles += 1
-                intensity_score += 3
-            
-            try:
-                pub_date = article.get('publishedAt', '')
-                if pub_date:
-                    pub_dt = datetime.fromisoformat(pub_date.replace('Z', '+00:00'))
-                    age_hours = (datetime.now(timezone.utc) - pub_dt).total_seconds() / 3600
-                    if age_hours <= 48:
-                        intensity_score += 2
-            except:
-                pass
-        
-        intensity = min(100, int(intensity_score / max(len(all_articles), 1) * 10))
-        
-        if intensity >= 75:
-            intensity_desc = "Very High"
-        elif intensity >= 50:
-            intensity_desc = "High"
-        elif intensity >= 25:
-            intensity_desc = "Moderate"
-        else:
-            intensity_desc = "Low"
-        
-        result = {
-            'success': True,
-            'probability': probability,
-            'intensity': intensity,
-            'intensity_description': intensity_desc,
-            'momentum': momentum,
-            'total_articles': len(all_articles),
-            'escalation_articles': escalation_articles,
-            'top_scoring_articles': scoring_result.get('top_scoring_articles', []),
-            'last_updated': datetime.now(timezone.utc).isoformat(),
-            'cached': False,
-            'version': '2.8.0'
-        }
+scoring_result = calculate_threat_probability(all_articles, days, 'syria')  # ← FIXED: was 'iran', should be 'syria'
+probability = scoring_result['probability']
+momentum = scoring_result['momentum']
+
+# Calculate conflict intensity as secondary metric
+intensity_score = 0
+escalation_articles = 0
+
+for article in all_articles:
+    text = f"{article.get('title', '')} {article.get('description', '')}".lower()
+    
+    if any(word in text for word in ['strike', 'attack', 'bombing', 'airstrike', 'killed', 'casualties']):
+        escalation_articles += 1
+        intensity_score += 3
+    
+    try:
+        pub_date = article.get('publishedAt', '')
+        if pub_date:
+            pub_dt = datetime.fromisoformat(pub_date.replace('Z', '+00:00'))
+            age_hours = (datetime.now(timezone.utc) - pub_dt).total_seconds() / 3600
+            if age_hours <= 48:
+                intensity_score += 2
+    except:
+        pass
+
+intensity = min(100, int(intensity_score / max(len(all_articles), 1) * 10))
+
+if intensity >= 75:
+    intensity_desc = "Very High"
+elif intensity >= 50:
+    intensity_desc = "High"
+elif intensity >= 25:
+    intensity_desc = "Moderate"
+else:
+    intensity_desc = "Low"
+
+# Calculate US strike + reverse threats for headlines
+israel_prob = probability / 100.0
+us_result = calculate_us_strike_probability(all_articles, days, 'syria')
+us_prob = us_result['probability']
+
+reverse_israel = calculate_reverse_threat(all_articles, 'syria', 'israel', israel_prob, us_prob)
+reverse_us = calculate_reverse_threat(all_articles, 'syria', 'us', israel_prob, us_prob)
+
+# Build recent headlines
+recent_headlines = build_recent_headlines(
+    scoring_result.get('top_contributors', []),
+    us_result.get('us_indicators', []),
+    reverse_israel.get('indicators', []),
+    reverse_us.get('indicators', []),
+    all_articles
+)
+
+result = {
+    'success': True,
+    'probability': probability,
+    'intensity': intensity,
+    'intensity_description': intensity_desc,
+    'momentum': momentum,
+    'total_articles': len(all_articles),
+    'escalation_articles': escalation_articles,
+    'top_scoring_articles': scoring_result.get('top_scoring_articles', []),
+    'recent_headlines': recent_headlines,  # ← NEW!
+    'last_updated': datetime.now(timezone.utc).isoformat(),
+    'cached': False,
+    'version': '2.8.0'
+}
         
         update_cache('syria', result)
         
