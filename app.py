@@ -114,15 +114,17 @@ def is_cache_fresh(cached_data, max_age_hours=6):
 app = Flask(__name__)
 CORS(app, resources={
     r"/api/*": {
-        "origins": [
-            "https://asifahanalytics.com",
-            "https://www.asifahanalytics.com",
-            "http://localhost:*"
-        ],
+        "origins": [...],
         "methods": ["GET", "POST", "OPTIONS"],
         "allow_headers": ["Content-Type"]
     },
-    r"/flight-cancellations": {  # ← ADD THIS!
+    r"/flight-cancellations": {
+        "origins": [...],
+        "methods": ["GET", "OPTIONS"],
+        "allow_headers": ["Content-Type"]
+    },
+    # ADD THIS:
+    r"/rate-limit": {
         "origins": [
             "https://asifahanalytics.com",
             "https://www.asifahanalytics.com",
@@ -4231,10 +4233,29 @@ def api_threat(target):
         all_articles.extend(rss_articles)
         print(f"[RSS] Total articles with RSS feeds: {len(all_articles)}")
         
+        # Calculate Israel strike probability (main algorithm)
         scoring_result = calculate_threat_probability(all_articles, days, target)
         probability = scoring_result['probability']
         momentum = scoring_result['momentum']
         breakdown = scoring_result['breakdown']
+        
+        # Calculate US strike probability
+        us_result = calculate_us_strike_probability(all_articles, days, target)
+        us_prob = us_result['probability']
+        
+        # Calculate reverse threats for headlines
+        israel_prob = probability / 100.0
+        reverse_israel = calculate_reverse_threat(all_articles, target, 'israel', israel_prob, us_prob)
+        reverse_us = calculate_reverse_threat(all_articles, target, 'us', israel_prob, us_prob)
+        
+        # Build recent headlines
+        recent_headlines = build_recent_headlines(
+            scoring_result.get('top_contributors', []),
+            us_result.get('us_indicators', []),
+            reverse_israel.get('indicators', []),
+            reverse_us.get('indicators', []),
+            all_articles
+        )
         
         if probability < 30:
             timeline = "180+ Days"
@@ -4302,10 +4323,11 @@ def api_threat(target):
             'deescalation_count': breakdown['deescalation_count'],
             'scoring_breakdown': breakdown,
             'top_scoring_articles': top_articles,
+            'recent_headlines': recent_headlines,  # ← NEW: Added headlines
             'escalation_keywords': ESCALATION_KEYWORDS,
             'target_keywords': TARGET_KEYWORDS[target]['keywords'],
             'cached': False,
-            'version': '2.7.0'
+            'version': '2.8.0'
         })
         
     except Exception as e:
