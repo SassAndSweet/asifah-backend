@@ -5353,7 +5353,158 @@ def parse_notam(notam_data, location_info):
     except Exception as e:
         print(f"NOTAM parse error: {e}")
         return None
-
+        
+@app.route('/api/threat-matrix/<target>', methods=['GET'])
+def api_threat_matrix(target):
+    """
+    Enhanced threat matrix with multi-directional probabilities
+    Returns: Israel strike, US strike, reverse threats, combined probability
+    """
+    try:
+        days = int(request.args.get('days', 7))
+        
+        if not check_rate_limit():
+            return jsonify({
+                'success': False,
+                'error': 'Rate limit reached',
+                'rate_limited': True
+            }), 200
+        
+        if target not in TARGET_KEYWORDS:
+            return jsonify({
+                'success': False,
+                'error': f"Invalid target: {target}"
+            }), 400
+        
+        # Fetch articles (same as existing endpoint)
+        query = ' OR '.join(TARGET_KEYWORDS[target]['keywords'])
+        
+        articles_en = fetch_newsapi_articles(query, days)
+        articles_gdelt_en = fetch_gdelt_articles(query, days, 'eng')
+        articles_gdelt_ar = fetch_gdelt_articles(query, days, 'ara')
+        articles_gdelt_he = fetch_gdelt_articles(query, days, 'heb')
+        
+        articles_gdelt_fa = []
+        if target == 'iran':
+            articles_gdelt_fa = fetch_gdelt_articles(query, days, 'fas')
+        
+        articles_reddit = fetch_reddit_posts(
+            target,
+            TARGET_KEYWORDS[target]['reddit_keywords'],
+            days
+        )
+        
+        all_articles = (articles_en + articles_gdelt_en + articles_gdelt_ar + 
+                       articles_gdelt_he + articles_gdelt_fa + articles_reddit)
+        
+        # Calculate Israel strike probability (existing algorithm)
+        israel_result = calculate_threat_probability(all_articles, days, target)
+        israel_prob = israel_result['probability'] / 100.0
+        
+        # Calculate US strike probability (new algorithm)
+        us_result = calculate_us_strike_probability(all_articles, days, target)
+        us_prob = us_result['probability']
+        
+        # Detect coordination between US and Israel
+        coordination = detect_coordination_signals(israel_prob, us_prob, all_articles)
+        
+        # Calculate combined probability
+        combined_result = calculate_combined_probability(israel_prob, us_prob, coordination)
+        
+        # Calculate reverse threats (target → Israel, target → US)
+        reverse_israel = calculate_reverse_threat(all_articles, target, 'israel')
+        reverse_us = calculate_reverse_threat(all_articles, target, 'us')
+        
+        # Build response
+        response = {
+            'success': True,
+            'target': target,
+            'target_flag': {
+                'iran': '🇮🇷',
+                'hezbollah': '🇱🇧',
+                'houthis': '🇾🇪',
+                'syria': '🇸🇾'
+            }.get(target, '🏴'),
+            'days_analyzed': days,
+            'total_articles': len(all_articles),
+            
+            # Combined probability (headline number)
+            'combined_probability': {
+                'value': round(combined_result['combined'] * 100, 1),
+                'base': round(combined_result['base_independent'] * 100, 1),
+                'coordination_bonus': round(combined_result['coordination_bonus'], 1),
+                'coordination_level': combined_result['coordination_level'],
+                'risk_level': (
+                    'very_high' if combined_result['combined'] > 0.70 else
+                    'high' if combined_result['combined'] > 0.50 else
+                    'moderate' if combined_result['combined'] > 0.30 else
+                    'low'
+                )
+            },
+            
+            # Incoming threats
+            'incoming_threats': {
+                'israel': {
+                    'probability': round(israel_prob * 100, 1),
+                    'risk_level': (
+                        'very_high' if israel_prob > 0.70 else
+                        'high' if israel_prob > 0.50 else
+                        'moderate' if israel_prob > 0.30 else
+                        'low'
+                    ),
+                    'flag': '🇮🇱',
+                    'indicators': israel_result.get('top_scoring_articles', [])[:3]
+                },
+                'us': {
+                    'probability': round(us_prob * 100, 1),
+                    'risk_level': (
+                        'very_high' if us_prob > 0.70 else
+                        'high' if us_prob > 0.50 else
+                        'moderate' if us_prob > 0.30 else
+                        'low'
+                    ),
+                    'flag': '🇺🇸',
+                    'indicators': us_result.get('us_indicators', [])[:3],
+                    'adjustment': round(us_result.get('us_adjustment', 0) * 100, 1)
+                }
+            },
+            
+            # Outgoing threats
+            'outgoing_threats': {
+                'vs_israel': {
+                    'probability': round(reverse_israel['probability'] * 100, 1),
+                    'risk_level': reverse_israel['risk_level'],
+                    'target_flag': '🇮🇱',
+                    'indicators': reverse_israel.get('indicators', [])[:3]
+                },
+                'vs_us': {
+                    'probability': round(reverse_us['probability'] * 100, 1),
+                    'risk_level': reverse_us['risk_level'],
+                    'target_flag': '🇺🇸',
+                    'indicators': reverse_us.get('indicators', [])[:3]
+                }
+            },
+            
+            # Coordination details
+            'coordination': {
+                'level': coordination['level'],
+                'factor': coordination['factor'],
+                'signals_detected': coordination['signals_detected'],
+                'indicators': coordination.get('indicators', [])
+            },
+            
+            'version': '2.8.0-multi-actor'
+        }
+        
+        return jsonify(response)
+        
+    except Exception as e:
+        print(f"[Threat Matrix] Error: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+        
 @app.route('/api/polymarket', methods=['GET'])
 def polymarket_proxy():
     """
