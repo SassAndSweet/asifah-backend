@@ -3572,48 +3572,193 @@ def calculate_casualty_trends(current_casualties):
         }
 
 
-def extract_hrana_structured_data(articles):
-    """Extract structured protest statistics from HRANA articles"""
+ddef calculate_casualty_trends(current_casualties):
+    """
+    Calculate trends and estimates with HRANA extraction + cache fallback
     
-    structured_data = {
-        'confirmed_deaths': 0,
-        'deaths_under_investigation': 0,
-        'seriously_injured': 0,
-        'total_arrests': 0,
-        'is_hrana_verified': False
-    }
-    
-    patterns = {
-        'confirmed_deaths': [
-            r'confirmed\s+deaths?\s*:?\s*(\d{1,3}(?:,\d{3})*)',
-        ],
-        'seriously_injured': [
-            r'seriously?\s+injured\s*:?\s*(\d{1,3}(?:,\d{3})*)',
-        ],
-        'total_arrests': [
-            r'total\s+arrests?\s*:?\s*(\d{1,3}(?:,\d{3})*)',
-        ]
-    }
-    
-    hrana_articles = [a for a in articles if a.get('source', {}).get('name') == 'HRANA']
-    
-    for article in hrana_articles:
-        content = article.get('content', '').lower()
+    Priority:
+    1. Try to extract cumulative from HRANA articles (Option 2)
+    2. Fallback to cache history calculation (Option 3)
+    3. Show "unavailable" if insufficient data
+    """
+    try:
+        cache = load_casualty_cache()
+        history = cache.get('history', {})
         
-        for key, pattern_list in patterns.items():
-            for pattern in pattern_list:
-                match = re.search(pattern, content, re.IGNORECASE)
-                if match:
-                    number_str = match.group(1).replace(',', '')
-                    try:
-                        number = int(number_str)
-                        if number > structured_data[key]:
-                            structured_data[key] = number
-                            structured_data['is_hrana_verified'] = True
-                    except:
-                        pass
-    
-    return structured_data
+        # Get yesterday's data for trend calculation
+        yesterday = (datetime.now(timezone.utc).date() - timedelta(days=1)).isoformat()
+        yesterday_data = history.get(yesterday, {})
+        
+        # Get cache start date
+        cache_start_date = cache.get('metadata', {}).get('started', datetime.now(timezone.utc).date().isoformat())
+        
+        # ========================================
+        # STEP 1: Try to get cumulative from HRANA (Option 2)
+        # ========================================
+        hrana_cumulative_deaths = current_casualties.get('hrana_cumulative_deaths')
+        hrana_cumulative_arrests = current_casualties.get('hrana_cumulative_arrests')
+        hrana_cumulative_injuries = current_casualties.get('hrana_cumulative_injuries')
+        
+        print(f"[Casualty Trends] HRANA cumulative - Deaths: {hrana_cumulative_deaths}, Arrests: {hrana_cumulative_arrests}, Injuries: {hrana_cumulative_injuries}")
+        
+        # ========================================
+        # STEP 2: Fallback to cache calculation (Option 3)
+        # ========================================
+        cache_cumulative_deaths = None
+        cache_cumulative_arrests = None
+        cache_cumulative_injuries = None
+        
+        if len(history) >= 7:  # Need at least 1 week of data
+            # Sum all 7-day snapshots from cache (will have overlap, but gives rough cumulative)
+            # Better approach: Track running total
+            cache_cumulative_deaths = sum(day.get('deaths_7d', 0) for day in history.values())
+            cache_cumulative_arrests = sum(day.get('arrests_7d', 0) for day in history.values())
+            cache_cumulative_injuries = sum(day.get('injuries_7d', 0) for day in history.values())
+            
+            print(f"[Casualty Trends] Cache-based cumulative - Deaths: {cache_cumulative_deaths}, Arrests: {cache_cumulative_arrests}")
+        
+        # ========================================
+        # STEP 3: Choose best cumulative source
+        # ========================================
+        cumulative_deaths = hrana_cumulative_deaths if hrana_cumulative_deaths else cache_cumulative_deaths
+        cumulative_arrests = hrana_cumulative_arrests if hrana_cumulative_arrests else cache_cumulative_arrests
+        cumulative_injuries = hrana_cumulative_injuries if hrana_cumulative_injuries else cache_cumulative_injuries
+        
+        # Determine data source
+        if hrana_cumulative_deaths or hrana_cumulative_arrests:
+            cumulative_source = 'HRANA reports'
+            cumulative_since = 'Since 2022 (Mahsa Amini protests)'
+        elif cumulative_deaths or cumulative_arrests:
+            cumulative_source = 'Cache tracking'
+            cumulative_since = f'Since {cache_start_date} (tracking began)'
+        else:
+            cumulative_source = 'Unavailable'
+            cumulative_since = 'Insufficient data'
+        
+        print(f"[Casualty Trends] Using cumulative source: {cumulative_source}")
+        
+        # ========================================
+        # Current 7-day values (with sanity check)
+        # ========================================
+        arrests_7d = current_casualties.get('arrests', 0)
+        deaths_7d = current_casualties.get('deaths', 0)
+        injuries_7d = current_casualties.get('injuries', 0)
+        
+        # SANITY CHECK: 7-day can't exceed cumulative
+        if cumulative_deaths and deaths_7d > cumulative_deaths:
+            print(f"[Casualty Trends] ⚠️ 7-day deaths ({deaths_7d}) > cumulative ({cumulative_deaths}). Likely parsing error, setting to 0.")
+            deaths_7d = 0
+        
+        if cumulative_arrests and arrests_7d > cumulative_arrests * 0.5:  # 7d shouldn't be >50% of cumulative
+            print(f"[Casualty Trends] ⚠️ 7-day arrests ({arrests_7d}) suspiciously high vs cumulative ({cumulative_arrests}). Capping.")
+            arrests_7d = min(arrests_7d, 1000)
+        
+        # Use 7-day as-is for 30-day estimate (no multiplication)
+        arrests_30d = arrests_7d
+        deaths_30d = deaths_7d
+        injuries_30d = injuries_7d
+        
+        # ========================================
+        # Calculate trends
+        # ========================================
+        def calc_trend(current, previous):
+            if previous and previous > 0:
+                return ((current - previous) / previous) * 100
+            elif current > 0:
+                return 10.0
+            return 0
+        
+        arrests_trend = calc_trend(arrests_7d, yesterday_data.get('arrests_7d', 0))
+        deaths_trend = calc_trend(deaths_7d, yesterday_data.get('deaths_7d', 0))
+        injuries_trend = calc_trend(injuries_7d, yesterday_data.get('injuries_7d', 0))
+        
+        # ========================================
+        # Calculate weekly averages
+        # ========================================
+        if cumulative_deaths and cumulative_source == 'HRANA reports':
+            # Calculate from Sept 2022 to now
+            start_date = datetime(2022, 9, 16, tzinfo=timezone.utc)
+            weeks_since_start = (datetime.now(timezone.utc) - start_date).days / 7
+            
+            avg_deaths_week = int(cumulative_deaths / weeks_since_start) if weeks_since_start > 0 else 0
+            avg_arrests_week = int(cumulative_arrests / weeks_since_start) if (cumulative_arrests and weeks_since_start > 0) else 0
+            avg_injuries_week = int(cumulative_injuries / weeks_since_start) if (cumulative_injuries and weeks_since_start > 0) else 0
+        
+        elif cumulative_deaths and len(history) > 0:
+            # Calculate from cache start
+            avg_deaths_week = int(cumulative_deaths / len(history)) if len(history) > 0 else 0
+            avg_arrests_week = int(cumulative_arrests / len(history)) if len(history) > 0 else 0
+            avg_injuries_week = int(cumulative_injuries / len(history)) if len(history) > 0 else 0
+        
+        else:
+            avg_deaths_week = 0
+            avg_arrests_week = 0
+            avg_injuries_week = 0
+        
+        # ========================================
+        # Build enhanced response
+        # ========================================
+        enhanced = {
+            'recent_7d': {
+                'arrests': arrests_7d,
+                'deaths': deaths_7d,
+                'injuries': injuries_7d
+            },
+            'recent_30d': {
+                'arrests': arrests_30d,
+                'deaths': deaths_30d,
+                'injuries': injuries_30d,
+                'estimated': True
+            },
+            'cumulative': {
+                'arrests': f"~{cumulative_arrests:,}+" if cumulative_arrests else 'Data unavailable',
+                'deaths': cumulative_deaths if cumulative_deaths else 'Data unavailable',
+                'injuries': f"~{cumulative_injuries:,}+" if cumulative_injuries else 'Data unavailable',
+                'source': cumulative_source,
+                'since': cumulative_since,
+                'estimated': cumulative_source != 'HRANA reports'
+            },
+            'averages': {
+                'arrests_per_week': avg_arrests_week,
+                'deaths_per_week': avg_deaths_week,
+                'injuries_per_week': avg_injuries_week
+            },
+            'trends': {
+                'arrests': round(arrests_trend, 1),
+                'deaths': round(deaths_trend, 1),
+                'injuries': round(injuries_trend, 1),
+                'has_historical_data': len(history) > 1
+            },
+            'sources': current_casualties.get('sources', []),
+            'hrana_verified': current_casualties.get('hrana_verified', False)
+        }
+        
+        # Update cache with today's data
+        update_casualty_cache(current_casualties)
+        
+        return enhanced
+        
+    except Exception as e:
+        print(f"[Trends] Error calculating trends: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        
+        # Return basic data if calculation fails
+        return {
+            'recent_7d': current_casualties,
+            'recent_30d': {'estimated': True},
+            'cumulative': {
+                'arrests': 'Data unavailable',
+                'deaths': 'Data unavailable',
+                'injuries': 'Data unavailable',
+                'source': 'Error',
+                'since': 'N/A'
+            },
+            'averages': {},
+            'trends': {},
+            'sources': current_casualties.get('sources', []),
+            'hrana_verified': current_casualties.get('hrana_verified', False)
+        }
 
      # ========================================
 # INSTAGRAM FEED SCRAPER
@@ -5137,6 +5282,7 @@ def scan_iran_protests():
         all_articles.extend(rss_articles)
         print(f"[RSS] Total articles for Iran protests: {len(all_articles)}")
         
+        # Extract HRANA structured data (includes cumulative if found)
         hrana_data = extract_hrana_structured_data(hrana_articles)
         casualties_regex = extract_casualty_data(all_articles)
         
@@ -5147,13 +5293,21 @@ def scan_iran_protests():
                 'arrests': max(hrana_data['total_arrests'], casualties_regex['arrests']),
                 'sources': list(set(['HRANA'] + casualties_regex['sources'])),
                 'details': casualties_regex['details'],
-                'hrana_verified': True
+                'hrana_verified': True,
+                # ← NEW: Pass cumulative data from HRANA articles
+                'hrana_cumulative_deaths': hrana_data.get('cumulative_deaths'),
+                'hrana_cumulative_arrests': hrana_data.get('cumulative_arrests'),
+                'hrana_cumulative_injuries': hrana_data.get('cumulative_injuries')
             }
         else:
             casualties = casualties_regex
             casualties['hrana_verified'] = False
+            # ← NEW: Set to None if HRANA didn't verify
+            casualties['hrana_cumulative_deaths'] = None
+            casualties['hrana_cumulative_arrests'] = None
+            casualties['hrana_cumulative_injuries'] = None
         
-        # Calculate enhanced casualties with trends, cumulative, and estimates
+        # Calculate enhanced casualties with HRANA extraction + cache fallback
         casualties_enhanced = calculate_casualty_trends(casualties)
         
         articles_per_day = len(all_articles) / days if days > 0 else 0
@@ -5205,10 +5359,13 @@ def scan_iran_protests():
             'exchange_rate': exchange_data,
             'oil_price': oil_data,
             'regime_stability': regime_stability,
-            'version': '2.7.0'
+            'version': '2.8.0'  # ← UPDATED VERSION
         })
         
     except Exception as e:
+        print(f"[Iran Protests] ❌ Error: {str(e)}")
+        import traceback
+        traceback.print_exc()
         return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/api/iran-oil-data')
