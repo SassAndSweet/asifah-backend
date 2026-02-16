@@ -5155,6 +5155,88 @@ def clear_cache():
             'error': str(e)
         }), 500
 
+def extract_hrana_structured_data(hrana_articles):
+    """
+    Extract structured casualty data from HRANA articles
+    Looks for cumulative totals and verified numbers
+    """
+    result = {
+        'is_hrana_verified': False,
+        'confirmed_deaths': 0,
+        'seriously_injured': 0,
+        'total_arrests': 0,
+        'cumulative_deaths': None,
+        'cumulative_arrests': None,
+        'cumulative_injuries': None
+    }
+    
+    if not hrana_articles:
+        return result
+    
+    for article in hrana_articles:
+        title = (article.get('title') or '').lower()
+        description = (article.get('description') or '').lower()
+        content = (article.get('content') or '').lower()
+        text = f"{title} {description} {content}"
+        
+        # Look for cumulative numbers in HRANA reports
+        # HRANA often publishes running totals
+        
+        # Deaths
+        death_patterns = [
+            r'(\d+(?:,\d{3})*)\s+(?:people\s+)?(?:killed|dead|deaths)',
+            r'(?:killed|death toll|deaths?)[\s:]+(\d+(?:,\d{3})*)',
+            r'(\d+(?:,\d{3})*)\s+(?:protesters?\s+)?(?:killed|shot dead)'
+        ]
+        
+        for pattern in death_patterns:
+            match = re.search(pattern, text)
+            if match:
+                num = int(match.group(1).replace(',', ''))
+                if num > result['confirmed_deaths']:
+                    result['confirmed_deaths'] = num
+                    result['is_hrana_verified'] = True
+                # Check if this looks like a cumulative total (large number)
+                if num > 100 and result['cumulative_deaths'] is None:
+                    result['cumulative_deaths'] = num
+        
+        # Arrests
+        arrest_patterns = [
+            r'(\d+(?:,\d{3})*)\s+(?:people\s+)?(?:arrested|detained)',
+            r'(?:arrested|detained|arrests?)[\s:]+(\d+(?:,\d{3})*)',
+            r'(\d+(?:,\d{3})*)\s+(?:protesters?\s+)?(?:arrested|taken into custody)'
+        ]
+        
+        for pattern in arrest_patterns:
+            match = re.search(pattern, text)
+            if match:
+                num = int(match.group(1).replace(',', ''))
+                if num > result['total_arrests']:
+                    result['total_arrests'] = num
+                    result['is_hrana_verified'] = True
+                if num > 500 and result['cumulative_arrests'] is None:
+                    result['cumulative_arrests'] = num
+        
+        # Injuries
+        injury_patterns = [
+            r'(\d+(?:,\d{3})*)\s+(?:people\s+)?(?:injured|wounded)',
+            r'(?:injured|wounded|injuries?)[\s:]+(\d+(?:,\d{3})*)'
+        ]
+        
+        for pattern in injury_patterns:
+            match = re.search(pattern, text)
+            if match:
+                num = int(match.group(1).replace(',', ''))
+                if num > result['seriously_injured']:
+                    result['seriously_injured'] = num
+                    result['is_hrana_verified'] = True
+                if num > 100 and result['cumulative_injuries'] is None:
+                    result['cumulative_injuries'] = num
+    
+    print(f"[HRANA Structured] Verified: {result['is_hrana_verified']}, Deaths: {result['confirmed_deaths']}, Arrests: {result['total_arrests']}, Injuries: {result['seriously_injured']}")
+    
+    return result
+
 @app.route('/scan-iran-protests', methods=['GET'])
 def scan_iran_protests():
     """Iran protests endpoint with regime stability calculation"""
