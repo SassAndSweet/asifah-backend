@@ -2746,19 +2746,17 @@ def calculate_regime_stability(exchange_data, protest_data, oil_data=None):
     """
     Calculate Iran regime stability score (0-100)
     
-    Formula v2.6.7:
+    Formula v2.9.0 (FIXED):
     Stability = Base(50)
                 + Military Strength Baseline(+30)
-                - (Rial Devaluation Impact × 1.5)  [Rebalanced from ×3 in v2.6.1]
-                - (Protest Intensity × 3)
-                - (Arrest Rate Impact × 2)
+                + Low Protest Bonus (when intensity < 20%)  # ← NEW!
+                - (Rial Devaluation Impact × 0.15)
+                - (Protest Intensity × 0.3)
+                - (Arrest Rate Impact × 0.2)
                 + (Oil Price Impact ±5)
                 + (Time Decay Bonus)
     
     Lower scores = Higher instability/regime stress
-    
-    Note: Rial weight reduced to 0.15 (from 0.3) to reflect that regime has survived
-    extreme currency devaluation - currency collapse is critical but not immediately fatal.
     """
     
     base_score = 50
@@ -2779,7 +2777,7 @@ def calculate_regime_stability(exchange_data, protest_data, oil_data=None):
         oil_price_impact = (oil_deviation / 10) * 0.5
         oil_price_impact = max(-5, min(5, oil_price_impact))
         
-        print(f"[Regime Stability] Oil price: ${oil_price:.2f} (baseline: ${baseline_oil}) → Impact: {oil_price_impact:+.1f}")
+        print(f"[Regime Stability] Oil price: ${oil_price:.2f} → Impact: {oil_price_impact:+.1f}")
     
     # ========================================
     # CURRENCY DEVALUATION IMPACT
@@ -2791,18 +2789,24 @@ def calculate_regime_stability(exchange_data, protest_data, oil_data=None):
         baseline_rate = 42000
         
         devaluation_pct = ((current_rate - baseline_rate) / baseline_rate) * 100
-        rial_devaluation_impact = (devaluation_pct / 10) * 0.15  # Reduced from 0.3 to 0.15 (v2.6.7)
+        rial_devaluation_impact = (devaluation_pct / 10) * 0.15
         
         print(f"[Regime Stability] Rial devaluation: {devaluation_pct:.1f}% → Impact: -{rial_devaluation_impact:.1f}")
     
     # ========================================
-    # PROTEST INTENSITY IMPACT
+    # PROTEST INTENSITY IMPACT (WITH LOW-PROTEST BONUS)
     # ========================================
     protest_intensity_impact = 0
-    arrest_rate_impact = 0
+    low_protest_bonus = 0  # ← NEW!
     
     if protest_data:
         intensity = protest_data.get('intensity', 0)
+        
+        # ← NEW: When protests are VERY low (< 20%), give a stability BONUS
+        if intensity < 20:
+            low_protest_bonus = 10  # +10 points for quiet period
+            print(f"[Regime Stability] ⭐ Low protest bonus: +{low_protest_bonus}")
+        
         protest_intensity_impact = (intensity / 10) * 0.3
         
         arrests = protest_data.get('casualties', {}).get('arrests', 0)
@@ -2810,6 +2814,8 @@ def calculate_regime_stability(exchange_data, protest_data, oil_data=None):
         
         print(f"[Regime Stability] Protest intensity: {intensity}/100 → Impact: -{protest_intensity_impact:.1f}")
         print(f"[Regime Stability] Arrests: {arrests} → Impact: -{arrest_rate_impact:.1f}")
+    else:
+        arrest_rate_impact = 0
     
     # ========================================
     # TIME DECAY BONUS
@@ -2827,11 +2833,13 @@ def calculate_regime_stability(exchange_data, protest_data, oil_data=None):
             print(f"[Regime Stability] Quiet period detected → Bonus: +{time_decay_bonus}")
     
     # ========================================
-    # FINAL SCORE CALCULATION
+    # FINAL SCORE CALCULATION (FIXED)
     # ========================================
-    stability_score = (base_score + military_strength_baseline + oil_price_impact - 
+    stability_score = (base_score + military_strength_baseline + oil_price_impact +
+                      low_protest_bonus +  # ← NEW!
+                      time_decay_bonus -
                       rial_devaluation_impact - protest_intensity_impact - 
-                      arrest_rate_impact + time_decay_bonus)
+                      arrest_rate_impact)
     
     stability_score = max(0, min(100, stability_score))
     stability_score = int(stability_score)
@@ -2847,7 +2855,7 @@ def calculate_regime_stability(exchange_data, protest_data, oil_data=None):
         if intensity > 40:
             trend = "decreasing"
         elif intensity < 20:
-            trend = "increasing"
+            trend = "increasing"  # Low protests = increasing stability!
         else:
             trend = "stable"
     
@@ -2878,11 +2886,12 @@ def calculate_regime_stability(exchange_data, protest_data, oil_data=None):
             'base_score': base_score,
             'military_strength_baseline': military_strength_baseline,
             'oil_price_impact': round(oil_price_impact, 2),
+            'low_protest_bonus': low_protest_bonus,  # ← NEW!
             'rial_devaluation_impact': round(-rial_devaluation_impact, 2),
             'protest_intensity_impact': round(-protest_intensity_impact, 2),
             'arrest_rate_impact': round(-arrest_rate_impact, 2),
             'time_decay_bonus': round(time_decay_bonus, 2),
-            'formula': 'Base(50) + Military(+30) + Oil(±5) - Rial - Protest - Arrest + Time'
+            'formula': 'Base(50) + Military(+30) + LowProtestBonus + Oil - Rial - Protest - Arrest + Time'
         }
     }
 
@@ -3616,6 +3625,22 @@ def calculate_casualty_trends(current_casualties):
             'sources': current_casualties.get('sources', []),
             'hrana_verified': current_casualties.get('hrana_verified', False)
         }
+        
+        # ← NEW: Fallback when NO data extracted at all
+        arrests_7d = enhanced['recent_7d'].get('arrests', 0)
+        deaths_7d = enhanced['recent_7d'].get('deaths', 0)
+        injuries_7d = enhanced['recent_7d'].get('injuries', 0)
+        
+        if (arrests_7d == 0 and deaths_7d == 0 and injuries_7d == 0 and
+            enhanced['cumulative'].get('deaths') == 'Data unavailable' and
+            enhanced['cumulative'].get('arrests') == 'Data unavailable'):
+            
+            print("[Casualty Trends] ⚠️ No data found - using 'No recent data' placeholders")
+            enhanced['recent_7d'] = {
+                'arrests': 'No recent data',
+                'deaths': 'No recent data',
+                'injuries': 'No recent data'
+            }
         
         # Update cache with today's data
         update_casualty_cache(current_casualties)
@@ -5151,6 +5176,17 @@ def scan_iran_protests():
         
         all_articles = (newsapi_articles + gdelt_en + gdelt_ar + gdelt_fa + 
                        gdelt_he + reddit_posts + iranwire_articles + hrana_articles)
+        
+        # Diagnostic logging for article sources
+        print(f"[Iran Protests] Articles breakdown:")
+        print(f"  NewsAPI: {len(newsapi_articles)}")
+        print(f"  GDELT EN: {len(gdelt_en)}")
+        print(f"  GDELT AR: {len(gdelt_ar)}")
+        print(f"  GDELT FA: {len(gdelt_fa)}")
+        print(f"  GDELT HE: {len(gdelt_he)}")
+        print(f"  Reddit: {len(reddit_posts)}")
+        print(f"  Iran Wire: {len(iranwire_articles)}")
+        print(f"  HRANA: {len(hrana_articles)}")
         
         # NEW: Fetch ALL RSS feeds (includes Iran Wire which we already have, but adds MEMRI, Al-Manar, Israeli sources)
         print(f"[RSS] Fetching additional RSS feeds for Iran protests...")
