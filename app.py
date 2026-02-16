@@ -3572,7 +3572,7 @@ def calculate_casualty_trends(current_casualties):
         }
 
 
-ddef calculate_casualty_trends(current_casualties):
+    def calculate_casualty_trends(current_casualties):
     """
     Calculate trends and estimates with HRANA extraction + cache fallback
     
