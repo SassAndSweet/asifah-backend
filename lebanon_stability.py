@@ -24,16 +24,23 @@ from pathlib import Path
 # FLASK APP INITIALIZATION
 # ========================================
 
+from flask_cors import CORS
+
 app = Flask(__name__)
+
+# CORS Configuration - Allow your frontend domains
 CORS(app, resources={
     r"/*": {
         "origins": [
             "https://asifahanalytics.com",
             "https://www.asifahanalytics.com",
-            "http://localhost:*"
+            "http://localhost:3000",
+            "http://localhost:8000",
+            "http://127.0.0.1:*"
         ],
         "methods": ["GET", "POST", "OPTIONS"],
-        "allow_headers": ["Content-Type"]
+        "allow_headers": ["Content-Type"],
+        "supports_credentials": False
     }
 })
 
