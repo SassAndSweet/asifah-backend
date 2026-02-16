@@ -23,24 +23,36 @@ from pathlib import Path
 # ========================================
 # FLASK APP INITIALIZATION
 # ========================================
-
-from flask_cors import CORS
-
 app = Flask(__name__)
 
-# CORS Configuration - Allow your frontend domains
+# CORS Configuration - Match main backend pattern
 CORS(app, resources={
-    r"/*": {
+    r"/scan-lebanon-stability": {
         "origins": [
             "https://asifahanalytics.com",
             "https://www.asifahanalytics.com",
-            "http://localhost:3000",
-            "http://localhost:8000",
-            "http://127.0.0.1:*"
+            "http://localhost:*"
         ],
         "methods": ["GET", "POST", "OPTIONS"],
-        "allow_headers": ["Content-Type"],
-        "supports_credentials": False
+        "allow_headers": ["Content-Type"]
+    },
+    r"/api/lebanon-trends": {
+        "origins": [
+            "https://asifahanalytics.com",
+            "https://www.asifahanalytics.com",
+            "http://localhost:*"
+        ],
+        "methods": ["GET", "OPTIONS"],
+        "allow_headers": ["Content-Type"]
+    },
+    r"/health": {
+        "origins": [
+            "https://asifahanalytics.com",
+            "https://www.asifahanalytics.com",
+            "http://localhost:*"
+        ],
+        "methods": ["GET", "OPTIONS"],
+        "allow_headers": ["Content-Type"]
     }
 })
 
