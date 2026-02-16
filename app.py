@@ -3477,6 +3477,12 @@ def calculate_casualty_trends(current_casualties):
             'injuries': 22000,
             'start_date': '2022-09-16'
         }
+
+        # IMPORTANT NOTE:
+        # - arrests_7d/deaths_7d/injuries_7d = RECENT activity from last 7 days
+        # - CUMULATIVE_BASELINE = TOTAL since Sept 2022 (Mahsa Amini protests start)
+        # - Recent numbers should be MUCH SMALLER than cumulative
+        # - If recent > cumulative, there's a bug in article parsing
         
         # Calculate days since September 2022
         start_date = datetime.strptime(CUMULATIVE_BASELINE['start_date'], '%Y-%m-%d').replace(tzinfo=timezone.utc)
@@ -3488,10 +3494,11 @@ def calculate_casualty_trends(current_casualties):
         deaths_7d = current_casualties.get('deaths', 0)
         injuries_7d = current_casualties.get('injuries', 0)
         
-        # Estimate 30-day (7d × 4.3 weeks)
-        arrests_30d = int(arrests_7d * 4.3)
-        deaths_30d = int(deaths_7d * 4.3)
-        injuries_30d = int(injuries_7d * 4.3)
+        # Calculate 30-day from recent article extraction (don't multiply 7d × 4.3!)
+        # The articles we fetch already span the requested time period
+        arrests_30d = arrests_7d  # Already represents recent period
+        deaths_30d = deaths_7d
+        injuries_30d = injuries_7d
         
         # Calculate trends (compare to yesterday if available)
         def calc_trend(current, previous):
@@ -5150,7 +5157,9 @@ def scan_iran_protests():
         casualties_enhanced = calculate_casualty_trends(casualties)
         
         articles_per_day = len(all_articles) / days if days > 0 else 0
-        intensity_score = min(articles_per_day * 2 + casualties['deaths'] * 0.5, 100)
+        # Reduced sensitivity: reflects current low activity period
+        # 50 articles/week = ~7 per day = 3.5% base + deaths impact
+        intensity_score = min(articles_per_day * 0.5 + casualties['deaths'] * 0.2, 100)
         stability_score = 100 - intensity_score
         
         exchange_data = fetch_iran_exchange_rate()
