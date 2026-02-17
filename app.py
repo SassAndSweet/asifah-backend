@@ -140,6 +140,15 @@ CORS(app, resources={
         "methods": ["GET", "OPTIONS"],
         "allow_headers": ["Content-Type"]
     },
+    r"/api/jordan-threat": {
+        "origins": [
+            "https://asifahanalytics.com",
+            "https://www.asifahanalytics.com",
+            "http://localhost:*"
+        ],
+        "methods": ["GET", "OPTIONS"],
+        "allow_headers": ["Content-Type"]
+    },
     r"/scan-iran-protests": {
         "origins": [
             "https://asifahanalytics.com",
@@ -306,6 +315,10 @@ TARGET_BASELINES = {
     'syria': {
         'base_adjustment': +8,
         'description': 'Post-Assad volatility, opportunistic strikes'
+    },
+    'jordan': {
+        'base_adjustment': +3,
+        'description': 'Stable US ally, elevated due to regional spillover risk'
     }
 }
 
@@ -325,6 +338,10 @@ REDDIT_SUBREDDITS = {
     "syria": [
         "syriancivilwar", "Syria", "geopolitics",
         "CredibleDefense", "anime_titties"
+    ],
+    "jordan": [
+        "jordan", "geopolitics", "CredibleDefense",
+        "anime_titties", "Israel", "syriancivilwar"
     ]
 }
 
@@ -368,8 +385,25 @@ TARGET_KEYWORDS = {
             'assad regime', 'post-assad', 'syria transition'
         ],
         'reddit_keywords': [
-            'Syria', 'Damascus', 'ISIS', 'Al Qaeda', 'HTS', 'SDF', 
+            'Syria', 'Damascus', 'ISIS', 'Al Qaeda', 'HTS', 'SDF',
             'Kurds', 'Druze', 'Golan', 'Israel', 'Assad', 'civil war'
+        ]
+    },
+    'jordan': {
+        'keywords': [
+            'jordan', 'jordanian', 'amman', 'king abdullah', 'hashemite',
+            'jordan border', 'jordan airspace', 'jordan intercept',
+            'jordan military', 'jordan air defense', 'jordan drone',
+            'jordan syria border', 'rukban', 'captagon jordan',
+            'jordan protest', 'amman protest', 'jordan palestinian',
+            'tower 22', 'tanf jordan', 'jordan us base',
+            'jordan muslim brotherhood', 'east bank', 'jordan refugee',
+            'jordan economic', 'jordan imf', 'zarqa', 'irbid', 'mafraq'
+        ],
+        'reddit_keywords': [
+            'Jordan', 'Amman', 'Jordanian', 'King Abdullah', 'Hashemite',
+            'Tower 22', 'Captagon', 'Jordan border', 'Jordan airspace',
+            'Jordan protest', 'Palestinian', 'ISIS Jordan'
         ]
     }
 }
@@ -1125,6 +1159,320 @@ def calculate_reverse_threat(articles, source_actor='iran', target_actor='israel
         'risk_level': 'high' if final_probability > 0.40 else 'moderate' if final_probability > 0.20 else 'low',
         'calculation_method': 'weighted_keywords_with_retaliation_trigger'
     }
+
+# ========================================
+# JORDAN-SPECIFIC THREAT CALCULATIONS
+# ========================================
+
+JORDAN_INCOMING_THREAT_KEYWORDS = {
+    'iran_militia_strike': {
+        'weight': 3.5,
+        'phrases': [
+            'iran strike jordan', 'iranian drones jordan', 'jordan intercept iranian',
+            'militia attack jordan', 'pmu jordan', 'hashd jordan',
+            'iran threatens jordan', 'irgc jordan', 'proxy attack jordan',
+            'iraqi militia jordan', 'shiite militia jordan border',
+            'jordan air defense iranian', 'drone incursion jordan'
+        ]
+    },
+    'syrian_border_isis': {
+        'weight': 3.0,
+        'phrases': [
+            'isis jordan', 'daesh jordan', 'islamic state jordan',
+            'jordan syria border incursion', 'jordan border attack',
+            'jordan border security', 'smuggling jordan syria',
+            'captagon jordan', 'drug smuggling jordan', 'rukban camp',
+            'border infiltration jordan', 'jordan border clashes',
+            'isis sleeper cell jordan', 'isis threat jordan'
+        ]
+    },
+    'palestinian_unrest': {
+        'weight': 2.5,
+        'phrases': [
+            'jordan palestinian uprising', 'amman protests palestine',
+            'jordan riots', 'east bank west bank tensions',
+            'refugee camp unrest jordan', 'palestinian protests amman',
+            'jordan destabilization', 'hashemite stability',
+            'jordan internal unrest', 'tribal tensions jordan',
+            'jordan protests', 'bread riots jordan', 'amman riots'
+        ]
+    },
+    'us_base_targeting': {
+        'weight': 4.0,
+        'phrases': [
+            'tower 22', 'tower 22 jordan', 'jordan us base attack',
+            'tanf jordan', 'us base jordan drone', 'american troops jordan',
+            'us forces jordan attacked', 'jordan base drone strike',
+            'centcom jordan', 'muwaffaq salti', 'jordan military base attack'
+        ]
+    }
+}
+
+JORDAN_DEFENSIVE_KEYWORDS = {
+    'coalition_air_defense': {
+        'weight': 2.0,
+        'phrases': [
+            'jordan intercept', 'jordan shoots down', 'jordan air defense',
+            'jordan intercepts drone', 'jordan intercepts missile',
+            'jordan airspace defense', 'jordan coalition defense',
+            'jordan shoots down iranian', 'jordan air force intercept',
+            'us jordan air defense', 'jordan patriot', 'jordan radar',
+            'joint air defense jordan', 'jordan allied intercept'
+        ]
+    },
+    'border_operations': {
+        'weight': 1.5,
+        'phrases': [
+            'jordan border operation', 'jordan counter smuggling',
+            'jordan anti drug operation', 'jordan border patrol',
+            'jordan captagon seizure', 'jordan border interdiction',
+            'jordan military border', 'jordan border security operation',
+            'jordan customs seizure', 'jordan border crackdown'
+        ]
+    }
+}
+
+
+def calculate_jordan_incoming_threats(articles, days_analyzed=7):
+    """
+    Calculate probability of kinetic action AGAINST Jordan
+    
+    Threat vectors:
+    1. Iranian/militia strike (demonstrated April 2024 precedent)
+    2. Syrian border incursion / ISIS spillover
+    3. Palestinian uprising / internal destabilization
+    4. US base targeting by Iran-aligned groups
+    
+    Returns individual threat probabilities + combined score
+    """
+    
+    threat_scores = {
+        'iran_militia': {'score': 0, 'indicators': [], 'articles': 0},
+        'syria_isis': {'score': 0, 'indicators': [], 'articles': 0},
+        'palestinian_unrest': {'score': 0, 'indicators': [], 'articles': 0},
+        'us_base': {'score': 0, 'indicators': [], 'articles': 0}
+    }
+    
+    category_map = {
+        'iran_militia_strike': 'iran_militia',
+        'syrian_border_isis': 'syria_isis',
+        'palestinian_unrest': 'palestinian_unrest',
+        'us_base_targeting': 'us_base'
+    }
+    
+    for article in articles:
+        content = f"{article.get('title', '')} {article.get('description', '')} {article.get('content', '')}".lower()
+        
+        for category, data in JORDAN_INCOMING_THREAT_KEYWORDS.items():
+            mapped = category_map.get(category)
+            if not mapped:
+                continue
+            
+            for phrase in data['phrases']:
+                if phrase in content:
+                    threat_scores[mapped]['score'] += data['weight']
+                    threat_scores[mapped]['articles'] += 1
+                    threat_scores[mapped]['indicators'].append({
+                        'phrase': phrase,
+                        'weight': data['weight'],
+                        'article': article.get('title', '')[:80],
+                        'article_url': article.get('url', '')
+                    })
+                    break  # One match per category per article
+    
+    # Convert scores to probabilities (cap each at 60%)
+    results = {}
+    for key, data in threat_scores.items():
+        prob = min(data['score'] / 35.0, 0.60)
+        
+        results[key] = {
+            'probability': prob,
+            'risk_level': (
+                'very_high' if prob > 0.50 else
+                'high' if prob > 0.35 else
+                'moderate' if prob > 0.20 else
+                'low'
+            ),
+            'indicators': sorted(data['indicators'], key=lambda x: x['weight'], reverse=True)[:5],
+            'total_indicators': len(data['indicators'])
+        }
+    
+    # Combined incoming threat (independent events formula)
+    probs = [results[k]['probability'] for k in results]
+    combined = 1.0
+    for p in probs:
+        combined *= (1 - p)
+    combined = 1 - combined
+    combined = min(combined, 0.85)
+    
+    return {
+        'iran_militia': results['iran_militia'],
+        'syria_isis': results['syria_isis'],
+        'palestinian_unrest': results['palestinian_unrest'],
+        'us_base': results['us_base'],
+        'combined': {
+            'probability': combined,
+            'risk_level': (
+                'very_high' if combined > 0.60 else
+                'high' if combined > 0.40 else
+                'moderate' if combined > 0.20 else
+                'low'
+            )
+        }
+    }
+
+
+def calculate_jordan_defensive_posture(articles, iran_israel_tension=0.0):
+    """
+    Calculate Jordan's defensive activation probability
+    
+    Two outgoing/defensive vectors:
+    1. Coalition Air Defense — probability of active intercept ops
+       (boosted when Iran-Israel tensions are elevated)
+    2. Border Security Operations — counter-smuggling, counter-ISIS
+    
+    Returns probabilities for each defensive posture
+    """
+    
+    defense_scores = {
+        'coalition_air_defense': {'score': 0, 'indicators': []},
+        'border_operations': {'score': 0, 'indicators': []}
+    }
+    
+    for article in articles:
+        content = f"{article.get('title', '')} {article.get('description', '')} {article.get('content', '')}".lower()
+        
+        for category, data in JORDAN_DEFENSIVE_KEYWORDS.items():
+            for phrase in data['phrases']:
+                if phrase in content:
+                    defense_scores[category]['score'] += data['weight']
+                    defense_scores[category]['indicators'].append({
+                        'phrase': phrase,
+                        'weight': data['weight'],
+                        'article': article.get('title', '')[:80],
+                        'article_url': article.get('url', '')
+                    })
+                    break
+    
+    # Coalition Air Defense gets a BOOST from Iran-Israel tension
+    # If Iran-Israel probability is high, Jordan is more likely to activate air defense
+    tension_boost = 0.0
+    if iran_israel_tension > 0.60:
+        tension_boost = 0.25
+    elif iran_israel_tension > 0.40:
+        tension_boost = 0.15
+    elif iran_israel_tension > 0.20:
+        tension_boost = 0.05
+    
+    air_defense_base = min(defense_scores['coalition_air_defense']['score'] / 20.0, 0.50)
+    air_defense_prob = min(air_defense_base + tension_boost, 0.75)
+    
+    border_ops_prob = min(defense_scores['border_operations']['score'] / 20.0, 0.50)
+    
+    return {
+        'coalition_air_defense': {
+            'probability': air_defense_prob,
+            'base_probability': air_defense_base,
+            'iran_israel_tension_boost': tension_boost,
+            'risk_level': (
+                'very_high' if air_defense_prob > 0.50 else
+                'high' if air_defense_prob > 0.35 else
+                'moderate' if air_defense_prob > 0.20 else
+                'low'
+            ),
+            'indicators': sorted(defense_scores['coalition_air_defense']['indicators'],
+                               key=lambda x: x['weight'], reverse=True)[:5],
+            'tooltip': 'Probability of active intercept operations against hostile aerial threats transiting Jordanian airspace'
+        },
+        'border_operations': {
+            'probability': border_ops_prob,
+            'risk_level': (
+                'very_high' if border_ops_prob > 0.50 else
+                'high' if border_ops_prob > 0.35 else
+                'moderate' if border_ops_prob > 0.20 else
+                'low'
+            ),
+            'indicators': sorted(defense_scores['border_operations']['indicators'],
+                               key=lambda x: x['weight'], reverse=True)[:5],
+            'tooltip': 'Probability of active border security operations against smuggling and ISIS infiltration'
+        }
+    }
+
+
+def build_jordan_headlines(incoming_threats, defensive_posture, all_articles):
+    """Build unified headlines list for Jordan threat display"""
+    
+    headlines = []
+    seen_urls = set()
+    
+    # Collect all indicators from incoming threats
+    for threat_key in ['iran_militia', 'syria_isis', 'palestinian_unrest', 'us_base']:
+        threat = incoming_threats.get(threat_key, {})
+        threat_labels = {
+            'iran_militia': 'Iran/Militia Threat',
+            'syria_isis': 'Syria Border/ISIS',
+            'palestinian_unrest': 'Internal Unrest',
+            'us_base': 'US Base Targeting'
+        }
+        
+        for indicator in threat.get('indicators', [])[:3]:
+            url = indicator.get('article_url', '')
+            if url and url not in seen_urls:
+                seen_urls.add(url)
+                
+                # Find matching article for full data
+                matching = None
+                for article in all_articles:
+                    if article.get('url') == url:
+                        matching = article
+                        break
+                
+                headlines.append({
+                    'title': matching.get('title', indicator.get('article', ''))[:120] if matching else indicator.get('article', '')[:120],
+                    'url': url,
+                    'source': matching.get('source', {}).get('name', 'Unknown') if matching else 'Unknown',
+                    'published': matching.get('publishedAt', '') if matching else '',
+                    'threat_type': threat_labels.get(threat_key, 'Unknown'),
+                    'weight': indicator.get('weight', 0),
+                    'phrase': indicator.get('phrase', ''),
+                    'why_included': f"Matched: '{indicator.get('phrase', '')}'",
+                    'color': 'red' if threat_key == 'us_base' else 'orange' if threat_key == 'iran_militia' else 'blue'
+                })
+    
+    # Add defensive posture indicators
+    for def_key in ['coalition_air_defense', 'border_operations']:
+        defense = defensive_posture.get(def_key, {})
+        def_labels = {
+            'coalition_air_defense': 'Coalition Air Defense',
+            'border_operations': 'Border Operations'
+        }
+        
+        for indicator in defense.get('indicators', [])[:2]:
+            url = indicator.get('article_url', '')
+            if url and url not in seen_urls:
+                seen_urls.add(url)
+                
+                matching = None
+                for article in all_articles:
+                    if article.get('url') == url:
+                        matching = article
+                        break
+                
+                headlines.append({
+                    'title': matching.get('title', indicator.get('article', ''))[:120] if matching else indicator.get('article', '')[:120],
+                    'url': url,
+                    'source': matching.get('source', {}).get('name', 'Unknown') if matching else 'Unknown',
+                    'published': matching.get('publishedAt', '') if matching else '',
+                    'threat_type': def_labels.get(def_key, 'Defensive'),
+                    'weight': indicator.get('weight', 0),
+                    'phrase': indicator.get('phrase', ''),
+                    'why_included': f"Defensive signal: '{indicator.get('phrase', '')}'",
+                    'color': 'green'
+                })
+    
+    headlines.sort(key=lambda x: x['weight'], reverse=True)
+    return headlines[:15]
+    
 # ========================================
 # RATE LIMITING
 # ========================================
@@ -4483,7 +4831,8 @@ def api_threat_matrix(target):
                 'iran': '🇮🇷',
                 'hezbollah': '🇱🇧',
                 'houthis': '🇾🇪',
-                'syria': '🇸🇾'
+                'syria': '🇸🇾',
+                'jordan': '🇯🇴'
             }.get(target, '🏴'),
             'days_analyzed': days,
             'total_articles': len(all_articles),
@@ -5109,7 +5458,239 @@ def api_syria_conflict():
             'intensity_description': 'Unknown'
         }), 500
 
+# ========================================
+# JORDAN THREAT ENDPOINT
+# ========================================
 
+@app.route('/api/jordan-threat', methods=['GET'])
+def api_jordan_threat():
+    """
+    Jordan Kinetic Activity Probability Endpoint
+    
+    Unique threat model:
+    - Incoming: Iran/militia, Syria/ISIS, Palestinian unrest, US base targeting
+    - Defensive: Coalition air defense activation, border operations
+    - Cross-references Iran-Israel tension for air defense boost
+    """
+    try:
+        refresh = request.args.get('refresh', 'false').lower() == 'true'
+        days = int(request.args.get('days', 7))
+        
+        # Try cached data first
+        if not refresh:
+            cached = get_cached_result('jordan')
+            if cached and is_cache_fresh(cached, max_age_hours=6):
+                print("[Jordan] Returning cached data")
+                return jsonify(cached)
+        
+        print("[Jordan] Performing fresh scan...")
+        
+        if not check_rate_limit():
+            cached = get_cached_result('jordan')
+            if cached:
+                cached['stale_cache'] = True
+                return jsonify(cached)
+            return jsonify({
+                'success': False, 'error': 'Rate limit exceeded',
+                'probability': 0, 'rate_limited': True
+            }), 429
+        
+        # Fetch articles from all sources
+        query = ' OR '.join(TARGET_KEYWORDS['jordan']['keywords'])
+        
+        articles_en = fetch_newsapi_articles(query, days)
+        articles_gdelt_en = fetch_gdelt_articles(query, days, 'eng')
+        articles_gdelt_ar = fetch_gdelt_articles(query, days, 'ara')
+        articles_gdelt_he = fetch_gdelt_articles(query, days, 'heb')
+        articles_gdelt_fa = fetch_gdelt_articles(query, days, 'fas')
+        
+        articles_reddit = fetch_reddit_posts(
+            'jordan',
+            TARGET_KEYWORDS['jordan']['reddit_keywords'],
+            days
+        )
+        
+        # Also fetch Jordanian news RSS feeds
+        jordan_rss = fetch_jordan_news_rss()
+        
+        all_articles = (articles_en + articles_gdelt_en + articles_gdelt_ar +
+                       articles_gdelt_he + articles_gdelt_fa + articles_reddit +
+                       jordan_rss)
+        
+        print(f"[Jordan] Total articles: {len(all_articles)}")
+        
+        # Calculate base strike probability using standard algorithm
+        scoring_result = calculate_threat_probability(all_articles, days, 'jordan')
+        probability = scoring_result['probability']
+        momentum = scoring_result['momentum']
+        breakdown = scoring_result['breakdown']
+        
+        # Calculate Jordan-specific incoming threats
+        incoming = calculate_jordan_incoming_threats(all_articles, days)
+        
+        # Get Iran-Israel tension level for air defense boost
+        iran_cache = get_cached_result('iran')
+        iran_israel_tension = 0.0
+        if iran_cache:
+            iran_israel_tension = iran_cache.get('probability', 0) / 100.0
+        
+        # Calculate defensive posture
+        defensive = calculate_jordan_defensive_posture(all_articles, iran_israel_tension)
+        
+        # Build headlines
+        recent_headlines = build_jordan_headlines(incoming, defensive, all_articles)
+        
+        # Timeline
+        if probability < 30:
+            timeline = "180+ Days"
+        elif probability < 50:
+            timeline = "91-180 Days"
+        elif probability < 70:
+            timeline = "31-90 Days"
+        else:
+            timeline = "0-30 Days"
+        
+        # Confidence
+        unique_sources = len(set(a.get('source', {}).get('name', 'Unknown') for a in all_articles))
+        if len(all_articles) >= 20 and unique_sources >= 8:
+            confidence = "High"
+        elif len(all_articles) >= 10 and unique_sources >= 5:
+            confidence = "Medium"
+        else:
+            confidence = "Low"
+        
+        result = {
+            'success': True,
+            'probability': probability,
+            'timeline': timeline,
+            'confidence': confidence,
+            'momentum': momentum,
+            'total_articles': len(all_articles),
+            'unique_sources': unique_sources,
+            'recent_articles_48h': breakdown['recent_articles_48h'],
+            'scoring_breakdown': breakdown,
+            'incoming_threats': {
+                'iran_militia': {
+                    'probability': round(incoming['iran_militia']['probability'] * 100, 1),
+                    'risk_level': incoming['iran_militia']['risk_level'],
+                    'indicators': incoming['iran_militia']['indicators'][:3]
+                },
+                'syria_isis': {
+                    'probability': round(incoming['syria_isis']['probability'] * 100, 1),
+                    'risk_level': incoming['syria_isis']['risk_level'],
+                    'indicators': incoming['syria_isis']['indicators'][:3]
+                },
+                'palestinian_unrest': {
+                    'probability': round(incoming['palestinian_unrest']['probability'] * 100, 1),
+                    'risk_level': incoming['palestinian_unrest']['risk_level'],
+                    'indicators': incoming['palestinian_unrest']['indicators'][:3]
+                },
+                'us_base': {
+                    'probability': round(incoming['us_base']['probability'] * 100, 1),
+                    'risk_level': incoming['us_base']['risk_level'],
+                    'indicators': incoming['us_base']['indicators'][:3]
+                },
+                'combined': {
+                    'probability': round(incoming['combined']['probability'] * 100, 1),
+                    'risk_level': incoming['combined']['risk_level']
+                }
+            },
+            'defensive_posture': {
+                'coalition_air_defense': {
+                    'probability': round(defensive['coalition_air_defense']['probability'] * 100, 1),
+                    'base_probability': round(defensive['coalition_air_defense']['base_probability'] * 100, 1),
+                    'iran_israel_tension_boost': round(defensive['coalition_air_defense']['iran_israel_tension_boost'] * 100, 1),
+                    'risk_level': defensive['coalition_air_defense']['risk_level'],
+                    'tooltip': defensive['coalition_air_defense']['tooltip'],
+                    'indicators': defensive['coalition_air_defense']['indicators'][:3]
+                },
+                'border_operations': {
+                    'probability': round(defensive['border_operations']['probability'] * 100, 1),
+                    'risk_level': defensive['border_operations']['risk_level'],
+                    'tooltip': defensive['border_operations']['tooltip'],
+                    'indicators': defensive['border_operations']['indicators'][:3]
+                }
+            },
+            'recent_headlines': recent_headlines,
+            'last_updated': datetime.now(timezone.utc).isoformat(),
+            'cached': False,
+            'version': '2.9.0-jordan'
+        }
+        
+        update_cache('jordan', result)
+        
+        print(f"[Jordan] Fresh scan complete: {probability}%")
+        return jsonify(result)
+        
+    except Exception as e:
+        print(f"Error in /api/jordan-threat: {e}")
+        import traceback
+        traceback.print_exc()
+        
+        cached = get_cached_result('jordan')
+        if cached:
+            cached['error_fallback'] = True
+            return jsonify(cached)
+        
+        return jsonify({
+            'success': False, 'error': str(e),
+            'probability': 0, 'timeline': 'Unknown'
+        }), 500
+
+
+def fetch_jordan_news_rss():
+    """Fetch articles from Jordanian news RSS feeds"""
+    articles = []
+    
+    feeds = {
+        'Jordan Times': 'https://www.jordantimes.com/feed',
+        'Roya News': 'https://en.royanews.tv/feed',
+    }
+    
+    for source_name, feed_url in feeds.items():
+        try:
+            response = requests.get(feed_url, timeout=15, headers={
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            })
+            
+            if response.status_code != 200:
+                continue
+            
+            try:
+                root = ET.fromstring(response.content)
+            except ET.ParseError:
+                continue
+            
+            items = root.findall('.//item')
+            
+            for item in items[:15]:
+                title_elem = item.find('title')
+                link_elem = item.find('link')
+                pubDate_elem = item.find('pubDate')
+                description_elem = item.find('description')
+                
+                if title_elem is not None and link_elem is not None:
+                    pub_date = pubDate_elem.text if pubDate_elem is not None else datetime.now(timezone.utc).isoformat()
+                    description = description_elem.text[:500] if description_elem is not None and description_elem.text else ''
+                    
+                    articles.append({
+                        'title': title_elem.text or '',
+                        'description': description,
+                        'url': link_elem.text or '',
+                        'publishedAt': pub_date,
+                        'source': {'name': source_name},
+                        'content': description,
+                        'language': 'en'
+                    })
+            
+            print(f"[{source_name}] ✓ Fetched {len([a for a in articles if a['source']['name'] == source_name])} articles")
+            
+        except Exception as e:
+            print(f"[{source_name}] Error: {str(e)[:100]}")
+            continue
+    
+    return articles
+    
 # ========================================
 # CACHE MANAGEMENT ENDPOINT (OPTIONAL)
 # ========================================
@@ -5601,6 +6182,7 @@ def home():
         'endpoints': {
             '/api/threat/<target>': 'Threat assessment for hezbollah, iran, houthis, syria',
             '/scan-iran-protests': 'Iran protests data + Regime Stability Index ✅',
+            '/api/jordan-threat': 'Jordan kinetic activity probability (incoming threats + defensive posture) 🇯🇴 NEW!',
             '/scan-lebanon-stability': 'Lebanon Stability Index (Political, Economic, Security, Hezbollah) 🇱🇧 NEW!',
             '/api/syria-conflicts': 'Syria conflicts tracker ✅',
             '/flight-cancellations': 'Flight disruptions monitor (15 Middle East countries) ✅',
