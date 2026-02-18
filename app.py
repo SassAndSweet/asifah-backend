@@ -29,6 +29,7 @@ import math
 import json
 from pathlib import Path
 from iran_protests import get_iran_oil_data
+from military_tracker import register_military_endpoints, get_military_posture
 
 # Local imports last
 from rss_monitor import (
@@ -159,6 +160,8 @@ CORS(app, resources={
         "allow_headers": ["Content-Type"]
     }
 })
+
+register_military_endpoints(app)
 
 # ========================================
 # CONFIGURATION
