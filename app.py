@@ -5537,8 +5537,32 @@ def api_jordan_threat():
         # Calculate defensive posture
         defensive = calculate_jordan_defensive_posture(all_articles, iran_israel_tension)
         
-        # Build headlines
+        # Build headlines - fall back to generic top contributors if Jordan-specific matching finds nothing
         recent_headlines = build_jordan_headlines(incoming, defensive, all_articles)
+
+        if not recent_headlines and scoring_result.get('top_contributors'):
+            # Fallback: use generic headline builder with top scoring articles
+            recent_headlines = []
+            seen_urls = set()
+            for contributor in scoring_result['top_contributors'][:10]:
+                for article in all_articles:
+                    if (article.get('source', {}).get('name', '') == contributor.get('source', '') 
+                        and article.get('url') not in seen_urls):
+                        seen_urls.add(article['url'])
+                        recent_headlines.append({
+                            'title': article.get('title', '')[:120],
+                            'url': article.get('url', ''),
+                            'source': contributor.get('source', 'Unknown'),
+                            'published': article.get('publishedAt', ''),
+                            'threat_type': 'General Intelligence',
+                            'weight': abs(contributor.get('contribution', 0)),
+                            'phrase': '',
+                            'why_included': f"Top scoring article (severity: {contributor.get('severity', 1.0)}x)",
+                            'color': 'blue'
+                        })
+                        break
+            recent_headlines.sort(key=lambda x: x['weight'], reverse=True)
+            recent_headlines = recent_headlines[:15]
         
         # Timeline
         if probability < 30:
