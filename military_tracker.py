@@ -1,5 +1,5 @@
 """
-Asifah Analytics — Military Asset & Deployment Tracker v1.0.0
+Asifah Analytics — Military Asset & Deployment Tracker v1.0.1
 February 18, 2026
 
 Tracks military asset movements across multiple actors and regions.
@@ -29,6 +29,10 @@ OUTPUTS:
   - Regional tension multipliers
   - Alert objects for dashboard integration
   - Standalone page data for military.html
+
+CHANGELOG:
+  v1.0.1 - Added CORS headers to all endpoint responses
+  v1.0.0 - Initial release
 
 COPYRIGHT © 2025-2026 Asifah Analytics. All rights reserved.
 """
@@ -97,9 +101,7 @@ MILITARY_ACTORS = {
             'military sealift command', 'us logistics middle east'
         ],
         'rss_feeds': [
-            # CENTCOM official
             'https://www.centcom.mil/RSS/',
-            # Defense media
             'https://www.defense.gov/DesktopModules/ArticleCS/RSS.ashx?ContentType=1&Site=945',
         ]
     },
@@ -462,7 +464,6 @@ ASSET_TARGET_MAPPING = {
     # CENTCOM AOR (Middle East)
     # ============================
     'centcom': {
-        # Gulf / Iran axis
         'Al Udeid Air Base': {
             'location': 'Qatar',
             'targets': ['iran', 'houthis'],
@@ -498,8 +499,6 @@ ASSET_TARGET_MAPPING = {
             'targets': ['iran'],
             'description': 'Critical oil chokepoint. Maximum tension zone.'
         },
-
-        # Levant / Eastern Med
         'Eastern Mediterranean': {
             'location': 'Maritime',
             'targets': ['lebanon', 'syria', 'hezbollah'],
@@ -515,8 +514,6 @@ ASSET_TARGET_MAPPING = {
             'targets': ['syria', 'lebanon'],
             'description': 'RAF base. Strike and ISR platform.'
         },
-
-        # Syria / Iraq
         'Al Tanf': {
             'location': 'Syria',
             'targets': ['syria', 'iran'],
@@ -532,15 +529,11 @@ ASSET_TARGET_MAPPING = {
             'targets': ['syria', 'iran'],
             'description': 'US forces in northern Iraq.'
         },
-
-        # Jordan
         'Muwaffaq Salti (Tower 22)': {
             'location': 'Jordan',
             'targets': ['jordan', 'syria'],
             'description': 'US base near Jordan-Syria border.'
         },
-
-        # Red Sea / Yemen
         'Red Sea': {
             'location': 'Maritime',
             'targets': ['houthis', 'yemen'],
@@ -963,19 +956,6 @@ def fetch_reddit_military(days=7):
 def analyze_article_military(article):
     """
     Analyze a single article for military deployment signals.
-
-    Returns:
-    {
-        'actors': ['us', 'iran'],
-        'asset_types': ['carrier_strike_group', 'fighter_surge'],
-        'regions': ['persian_gulf'],
-        'targets': ['iran'],
-        'score': 8.5,
-        'signals': [
-            {'actor': 'us', 'asset': 'carrier_strike_group',
-             'keyword': 'carrier strike group', 'weight': 5.0}
-        ]
-    }
     """
     title = (article.get('title') or '').lower()
     description = (article.get('description') or '').lower()
@@ -1024,7 +1004,7 @@ def analyze_article_military(article):
 
                             result['score'] += signal_score
                             asset_matched = True
-                            break  # One asset match per category per article
+                            break
 
                     if asset_matched:
                         break
@@ -1071,11 +1051,6 @@ def analyze_article_military(article):
 def calculate_regional_tension_multiplier(active_actors):
     """
     Multiple militaries moving simultaneously = compounding tension.
-
-    1 actor  = 1.0x  (baseline)
-    2 actors = 1.15x
-    3 actors = 1.3x
-    4+ actors = 1.5x (cap)
     """
     count = len(active_actors)
     if count <= 1:
@@ -1108,10 +1083,6 @@ def scan_military_posture(days=7, force_refresh=False):
     """
     Main entry point. Scans all sources, analyzes articles,
     and returns comprehensive military posture assessment.
-
-    Called by:
-    - /api/military-posture endpoint (standalone page)
-    - get_military_posture(target) helper (dashboard integration)
     """
 
     # Check cache first
@@ -1143,8 +1114,8 @@ def scan_military_posture(days=7, force_refresh=False):
     print("[Military Tracker] Phase 2: Analyzing articles...")
 
     all_signals = []
-    per_target_scores = {}  # target → total score
-    per_actor_scores = {}   # actor → total score
+    per_target_scores = {}
+    per_actor_scores = {}
     active_actors = set()
     asset_type_counts = {}
 
@@ -1156,15 +1127,12 @@ def scan_military_posture(days=7, force_refresh=False):
                 all_signals.append(signal)
                 active_actors.add(signal['actor'])
 
-                # Accumulate per-target scores
                 for target in analysis['targets']:
                     per_target_scores[target] = per_target_scores.get(target, 0) + signal['weight']
 
-                # Accumulate per-actor scores
                 actor = signal['actor']
                 per_actor_scores[actor] = per_actor_scores.get(actor, 0) + signal['weight']
 
-                # Count asset types
                 asset = signal['asset']
                 asset_type_counts[asset] = asset_type_counts.get(asset, 0) + 1
 
@@ -1175,7 +1143,6 @@ def scan_military_posture(days=7, force_refresh=False):
 
     print(f"[Military Tracker] Active actors: {len(active_actors)} → Tension multiplier: {tension_multiplier}x")
 
-    # Apply tension multiplier to target scores
     for target in per_target_scores:
         per_target_scores[target] = round(per_target_scores[target] * tension_multiplier, 2)
 
@@ -1188,7 +1155,6 @@ def scan_military_posture(days=7, force_refresh=False):
         alert_level = determine_alert_level(score)
         threshold = ALERT_THRESHOLDS[alert_level]
 
-        # Get top signals for this target
         target_signals = [
             s for s in all_signals
             if target in analyze_article_military({
@@ -1199,7 +1165,6 @@ def scan_military_posture(days=7, force_refresh=False):
             or s.get('actor_keyword', '') in str(ASSET_TARGET_MAPPING.get('centcom', {}))
         ]
 
-        # Simpler approach: get signals from actors that map to this target
         relevant_signals = sorted(all_signals, key=lambda x: x['weight'], reverse=True)
 
         target_postures[target] = {
@@ -1247,33 +1212,21 @@ def scan_military_posture(days=7, force_refresh=False):
         'active_actors': list(active_actors),
         'active_actor_count': len(active_actors),
         'tension_multiplier': tension_multiplier,
-
-        # Per-target posture (for dashboard integration)
         'target_postures': target_postures,
-
-        # Per-actor breakdown (for standalone page)
         'actor_summaries': actor_summaries,
-
-        # Asset type distribution
         'asset_distribution': asset_type_counts,
-
-        # Top signals overall (for standalone page)
         'top_signals': sorted(all_signals, key=lambda x: x['weight'], reverse=True)[:20],
-
-        # Source breakdown
         'source_breakdown': {
             'defense_rss': len(rss_articles),
             'gdelt': len(gdelt_articles),
             'newsapi': len(newsapi_articles),
             'reddit': len(reddit_posts)
         },
-
         'last_updated': datetime.now(timezone.utc).isoformat(),
         'cached': False,
-        'version': '1.0.0'
+        'version': '1.0.1'
     }
 
-    # Save to cache
     save_military_cache(result)
 
     print(f"[Military Tracker] ✅ Scan complete in {scan_time}s")
@@ -1292,18 +1245,6 @@ def get_military_posture(target):
 
     Called by existing threat endpoints:
       probability += posture['military_bonus']
-
-    Returns:
-    {
-        'alert_level': 'elevated',
-        'alert_label': 'Elevated',
-        'alert_color': 'yellow',
-        'military_bonus': 5,
-        'show_banner': True,
-        'banner_text': '⚠️ Elevated US naval presence in Gulf of Oman',
-        'detail_url': '/military.html',
-        'top_signals': [...]
-    }
     """
     try:
         data = scan_military_posture()  # Uses cache if fresh
@@ -1322,7 +1263,6 @@ def get_military_posture(target):
                 'top_signals': []
             }
 
-        # Convert alert level to probability bonus
         bonus_map = {
             'normal': 0,
             'elevated': 5,
@@ -1333,7 +1273,6 @@ def get_military_posture(target):
         alert_level = posture.get('alert_level', 'normal')
         military_bonus = bonus_map.get(alert_level, 0)
 
-        # Build banner text from top signal
         banner_text = ''
         top_signals = posture.get('top_signals', [])
         if top_signals and posture.get('show_banner'):
@@ -1372,6 +1311,18 @@ def get_military_posture(target):
 
 
 # ========================================
+# CORS HELPER
+# ========================================
+
+def _add_cors_headers(response):
+    """Add CORS headers to a Flask response"""
+    response.headers['Access-Control-Allow-Origin'] = '*'
+    response.headers['Access-Control-Allow-Methods'] = 'GET, OPTIONS'
+    response.headers['Access-Control-Allow-Headers'] = 'Content-Type'
+    return response
+
+
+# ========================================
 # FLASK ENDPOINT REGISTRATION
 # ========================================
 
@@ -1381,32 +1332,36 @@ def register_military_endpoints(app):
     Called from main app.py: register_military_endpoints(app)
     """
 
-    @app.route('/api/military-posture', methods=['GET'])
+    @app.route('/api/military-posture', methods=['GET', 'OPTIONS'])
     def api_military_posture():
         """
         Full military posture assessment.
         Used by standalone military.html page.
         """
-        try:
-            days = int(app.current_request.args.get('days', 7)) if hasattr(app, 'current_request') else 7
-            refresh = False
+        from flask import request as flask_request
 
-            from flask import request as flask_request
+        # Handle CORS preflight
+        if flask_request.method == 'OPTIONS':
+            response = app.response_class(response='', status=200)
+            return _add_cors_headers(response)
+
+        try:
             days = int(flask_request.args.get('days', 7))
             refresh = flask_request.args.get('refresh', 'false').lower() == 'true'
 
             result = scan_military_posture(days=days, force_refresh=refresh)
-            return app.response_class(
+            response = app.response_class(
                 response=json.dumps(result, default=str),
                 status=200,
                 mimetype='application/json'
             )
+            return _add_cors_headers(response)
 
         except Exception as e:
             print(f"[Military API] Error: {str(e)}")
             import traceback
             traceback.print_exc()
-            return app.response_class(
+            response = app.response_class(
                 response=json.dumps({
                     'success': False,
                     'error': str(e)[:200]
@@ -1414,23 +1369,32 @@ def register_military_endpoints(app):
                 status=500,
                 mimetype='application/json'
             )
+            return _add_cors_headers(response)
 
-    @app.route('/api/military-posture/<target>', methods=['GET'])
+    @app.route('/api/military-posture/<target>', methods=['GET', 'OPTIONS'])
     def api_military_posture_target(target):
         """
         Quick posture check for a specific target.
         Used by dashboard threat cards.
         """
+        from flask import request as flask_request
+
+        # Handle CORS preflight
+        if flask_request.method == 'OPTIONS':
+            response = app.response_class(response='', status=200)
+            return _add_cors_headers(response)
+
         try:
             posture = get_military_posture(target)
-            return app.response_class(
+            response = app.response_class(
                 response=json.dumps(posture, default=str),
                 status=200,
                 mimetype='application/json'
             )
+            return _add_cors_headers(response)
 
         except Exception as e:
-            return app.response_class(
+            response = app.response_class(
                 response=json.dumps({
                     'success': False,
                     'error': str(e)[:200]
@@ -1438,5 +1402,6 @@ def register_military_endpoints(app):
                 status=500,
                 mimetype='application/json'
             )
+            return _add_cors_headers(response)
 
     print("[Military Tracker] ✅ Endpoints registered: /api/military-posture, /api/military-posture/<target>")
