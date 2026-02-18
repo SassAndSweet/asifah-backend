@@ -4937,6 +4937,7 @@ def api_iran_strike_probability():
     """
     Iran Strike Probability Endpoint
     Returns cached data by default, only scans when refresh=true
+    Now includes military posture data from Military Asset Tracker
     """
     try:
         # Check if user requested a fresh scan
@@ -4991,6 +4992,19 @@ def api_iran_strike_probability():
         probability = scoring_result['probability']
         momentum = scoring_result['momentum']
         
+        # ========================================
+        # MILITARY POSTURE INTEGRATION
+        # ========================================
+        try:
+            military_posture = get_military_posture('iran')
+            military_bonus = military_posture.get('military_bonus', 0)
+            if military_bonus > 0:
+                probability = min(99, probability + military_bonus)
+                print(f"[Iran] Military posture: {military_posture.get('alert_level', 'normal')} → +{military_bonus}% (new total: {probability}%)")
+        except Exception as mil_err:
+            print(f"[Iran] Military posture lookup failed: {mil_err}")
+            military_posture = {'alert_level': 'normal', 'military_bonus': 0, 'show_banner': False, 'banner_text': '', 'top_signals': []}
+        
         # Timeline
         if probability < 30:
             timeline = "180+ Days"
@@ -5039,9 +5053,19 @@ def api_iran_strike_probability():
             'recent_articles_48h': scoring_result['breakdown']['recent_articles_48h'],
             'top_scoring_articles': scoring_result.get('top_scoring_articles', []),
             'recent_headlines': recent_headlines,
+            'military_posture': {
+                'alert_level': military_posture.get('alert_level', 'normal'),
+                'alert_label': military_posture.get('alert_label', 'Normal'),
+                'alert_color': military_posture.get('alert_color', 'green'),
+                'military_bonus': military_posture.get('military_bonus', 0),
+                'show_banner': military_posture.get('show_banner', False),
+                'banner_text': military_posture.get('banner_text', ''),
+                'top_signals': military_posture.get('top_signals', []),
+                'detail_url': '/military.html'
+            },
             'last_updated': datetime.now(timezone.utc).isoformat(),
             'cached': False,
-            'version': '2.8.0'
+            'version': '3.0.0'
         }
         
         # Update cache
@@ -5076,6 +5100,7 @@ def api_hezbollah_activity():
     """
     Hezbollah Strike Probability Endpoint
     Returns cached data by default, only scans when refresh=true
+    Now includes military posture data from Military Asset Tracker
     """
     try:
         refresh = request.args.get('refresh', 'false').lower() == 'true'
@@ -5138,6 +5163,19 @@ def api_hezbollah_activity():
         else:
             activity_desc = "Low"
         
+        # ========================================
+        # MILITARY POSTURE INTEGRATION
+        # ========================================
+        try:
+            military_posture = get_military_posture('hezbollah')
+            military_bonus = military_posture.get('military_bonus', 0)
+            if military_bonus > 0:
+                probability = min(99, probability + military_bonus)
+                print(f"[Hezbollah] Military posture: {military_posture.get('alert_level', 'normal')} → +{military_bonus}% (new total: {probability}%)")
+        except Exception as mil_err:
+            print(f"[Hezbollah] Military posture lookup failed: {mil_err}")
+            military_posture = {'alert_level': 'normal', 'military_bonus': 0, 'show_banner': False, 'banner_text': '', 'top_signals': []}
+        
         # Calculate US strike + reverse threats for headlines
         israel_prob = probability / 100.0
         us_result = calculate_us_strike_probability(all_articles, days, 'hezbollah')
@@ -5165,9 +5203,19 @@ def api_hezbollah_activity():
             'recent_articles_48h': scoring_result['breakdown']['recent_articles_48h'],
             'top_scoring_articles': scoring_result.get('top_scoring_articles', []),
             'recent_headlines': recent_headlines,
+            'military_posture': {
+                'alert_level': military_posture.get('alert_level', 'normal'),
+                'alert_label': military_posture.get('alert_label', 'Normal'),
+                'alert_color': military_posture.get('alert_color', 'green'),
+                'military_bonus': military_posture.get('military_bonus', 0),
+                'show_banner': military_posture.get('show_banner', False),
+                'banner_text': military_posture.get('banner_text', ''),
+                'top_signals': military_posture.get('top_signals', []),
+                'detail_url': '/military.html'
+            },
             'last_updated': datetime.now(timezone.utc).isoformat(),
             'cached': False,
-            'version': '2.8.0'
+            'version': '3.0.0'
         }
         
         update_cache('hezbollah', result)
@@ -5199,6 +5247,7 @@ def api_houthis_threat():
     """
     Houthis Strike Probability Endpoint
     Returns cached data by default, only scans when refresh=true
+    Now includes military posture data from Military Asset Tracker
     """
     try:
         refresh = request.args.get('refresh', 'false').lower() == 'true'
@@ -5264,6 +5313,19 @@ def api_houthis_threat():
         else:
             threat_desc = "Low"
         
+        # ========================================
+        # MILITARY POSTURE INTEGRATION
+        # ========================================
+        try:
+            military_posture = get_military_posture('houthis')
+            military_bonus = military_posture.get('military_bonus', 0)
+            if military_bonus > 0:
+                probability = min(99, probability + military_bonus)
+                print(f"[Houthis] Military posture: {military_posture.get('alert_level', 'normal')} → +{military_bonus}% (new total: {probability}%)")
+        except Exception as mil_err:
+            print(f"[Houthis] Military posture lookup failed: {mil_err}")
+            military_posture = {'alert_level': 'normal', 'military_bonus': 0, 'show_banner': False, 'banner_text': '', 'top_signals': []}
+        
         # Calculate US strike + reverse threats for headlines
         israel_prob = probability / 100.0
         us_result = calculate_us_strike_probability(all_articles, days, 'houthis')
@@ -5291,9 +5353,19 @@ def api_houthis_threat():
             'recent_articles_48h': scoring_result['breakdown']['recent_articles_48h'],
             'top_scoring_articles': scoring_result.get('top_scoring_articles', []),
             'recent_headlines': recent_headlines,
+            'military_posture': {
+                'alert_level': military_posture.get('alert_level', 'normal'),
+                'alert_label': military_posture.get('alert_label', 'Normal'),
+                'alert_color': military_posture.get('alert_color', 'green'),
+                'military_bonus': military_posture.get('military_bonus', 0),
+                'show_banner': military_posture.get('show_banner', False),
+                'banner_text': military_posture.get('banner_text', ''),
+                'top_signals': military_posture.get('top_signals', []),
+                'detail_url': '/military.html'
+            },
             'last_updated': datetime.now(timezone.utc).isoformat(),
             'cached': False,
-            'version': '2.8.0'
+            'version': '3.0.0'
         }
         
         update_cache('houthis', result)
@@ -5325,6 +5397,7 @@ def api_syria_conflict():
     """
     Syria Strike Probability Endpoint
     Returns cached data by default, only scans when refresh=true
+    Now includes military posture data from Military Asset Tracker
     """
     try:
         refresh = request.args.get('refresh', 'false').lower() == 'true'
@@ -5406,6 +5479,19 @@ def api_syria_conflict():
         else:
             intensity_desc = "Low"
         
+        # ========================================
+        # MILITARY POSTURE INTEGRATION
+        # ========================================
+        try:
+            military_posture = get_military_posture('syria')
+            military_bonus = military_posture.get('military_bonus', 0)
+            if military_bonus > 0:
+                probability = min(99, probability + military_bonus)
+                print(f"[Syria] Military posture: {military_posture.get('alert_level', 'normal')} → +{military_bonus}% (new total: {probability}%)")
+        except Exception as mil_err:
+            print(f"[Syria] Military posture lookup failed: {mil_err}")
+            military_posture = {'alert_level': 'normal', 'military_bonus': 0, 'show_banner': False, 'banner_text': '', 'top_signals': []}
+        
         # Calculate US strike + reverse threats for headlines
         israel_prob = probability / 100.0
         us_result = calculate_us_strike_probability(all_articles, days, 'syria')
@@ -5433,9 +5519,19 @@ def api_syria_conflict():
             'escalation_articles': escalation_articles,
             'top_scoring_articles': scoring_result.get('top_scoring_articles', []),
             'recent_headlines': recent_headlines,
+            'military_posture': {
+                'alert_level': military_posture.get('alert_level', 'normal'),
+                'alert_label': military_posture.get('alert_label', 'Normal'),
+                'alert_color': military_posture.get('alert_color', 'green'),
+                'military_bonus': military_posture.get('military_bonus', 0),
+                'show_banner': military_posture.get('show_banner', False),
+                'banner_text': military_posture.get('banner_text', ''),
+                'top_signals': military_posture.get('top_signals', []),
+                'detail_url': '/military.html'
+            },
             'last_updated': datetime.now(timezone.utc).isoformat(),
             'cached': False,
-            'version': '2.8.0'
+            'version': '3.0.0'
         }
         
         update_cache('syria', result)
@@ -5474,6 +5570,7 @@ def api_jordan_threat():
     - Incoming: Iran/militia, Syria/ISIS, Palestinian unrest, US base targeting
     - Defensive: Coalition air defense activation, border operations
     - Cross-references Iran-Israel tension for air defense boost
+    Now includes military posture data from Military Asset Tracker
     """
     try:
         refresh = request.args.get('refresh', 'false').lower() == 'true'
@@ -5539,6 +5636,19 @@ def api_jordan_threat():
         
         # Calculate defensive posture
         defensive = calculate_jordan_defensive_posture(all_articles, iran_israel_tension)
+        
+        # ========================================
+        # MILITARY POSTURE INTEGRATION
+        # ========================================
+        try:
+            military_posture = get_military_posture('jordan')
+            military_bonus = military_posture.get('military_bonus', 0)
+            if military_bonus > 0:
+                probability = min(99, probability + military_bonus)
+                print(f"[Jordan] Military posture: {military_posture.get('alert_level', 'normal')} → +{military_bonus}% (new total: {probability}%)")
+        except Exception as mil_err:
+            print(f"[Jordan] Military posture lookup failed: {mil_err}")
+            military_posture = {'alert_level': 'normal', 'military_bonus': 0, 'show_banner': False, 'banner_text': '', 'top_signals': []}
         
         # Build headlines - fall back to generic top contributors if Jordan-specific matching finds nothing
         recent_headlines = build_jordan_headlines(incoming, defensive, all_articles)
@@ -5638,10 +5748,20 @@ def api_jordan_threat():
                     'indicators': defensive['border_operations']['indicators'][:3]
                 }
             },
+            'military_posture': {
+                'alert_level': military_posture.get('alert_level', 'normal'),
+                'alert_label': military_posture.get('alert_label', 'Normal'),
+                'alert_color': military_posture.get('alert_color', 'green'),
+                'military_bonus': military_posture.get('military_bonus', 0),
+                'show_banner': military_posture.get('show_banner', False),
+                'banner_text': military_posture.get('banner_text', ''),
+                'top_signals': military_posture.get('top_signals', []),
+                'detail_url': '/military.html'
+            },
             'recent_headlines': recent_headlines,
             'last_updated': datetime.now(timezone.utc).isoformat(),
             'cached': False,
-            'version': '2.9.0-jordan'
+            'version': '3.0.0-jordan'
         }
         
         update_cache('jordan', result)
@@ -5744,7 +5864,7 @@ def cache_status():
         'success': True,
         'cache_file': CACHE_FILE,
         'targets': status,
-        'version': '2.8.0'
+        'version': '3.0.0'
     })
 
 
@@ -5903,7 +6023,6 @@ def scan_iran_protests():
                 'sources': list(set(['HRANA'] + casualties_regex['sources'])),
                 'details': casualties_regex['details'],
                 'hrana_verified': True,
-                # ← NEW: Pass cumulative data from HRANA articles
                 'hrana_cumulative_deaths': hrana_data.get('cumulative_deaths'),
                 'hrana_cumulative_arrests': hrana_data.get('cumulative_arrests'),
                 'hrana_cumulative_injuries': hrana_data.get('cumulative_injuries')
@@ -5911,7 +6030,6 @@ def scan_iran_protests():
         else:
             casualties = casualties_regex
             casualties['hrana_verified'] = False
-            # ← NEW: Set to None if HRANA didn't verify
             casualties['hrana_cumulative_deaths'] = None
             casualties['hrana_cumulative_arrests'] = None
             casualties['hrana_cumulative_injuries'] = None
@@ -5920,8 +6038,6 @@ def scan_iran_protests():
         casualties_enhanced = calculate_casualty_trends(casualties)
         
         articles_per_day = len(all_articles) / days if days > 0 else 0
-        # Reduced sensitivity: reflects current low activity period
-        # 50 articles/week = ~7 per day = 3.5% base + deaths impact
         intensity_score = min(articles_per_day * 0.5 + casualties['deaths'] * 0.2, 100)
         stability_score = 100 - intensity_score
         
@@ -5943,7 +6059,6 @@ def scan_iran_protests():
         cities = extract_iran_cities(all_articles)
         num_cities = len(cities)
         
-        # If no cities found, show zero not hardcoded number
         if num_cities == 0:
             cities = []
             num_cities = 0
@@ -5968,7 +6083,7 @@ def scan_iran_protests():
             'exchange_rate': exchange_data,
             'oil_price': oil_data,
             'regime_stability': regime_stability,
-            'version': '2.8.0'  # ← UPDATED VERSION
+            'version': '3.0.0'
         })
         
     except Exception as e:
@@ -6050,7 +6165,7 @@ def scan_lebanon_stability():
                 'parliamentary_election_date': '2026-05-10',
                 'days_until_election': stability.get('days_until_election', 0)
             },
-            'version': '2.7.1'
+            'version': '3.0.0'
         })
         
     except Exception as e:
@@ -6162,7 +6277,7 @@ def api_syria_conflicts():
             # EXISTING: Basic conflict data
             'conflict_data': {
                 'deaths': conflict_data['deaths'],
-                'displaced': conflict_data['displaced'],  # Keep for backwards compatibility
+                'displaced': conflict_data['displaced'],
                 'factional_clashes': conflict_data['factional_clashes'],
                 'active_factions': conflict_data['active_factions'],
                 'num_factions': len(conflict_data['active_factions']),
@@ -6188,7 +6303,7 @@ def api_syria_conflicts():
             'articles_fa': [a for a in all_articles if a.get('language') == 'fa'][:20],
             'articles_reddit': reddit_posts[:20],
             
-            'version': '2.8.1'
+            'version': '3.0.0'
         })
         
     except Exception as e:
