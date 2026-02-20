@@ -1,5 +1,5 @@
 """
-Asifah Analytics — Military Asset & Deployment Tracker v2.0.0
+Asifah Analytics — Military Asset & Deployment Tracker v2.1.0
 February 20, 2026
 
 Tracks military asset movements across multiple actors and regions.
@@ -44,6 +44,16 @@ OUTPUTS:
   - Standalone page data for military.html
 
 CHANGELOG:
+  v2.1.0 - Multilingual intelligence expansion:
+           * Added GDELT queries in 8 languages: Hebrew, Russian, Arabic,
+             Farsi, Turkish, Ukrainian, French, Chinese
+           * Added 15 new RSS feeds: Jerusalem Post, Times of Israel, Ynet,
+             Israel Hayom, Al Jazeera, Al Arabiya, MEE, TASS, Moscow Times,
+             Daily Sabah, TRT World, Kyiv Independent, Ukrinform,
+             Iran International, Tasnim
+           * Added missing English GDELT queries for Israel/IDF, Egypt, Turkey
+           * Expanded English GDELT queries from 25 to 44
+           * Total GDELT queries now 92 across 9 languages
   v2.0.0 - Major rewrite:
            * Added base evacuation / drawdown asset category with tiered weights
            * Added location multipliers for hotspot scoring
@@ -1007,6 +1017,7 @@ ALERT_THRESHOLDS = {
 # ========================================
 
 DEFENSE_RSS_FEEDS = {
+    # ── English-language defense media ──
     'The War Zone': 'https://www.twz.com/feed',
     'Breaking Defense': 'https://breakingdefense.com/feed/',
     'Defense One': 'https://www.defenseone.com/rss/all/',
@@ -1016,6 +1027,33 @@ DEFENSE_RSS_FEEDS = {
     'CENTCOM': 'https://www.centcom.mil/RSS/',
     'NATO News': 'https://www.nato.int/cps/en/natohq/news.xml',
     'DVIDS': 'https://www.dvidshub.net/rss/news',
+
+    # ── Hebrew / Israeli defense media ──
+    'Jerusalem Post': 'https://www.jpost.com/rss/rssfeedsmilitary.aspx',
+    'Times of Israel': 'https://www.timesofisrael.com/feed/',
+    'Ynet News': 'https://www.ynetnews.com/RSS/0,84,0,0,1,0',
+    'Israel Hayom': 'https://www.israelhayom.com/feed/',
+
+    # ── Arabic-language defense / regional media ──
+    'Al Jazeera English': 'https://www.aljazeera.com/xml/rss/all.xml',
+    'Al Arabiya English': 'https://english.alarabiya.net/tools/rss',
+    'Middle East Eye': 'https://www.middleeasteye.net/rss',
+
+    # ── Russian-language defense media ──
+    'TASS Defense': 'https://tass.com/rss/v2.xml',
+    'Moscow Times': 'https://www.themoscowtimes.com/rss/news',
+
+    # ── Turkish / regional media ──
+    'Daily Sabah': 'https://www.dailysabah.com/rssFeed/defense',
+    'TRT World': 'https://www.trtworld.com/rss',
+
+    # ── Ukraine conflict trackers ──
+    'Kyiv Independent': 'https://kyivindependent.com/feed/',
+    'Ukrinform': 'https://www.ukrinform.net/rss/block-lastnews',
+
+    # ── Iran / Farsi-adjacent English sources ──
+    'Iran International': 'https://www.iranintl.com/en/feed',
+    'Tasnim English': 'https://www.tasnimnews.com/en/rss',
 }
 
 REDDIT_MILITARY_SUBREDDITS = [
@@ -1194,8 +1232,16 @@ def fetch_gdelt_military(query, days=7, language='eng'):
 
 
 def fetch_all_gdelt_military(days=7):
-    """Fetch military articles from GDELT across multiple queries"""
-    queries = [
+    """Fetch military articles from GDELT across multiple queries and languages.
+
+    v2.1: Multilingual expansion — queries in Russian, Hebrew, Arabic, Farsi,
+    Turkish, Ukrainian, French, and Chinese to catch defense reporting that
+    English-only queries miss entirely (e.g., Israeli IDF reports, TASS
+    military dispatches, IRGC announcements in Farsi).
+    """
+
+    # ── ENGLISH queries (expanded — added Israel, Egypt, Turkey, more evac) ──
+    english_queries = [
         # Core ME queries
         'military deployment middle east',
         'carrier strike group persian gulf',
@@ -1211,29 +1257,148 @@ def fetch_all_gdelt_military(days=7):
         'embassy evacuation middle east',
         'voluntary departure military',
         'military families evacuation',
+        'ordered departure embassy',
+        'noncombatant evacuation operation',
+        # Israel (MISSING before v2.1!)
+        'IDF military operation',
+        'Israel defense forces deployment',
+        'Israel military buildup',
+        'Israel reservists mobilization',
+        'Iron Dome deployment',
+        'Israeli airstrike',
+        'Israel Hezbollah military',
+        'IDF northern command',
         # Regional allies
         'jordan military base',
         'qatar al udeid',
         'saudi military exercise',
         'uae military',
         'kuwait camp arifjan',
+        'egypt military exercise',
+        'egypt sinai troops',
+        # Turkey
+        'turkish military operation syria',
+        'turkey military exercise',
+        'incirlik air base',
         # Europe / NATO
         'nato exercise arctic',
         'nato military deployment',
         'greenland military defense',
+        'nato baltic deployment',
         # Ukraine / Russia
         'ukraine military front',
         'russia ukraine offensive',
         'ukraine weapons delivery',
         'black sea military',
+        'ukraine drone strike russia',
+        'russia mobilization military',
+        'crimea military attack',
     ]
 
+    # ── HEBREW queries (Israeli defense reporting) ──
+    hebrew_queries = [
+        'צה"ל פריסה',              # IDF deployment
+        'צה"ל תרגיל',              # IDF exercise
+        'כיפת ברזל',               # Iron Dome
+        'חיל האוויר תרגיל',        # Air Force exercise
+        'מילואים גיוס',            # Reserves mobilization
+        'חזבאללה צפון',            # Hezbollah north
+        'פיקוד צפון כוננות',       # Northern Command readiness
+        'חיל הים סיור',            # Navy patrol
+    ]
+
+    # ── RUSSIAN queries (Russia/Ukraine military reporting) ──
+    russian_queries = [
+        'военная операция украина',        # military operation ukraine
+        'черноморский флот',               # Black Sea Fleet
+        'вооруженные силы учения',         # armed forces exercises
+        'ракетный удар украина',           # missile strike ukraine
+        'мобилизация военная',             # military mobilization
+        'северный флот арктика',           # Northern Fleet Arctic
+        'военно-морской флот',             # Navy
+        'ПВО развертывание',               # Air defense deployment
+    ]
+
+    # ── ARABIC queries (Gulf, Iran, regional military) ──
+    arabic_queries = [
+        'الحرس الثوري تدريب',             # IRGC exercise
+        'قوات عسكرية الخليج',              # military forces Gulf
+        'تدريب عسكري السعودية',            # military exercise Saudi
+        'القوات المسلحة الإماراتية',       # UAE armed forces
+        'الجيش المصري تدريب',              # Egyptian army exercise
+        'القوات الأردنية',                 # Jordanian forces
+        'حزب الله عسكري',                  # Hezbollah military
+        'صواريخ باليستية إيران',           # ballistic missiles Iran
+        'القوات البحرية مضيق هرمز',       # naval forces Strait of Hormuz
+        'إخلاء قاعدة عسكرية',             # military base evacuation
+    ]
+
+    # ── FARSI queries (Iranian military / IRGC) ──
+    farsi_queries = [
+        'سپاه پاسداران رزمایش',           # IRGC exercise
+        'نیروی دریایی رزمایش',             # Navy exercise
+        'موشک بالستیک آزمایش',             # ballistic missile test
+        'پهپاد نظامی',                     # military drone
+        'نیروی هوافضا سپاه',               # IRGC Aerospace Force
+        'تنگه هرمز رزمایش',                # Strait of Hormuz exercise
+    ]
+
+    # ── TURKISH queries (Turkey military ops) ──
+    turkish_queries = [
+        'türk silahlı kuvvetleri operasyon',   # Turkish armed forces operation
+        'türk donanması tatbikat',              # Turkish navy exercise
+        'suriye askeri operasyon',              # Syria military operation
+        'bayraktar insansız hava',              # Bayraktar drone
+        'incirlik üssü',                        # Incirlik base
+    ]
+
+    # ── UKRAINIAN queries (Ukrainian military reporting) ──
+    ukrainian_queries = [
+        'збройні сили україни',            # Armed Forces of Ukraine
+        'фронт наступ',                    # front offensive
+        'мобілізація військова',            # military mobilization
+        'протиповітряна оборона',           # air defense
+        'зброя постачання',                 # weapons supply
+    ]
+
+    # ── FRENCH queries (North Africa, Djibouti, Mediterranean) ──
+    french_queries = [
+        'forces armées méditerranée',       # armed forces Mediterranean
+        'base militaire djibouti',          # military base Djibouti
+        'opération militaire sahel',         # military operation Sahel
+    ]
+
+    # ── CHINESE queries (PLA / South China Sea) ──
+    chinese_queries = [
+        '军事演习 南海',                     # military exercise South China Sea
+        '解放军 海军',                        # PLA Navy
+        '中国 军舰',                          # China warship
+    ]
+
+    # ── Fetch all query blocks ──
     all_articles = []
 
-    for query in queries:
-        articles = fetch_gdelt_military(query, days)
-        all_articles.extend(articles)
-        time.sleep(0.3)
+    query_blocks = [
+        (english_queries, 'eng', 'English'),
+        (hebrew_queries, 'heb', 'Hebrew'),
+        (russian_queries, 'rus', 'Russian'),
+        (arabic_queries, 'ara', 'Arabic'),
+        (farsi_queries, 'fas', 'Farsi'),
+        (turkish_queries, 'tur', 'Turkish'),
+        (ukrainian_queries, 'ukr', 'Ukrainian'),
+        (french_queries, 'fra', 'French'),
+        (chinese_queries, 'zho', 'Chinese'),
+    ]
+
+    for queries, lang_code, lang_name in query_blocks:
+        block_count = 0
+        for query in queries:
+            articles = fetch_gdelt_military(query, days, language=lang_code)
+            all_articles.extend(articles)
+            block_count += len(articles)
+            time.sleep(0.3)
+        if block_count > 0:
+            print(f"[Military GDELT] {lang_name} ({lang_code}): {block_count} articles from {len(queries)} queries")
 
     print(f"[Military GDELT] Total GDELT military articles: {len(all_articles)}")
     return all_articles
@@ -1743,7 +1908,7 @@ def scan_military_posture(days=7, force_refresh=False):
         },
         'last_updated': datetime.now(timezone.utc).isoformat(),
         'cached': False,
-        'version': '2.0.0'
+        'version': '2.1.0'
     }
 
     save_military_cache(result)
