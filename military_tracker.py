@@ -1,6 +1,6 @@
 """
-Asifah Analytics — Military Asset & Deployment Tracker v1.0.1
-February 18, 2026
+Asifah Analytics — Military Asset & Deployment Tracker v2.0.0
+February 20, 2026
 
 Tracks military asset movements across multiple actors and regions.
 Feeds deployment scores into existing threat probability calculations.
@@ -13,24 +13,45 @@ ACTORS TRACKED:
     - Iran / IRGC
     - Russia
     - China / PLAN
-  Tier 3 (Regional):
-    - Saudi Arabia / UAE
-    - Turkey
+  Tier 3 (Regional — Middle East):
+    - Saudi Arabia
+    - UAE
+    - Jordan
+    - Qatar
+    - Kuwait
     - Egypt
+    - Turkey
+  Tier 3 (Regional — Europe):
+    - Ukraine
   Tier 4 (Alliance):
     - NATO (Europe / Arctic expansion)
 
 REGIONS:
   Primary: CENTCOM AOR (Persian Gulf, Red Sea, Eastern Med, Levant)
-  Planned: EUCOM (Europe, Arctic/Greenland), INDOPACOM
+  Secondary: EUCOM (Europe, Arctic/Greenland, Black Sea, Ukraine)
+  Planned: INDOPACOM
+
+REGIONAL GROUPINGS (for frontend display):
+  - Asia & The Pacific Theatre
+  - European Theatre
+  - Middle East & North Africa
 
 OUTPUTS:
   - Per-target military posture scores
   - Regional tension multipliers
+  - Location-aware context scoring
   - Alert objects for dashboard integration
   - Standalone page data for military.html
 
 CHANGELOG:
+  v2.0.0 - Major rewrite:
+           * Added base evacuation / drawdown asset category with tiered weights
+           * Added location multipliers for hotspot scoring
+           * Added context-aware scoring (adversary exercises during buildup)
+           * Expanded actors: Ukraine, split Saudi/UAE/Jordan/Qatar/Kuwait
+           * Added regional theatre groupings for frontend
+           * Expanded GDELT and RSS queries for new coverage
+           * Added EUCOM target mapping (Ukraine, Black Sea, Baltic)
   v1.0.1 - Added CORS headers to all endpoint responses
   v1.0.0 - Initial release
 
@@ -62,6 +83,35 @@ MILITARY_CACHE_FILE = '/tmp/military_tracker_cache.json'
 MILITARY_CACHE_TTL_HOURS = 4
 
 # ========================================
+# REGIONAL THEATRE GROUPINGS (for frontend)
+# ========================================
+
+REGIONAL_THEATRES = {
+    'asia_pacific': {
+        'label': 'Asia & The Pacific Theatre',
+        'icon': '🌏',
+        'order': 1,
+        'actors': ['china'],
+        'description': 'INDOPACOM area — China/PLAN activity, South China Sea, Indian Ocean'
+    },
+    'europe': {
+        'label': 'European Theatre',
+        'icon': '🌍',
+        'order': 2,
+        'actors': ['nato', 'russia', 'turkey', 'ukraine'],
+        'description': 'EUCOM area — NATO, Russia, Arctic, Black Sea, Ukraine'
+    },
+    'middle_east': {
+        'label': 'Middle East & North Africa',
+        'icon': '🕌',
+        'order': 3,
+        'actors': ['us', 'israel', 'iran', 'egypt', 'jordan', 'kuwait', 'qatar', 'saudi_arabia', 'uae'],
+        'description': 'CENTCOM area — Persian Gulf, Red Sea, Eastern Med, Levant'
+    }
+}
+
+
+# ========================================
 # MILITARY ACTORS
 # ========================================
 
@@ -73,6 +123,7 @@ MILITARY_ACTORS = {
         'name': 'United States',
         'flag': '🇺🇸',
         'tier': 1,
+        'theatre': 'middle_east',
         'weight': 1.0,
         'feeds_into': ['strike_probability'],
         'keywords': [
@@ -98,7 +149,11 @@ MILITARY_ACTORS = {
             'iron dome us', 'us air defense middle east',
             # Logistics
             'pre-positioned stocks', 'ammunition shipment',
-            'military sealift command', 'us logistics middle east'
+            'military sealift command', 'us logistics middle east',
+            # Buildup / surge language
+            'us military buildup', 'us force posture', 'us surge middle east',
+            'massive fleet', 'armada', 'combat power',
+            'us military assets middle east', 'military assets flock'
         ],
         'rss_feeds': [
             'https://www.centcom.mil/RSS/',
@@ -110,6 +165,7 @@ MILITARY_ACTORS = {
         'name': 'Israel',
         'flag': '🇮🇱',
         'tier': 1,
+        'theatre': 'middle_east',
         'weight': 0.9,
         'feeds_into': ['strike_probability', 'regional_tension'],
         'keywords': [
@@ -142,6 +198,7 @@ MILITARY_ACTORS = {
         'name': 'Iran',
         'flag': '🇮🇷',
         'tier': 2,
+        'theatre': 'middle_east',
         'weight': 0.8,
         'feeds_into': ['reverse_threat', 'regional_tension'],
         'keywords': [
@@ -160,9 +217,15 @@ MILITARY_ACTORS = {
             'irgc exercise', 'iran military exercise', 'iran war games',
             'irgc ground forces', 'basij mobilization',
             'great prophet exercise', 'iran military drill',
+            'iran drills', 'iran naval drill', 'iran naval exercise',
             # Proxy logistics
             'iran weapons shipment', 'iran arms transfer',
-            'irgc quds force', 'iran smuggling weapons'
+            'irgc quds force', 'iran smuggling weapons',
+            # Threats & posturing
+            'iran threatens', 'iran retaliation', 'iran warns',
+            'iranian bases within range', 'iran retaliatory strike',
+            'iran nuclear weapon', 'iran enrichment',
+            'iranian defense minister'
         ],
         'rss_feeds': []
     },
@@ -171,6 +234,7 @@ MILITARY_ACTORS = {
         'name': 'China',
         'flag': '🇨🇳',
         'tier': 2,
+        'theatre': 'asia_pacific',
         'weight': 0.6,
         'feeds_into': ['regional_tension'],
         'keywords': [
@@ -189,7 +253,11 @@ MILITARY_ACTORS = {
             'china intelligence ship', 'yuan wang tracking ship',
             # Exercises
             'china iran naval exercise', 'china russia naval exercise',
-            'china military exercise middle east'
+            'china military exercise middle east',
+            # Indo-Pacific
+            'south china sea military', 'taiwan strait military',
+            'pla exercise', 'chinese military exercise',
+            'china naval gun', 'plan warship'
         ],
         'rss_feeds': []
     },
@@ -198,6 +266,7 @@ MILITARY_ACTORS = {
         'name': 'Russia',
         'flag': '🇷🇺',
         'tier': 2,
+        'theatre': 'europe',
         'weight': 0.7,
         'feeds_into': ['regional_tension'],
         'keywords': [
@@ -216,28 +285,130 @@ MILITARY_ACTORS = {
             'russian air force middle east', 'su-35 syria',
             # Arms / support
             'russia arms delivery', 'russia s-300', 'russia s-400',
-            'russia weapons syria', 'russia iran military cooperation'
+            'russia weapons syria', 'russia iran military cooperation',
+            # Ukraine theatre
+            'russian offensive ukraine', 'russia ukraine front',
+            'russian forces ukraine', 'russia mobilization',
+            'russian missile ukraine', 'russia drone ukraine',
+            'russian artillery ukraine', 'wagner group',
+            'russia nuclear posture', 'russia nuclear threat',
+            # Black Sea
+            'russia black sea', 'russian black sea fleet',
+            'sevastopol naval base', 'crimea military',
+            # Arctic
+            'russia arctic military', 'northern fleet',
+            'russia arctic exercise'
         ],
         'rss_feeds': []
     },
 
     # ------------------------------------------------
-    # TIER 3 — Regional actors
+    # TIER 3 — Regional actors (Middle East)
     # ------------------------------------------------
-    'saudi_uae': {
-        'name': 'Saudi Arabia / UAE',
+    'saudi_arabia': {
+        'name': 'Saudi Arabia',
         'flag': '🇸🇦',
         'tier': 3,
+        'theatre': 'middle_east',
         'weight': 0.5,
         'feeds_into': ['regional_tension'],
         'keywords': [
             'saudi military', 'saudi air force', 'royal saudi navy',
             'saudi air defense', 'saudi patriot', 'saudi thaad',
+            'saudi arabia military exercise', 'saudi naval exercise',
+            'saudi yemen border', 'saudi military buildup',
+            'saudi defense spending', 'saudi arms deal',
+            'saudi intercept', 'saudi houthi',
+            'us cargo planes saudi', 'saudi base'
+        ],
+        'rss_feeds': []
+    },
+
+    'uae': {
+        'name': 'United Arab Emirates',
+        'flag': '🇦🇪',
+        'tier': 3,
+        'theatre': 'middle_east',
+        'weight': 0.5,
+        'feeds_into': ['regional_tension'],
+        'keywords': [
             'uae forces', 'uae military', 'uae air force',
-            'coalition forces yemen', 'saudi yemen border',
-            'uae naval', 'saudi naval exercise',
-            'saudi arabia military exercise', 'uae military exercise',
-            'gulf cooperation council military', 'gcc military exercise'
+            'uae naval', 'uae military exercise',
+            'al dhafra air base', 'uae defense',
+            'uae arms deal', 'uae military buildup',
+            'uae evacuation', 'uae departure',
+            'emirates military', 'uae drone'
+        ],
+        'rss_feeds': []
+    },
+
+    'jordan': {
+        'name': 'Jordan',
+        'flag': '🇯🇴',
+        'tier': 3,
+        'theatre': 'middle_east',
+        'weight': 0.5,
+        'feeds_into': ['regional_tension'],
+        'keywords': [
+            'jordan military', 'jordanian armed forces',
+            'muwaffaq salti', 'tower 22', 'jordan air base',
+            'jordan border', 'jordan syria border',
+            'f-15 jordan', 'us forces jordan',
+            'jordan military exercise', 'jordan defense',
+            'jordan intercept', 'jordan air defense',
+            'eager lion exercise', 'jordan base',
+            'us cargo planes jordan', 'strike eagles jordan'
+        ],
+        'rss_feeds': []
+    },
+
+    'qatar': {
+        'name': 'Qatar',
+        'flag': '🇶🇦',
+        'tier': 3,
+        'theatre': 'middle_east',
+        'weight': 0.5,
+        'feeds_into': ['regional_tension'],
+        'keywords': [
+            'al udeid air base', 'al udeid', 'qatar base',
+            'centcom forward headquarters', 'centcom hq qatar',
+            'qatar military', 'qatar defense',
+            'qatar air base evacuation', 'al udeid evacuation',
+            'qatar military exercise', 'us forces qatar'
+        ],
+        'rss_feeds': []
+    },
+
+    'kuwait': {
+        'name': 'Kuwait',
+        'flag': '🇰🇼',
+        'tier': 3,
+        'theatre': 'middle_east',
+        'weight': 0.4,
+        'feeds_into': ['regional_tension'],
+        'keywords': [
+            'camp arifjan', 'kuwait military', 'kuwait base',
+            'us forces kuwait', 'kuwait defense',
+            'ali al salem air base', 'kuwait evacuation',
+            'kuwait military exercise'
+        ],
+        'rss_feeds': []
+    },
+
+    'egypt': {
+        'name': 'Egypt',
+        'flag': '🇪🇬',
+        'tier': 3,
+        'theatre': 'middle_east',
+        'weight': 0.4,
+        'feeds_into': ['regional_tension'],
+        'keywords': [
+            'egyptian military', 'egypt military exercise',
+            'egyptian navy', 'egypt suez canal military',
+            'egypt sinai operation', 'egyptian air force',
+            'egypt rafale', 'egypt military buildup',
+            'egypt libya border', 'egypt gaza border',
+            'egypt israel border troops', 'bright star exercise'
         ],
         'rss_feeds': []
     },
@@ -246,6 +417,7 @@ MILITARY_ACTORS = {
         'name': 'Turkey',
         'flag': '🇹🇷',
         'tier': 3,
+        'theatre': 'europe',
         'weight': 0.5,
         'feeds_into': ['regional_tension'],
         'keywords': [
@@ -255,24 +427,46 @@ MILITARY_ACTORS = {
             'incirlik air base', 'turkish military exercise',
             'turkish navy mediterranean', 'turkish naval exercise',
             'turkey northern iraq', 'turkey pkk operation',
-            'turkish ground operation syria'
+            'turkish ground operation syria',
+            'turkey nato', 'turkish military nato'
         ],
         'rss_feeds': []
     },
 
-    'egypt': {
-        'name': 'Egypt',
-        'flag': '🇪🇬',
+    # ------------------------------------------------
+    # TIER 3 — Regional actors (Europe)
+    # ------------------------------------------------
+    'ukraine': {
+        'name': 'Ukraine',
+        'flag': '🇺🇦',
         'tier': 3,
-        'weight': 0.4,
+        'theatre': 'europe',
+        'weight': 0.6,
         'feeds_into': ['regional_tension'],
         'keywords': [
-            'egyptian military', 'egypt military exercise',
-            'egyptian navy', 'egypt suez canal military',
-            'egypt sinai operation', 'egyptian air force',
-            'egypt rafale', 'egypt military buildup',
-            'egypt libya border', 'egypt gaza border',
-            'egypt israel border troops'
+            # Military operations
+            'ukraine military', 'ukrainian armed forces',
+            'ukraine offensive', 'ukraine counteroffensive',
+            'ukraine front line', 'ukraine defense',
+            # Specific regions
+            'zaporizhzhia front', 'kherson front', 'bakhmut',
+            'kursk incursion', 'ukraine kursk',
+            'donetsk front', 'luhansk front',
+            # Weapons & systems
+            'ukraine f-16', 'ukraine patriot', 'ukraine air defense',
+            'ukraine himars', 'ukraine storm shadow',
+            'ukraine atacms', 'ukraine drone warfare',
+            'ukraine long range strike', 'ukraine missile',
+            # Naval
+            'ukraine black sea', 'ukraine naval drone',
+            'ukraine anti-ship', 'ukraine sea drone',
+            # Arms deliveries
+            'ukraine arms delivery', 'ukraine weapons package',
+            'ukraine military aid', 'ukraine ammunition',
+            'ukraine defense package',
+            # Mobilization
+            'ukraine mobilization', 'ukraine conscription',
+            'ukraine reserves', 'ukraine recruitment'
         ],
         'rss_feeds': []
     },
@@ -284,6 +478,7 @@ MILITARY_ACTORS = {
         'name': 'NATO',
         'flag': '🏳️',
         'tier': 4,
+        'theatre': 'europe',
         'weight': 0.5,
         'feeds_into': ['regional_tension'],
         'keywords': [
@@ -309,7 +504,9 @@ MILITARY_ACTORS = {
             # General European
             'nato defense spending', 'nato summit',
             'nato article 5', 'nato interoperability',
-            'ramstein air base', 'shape nato', 'saceur'
+            'ramstein air base', 'shape nato', 'saceur',
+            # Ukraine support
+            'nato ukraine', 'nato aid ukraine', 'ramstein format'
         ],
         'rss_feeds': [
             'https://www.nato.int/cps/en/natohq/news.xml',
@@ -344,7 +541,8 @@ ASSET_CATEGORIES = {
             'submarine deployed', 'submarine gulf', 'submarine mediterranean',
             'ssbn', 'ssgn', 'ohio class', 'virginia class',
             'submarine transit suez', 'submarine indian ocean',
-            'guided missile submarine'
+            'guided missile submarine', 'uss georgia', 'uss florida',
+            'uss ohio', 'uss michigan'
         ]
     },
     'bomber_deployment': {
@@ -356,7 +554,8 @@ ASSET_CATEGORIES = {
             'bomber task force', 'b-1 lancer', 'b-1b',
             'b-2 spirit', 'b-2 bomber', 'b-52 stratofortress', 'b-52h',
             'bomber deployment diego garcia', 'bomber deployment middle east',
-            'strategic bomber deployed', 'long-range strike'
+            'strategic bomber deployed', 'long-range strike',
+            'b-2 stealth bomber', 'long-range mission'
         ]
     },
     'amphibious_group': {
@@ -378,7 +577,9 @@ ASSET_CATEGORIES = {
         'keywords': [
             'f-35 deployed', 'f-22 deployed', 'f-15 deployed', 'f-16 deployed',
             'fighter squadron deployed', 'additional aircraft',
-            'air expeditionary wing', 'fighter surge', 'combat air patrol'
+            'air expeditionary wing', 'fighter surge', 'combat air patrol',
+            'f-15e strike eagle', 'strike eagles deployed',
+            'expeditionary fighter squadron', 'fighter wing deployed'
         ]
     },
     'air_defense': {
@@ -389,7 +590,9 @@ ASSET_CATEGORIES = {
         'keywords': [
             'patriot battery deployed', 'thaad deployed', 'thaad battery',
             'iron dome deployed', 'arrow battery', 'david sling deployed',
-            'air defense deployment', 'sam battery', 'air defense activation'
+            'air defense deployment', 'sam battery', 'air defense activation',
+            'patriot missile defense', 'air defense coordination',
+            'mead-cdoc', 'air defense cell'
         ]
     },
     'isr_assets': {
@@ -401,7 +604,8 @@ ASSET_CATEGORIES = {
             'mq-9 reaper', 'rq-4 global hawk', 'mq-4c triton',
             'p-8 poseidon', 'e-3 awacs', 'rc-135 rivet joint',
             'isr surge', 'surveillance aircraft', 'reconnaissance flight',
-            'spy plane', 'intelligence aircraft', 'sigint aircraft'
+            'spy plane', 'intelligence aircraft', 'sigint aircraft',
+            'rc-135w', 'electronic emissions', 'flight tracking military'
         ]
     },
     'ground_forces': {
@@ -427,7 +631,9 @@ ASSET_CATEGORIES = {
             'military sealift command', 'logistics buildup',
             'fuel pre-positioning', 'hospital ship deployed',
             'supply chain military', 'c-17 airlift surge',
-            'c-5 galaxy deployment', 'military cargo'
+            'c-5 galaxy deployment', 'military cargo',
+            'cargo planes flowing', 'c-130 airlift',
+            'airlift surge', 'logistics surge'
         ]
     },
     'missile_test': {
@@ -438,7 +644,8 @@ ASSET_CATEGORIES = {
         'keywords': [
             'missile test', 'ballistic missile launch', 'cruise missile test',
             'missile exercise', 'rocket launch', 'weapons test',
-            'hypersonic test', 'anti-ship missile test'
+            'hypersonic test', 'anti-ship missile test',
+            'tomahawk launch', 'missile salvo'
         ]
     },
     'naval_exercise': {
@@ -451,7 +658,142 @@ ASSET_CATEGORIES = {
             'freedom of navigation', 'multinational naval exercise',
             'combined maritime forces', 'naval war games'
         ]
+    },
+
+    # ================================================
+    # NEW: Base Evacuation / Drawdown (v2.0)
+    # ================================================
+    'base_evacuation': {
+        'label': 'Base Evacuation / Ordered Departure',
+        'icon': '🚨',
+        'weight': 5.0,  # Base weight — modified by sub-type in analysis
+        'description': 'Evacuation of military bases or embassy drawdowns. Highest threat signal.',
+        'keywords': [
+            # Full military evacuation (weight: 5.0)
+            'base evacuation', 'military evacuation', 'evacuated base',
+            'evacuation ordered', 'personnel evacuated',
+            'troops evacuated', 'evacuated troops',
+            'evacuation of base', 'base drawdown',
+            # NEO / noncombatant (weight: 4.5)
+            'noncombatant evacuation', 'neo operation',
+            'neo packet', 'neo preparation',
+            # Ordered departure (weight: 4.0)
+            'ordered departure', 'embassy ordered departure',
+            'reduced footprint', 'nonessential personnel depart',
+            'embassy drawdown', 'embassy evacuation',
+            'partial evacuation', 'personnel relocated',
+            # Authorized voluntary departure (weight: 3.5)
+            'voluntary departure', 'authorized departure',
+            'dependent evacuation', 'dependents evacuated',
+            'family departure', 'family evacuation',
+            'military families evacuate', 'military families depart',
+            'families prepare departure', 'families leaving',
+            # Related signals
+            'embassy closure', 'consulate evacuation',
+            'potential departures', 'prepare for evacuation'
+        ]
+    },
+
+    # ================================================
+    # NEW: Military Posturing / Threats (v2.0)
+    # ================================================
+    'military_posturing': {
+        'label': 'Military Posturing / Threats',
+        'icon': '⚠️',
+        'weight': 2.5,
+        'description': 'Explicit military threats, warnings, or posturing statements.',
+        'keywords': [
+            'military threat', 'threatens retaliation',
+            'warns of military action', 'warns neighbors',
+            'all options on the table', 'military options',
+            'strike options', 'decisive military options',
+            'regime change', 'regime overthrow',
+            'hit very hard', 'overwhelming force',
+            'bases within range', 'within our range',
+            'will defend with full force', 'painful response'
+        ]
     }
+}
+
+
+# ========================================
+# EVACUATION SUB-TYPE WEIGHTS
+# ========================================
+# Fine-grained weighting for different evacuation signals.
+# These override the base weight when a specific sub-type is detected.
+
+EVACUATION_SUBTYPE_WEIGHTS = {
+    'military_evacuation': {
+        'weight': 5.0,
+        'keywords': ['base evacuation', 'military evacuation', 'evacuated base',
+                     'evacuation ordered', 'personnel evacuated', 'troops evacuated',
+                     'evacuated troops', 'base drawdown']
+    },
+    'neo_operation': {
+        'weight': 4.5,
+        'keywords': ['noncombatant evacuation', 'neo operation', 'neo packet',
+                     'neo preparation']
+    },
+    'ordered_departure': {
+        'weight': 4.0,
+        'keywords': ['ordered departure', 'embassy ordered departure',
+                     'reduced footprint', 'nonessential personnel',
+                     'embassy drawdown', 'embassy evacuation',
+                     'partial evacuation', 'personnel relocated']
+    },
+    'voluntary_departure': {
+        'weight': 3.5,
+        'keywords': ['voluntary departure', 'authorized departure',
+                     'dependent evacuation', 'dependents evacuated',
+                     'family departure', 'family evacuation',
+                     'military families evacuate', 'military families depart',
+                     'families prepare departure', 'families leaving',
+                     'potential departures', 'prepare for evacuation']
+    }
+}
+
+
+# ========================================
+# LOCATION MULTIPLIERS
+# ========================================
+# Hotspot locations that amplify scores when detected in article text.
+# An Iranian exercise in the Strait of Hormuz ≠ a routine drill in Tehran.
+
+LOCATION_MULTIPLIERS = {
+    # Critical chokepoints (3x)
+    'strait of hormuz': 3.0,
+    'bab el-mandeb': 3.0,
+    'suez canal': 2.5,
+    'taiwan strait': 3.0,
+
+    # Active conflict / high-tension zones (2.5x)
+    'persian gulf': 2.0,
+    'arabian sea': 2.0,
+    'red sea': 2.0,
+    'gulf of oman': 2.5,
+    'eastern mediterranean': 2.0,
+    'black sea': 2.0,
+    'sea of azov': 2.0,
+
+    # Specific hotspot bases/areas (2x)
+    'al udeid': 2.5,
+    'bahrain naval': 2.0,
+    'camp arifjan': 1.5,
+    'muwaffaq salti': 2.0,
+    'tower 22': 2.5,
+    'incirlik': 1.5,
+    'diego garcia': 2.0,
+    'tartus': 2.0,
+    'hmeimim': 2.0,
+    'zaporizhzhia': 2.0,
+    'crimea': 2.0,
+    'kursk': 2.0,
+
+    # Broader regions (1.5x)
+    'arctic': 1.5,
+    'greenland': 1.5,
+    'south china sea': 2.0,
+    'baltic': 1.5
 }
 
 
@@ -466,12 +808,12 @@ ASSET_TARGET_MAPPING = {
     'centcom': {
         'Al Udeid Air Base': {
             'location': 'Qatar',
-            'targets': ['iran', 'houthis'],
+            'targets': ['iran', 'qatar'],
             'description': 'CENTCOM forward HQ. Primary air ops hub.'
         },
         'Al Dhafra Air Base': {
             'location': 'UAE',
-            'targets': ['iran', 'houthis'],
+            'targets': ['iran', 'uae'],
             'description': 'ISR and tanker hub. Iran-facing.'
         },
         'Bahrain Naval Base': {
@@ -531,8 +873,18 @@ ASSET_TARGET_MAPPING = {
         },
         'Muwaffaq Salti (Tower 22)': {
             'location': 'Jordan',
-            'targets': ['jordan', 'syria'],
-            'description': 'US base near Jordan-Syria border.'
+            'targets': ['jordan', 'syria', 'iran'],
+            'description': 'US base near Jordan-Syria border. F-15E hub.'
+        },
+        'Camp Arifjan': {
+            'location': 'Kuwait',
+            'targets': ['kuwait', 'iran'],
+            'description': 'US Army Central forward HQ.'
+        },
+        'Ali Al Salem Air Base': {
+            'location': 'Kuwait',
+            'targets': ['kuwait'],
+            'description': 'US Air Force operations in Kuwait.'
         },
         'Red Sea': {
             'location': 'Maritime',
@@ -548,6 +900,11 @@ ASSET_TARGET_MAPPING = {
             'location': 'Djibouti',
             'targets': ['houthis', 'yemen'],
             'description': 'US Africa Command base. Drone and SOF ops.'
+        },
+        'Prince Sultan Air Base': {
+            'location': 'Saudi Arabia',
+            'targets': ['iran', 'saudi_arabia'],
+            'description': 'US Air Force presence in Saudi Arabia.'
         },
     },
 
@@ -584,6 +941,26 @@ ASSET_TARGET_MAPPING = {
             'location': 'Baltic States',
             'targets': ['nato_eastern_flank'],
             'description': 'NATO enhanced forward presence.'
+        },
+        'Grafenwöhr': {
+            'location': 'Germany',
+            'targets': ['europe', 'ukraine_support'],
+            'description': 'US Army training hub. Ukraine training ops.'
+        },
+        'Rzeszów': {
+            'location': 'Poland',
+            'targets': ['ukraine_support'],
+            'description': 'Key logistics hub for Ukraine aid.'
+        },
+        'Mihail Kogălniceanu': {
+            'location': 'Romania',
+            'targets': ['black_sea', 'nato_eastern_flank'],
+            'description': 'US/NATO presence on Black Sea.'
+        },
+        'Deveselu': {
+            'location': 'Romania',
+            'targets': ['nato_eastern_flank'],
+            'description': 'Aegis Ashore missile defense site.'
         },
     }
 }
@@ -819,17 +1196,36 @@ def fetch_gdelt_military(query, days=7, language='eng'):
 def fetch_all_gdelt_military(days=7):
     """Fetch military articles from GDELT across multiple queries"""
     queries = [
+        # Core ME queries
         'military deployment middle east',
         'carrier strike group persian gulf',
         'military exercise middle east',
         'troops deployed middle east',
         'naval deployment mediterranean',
         'irgc military exercise',
+        'iran strait hormuz drill',
         'chinese warship persian gulf',
         'russian navy mediterranean',
+        # Evacuation / drawdown
+        'military base evacuation middle east',
+        'embassy evacuation middle east',
+        'voluntary departure military',
+        'military families evacuation',
+        # Regional allies
+        'jordan military base',
+        'qatar al udeid',
+        'saudi military exercise',
+        'uae military',
+        'kuwait camp arifjan',
+        # Europe / NATO
         'nato exercise arctic',
         'nato military deployment',
         'greenland military defense',
+        # Ukraine / Russia
+        'ukraine military front',
+        'russia ukraine offensive',
+        'ukraine weapons delivery',
+        'black sea military',
     ]
 
     all_articles = []
@@ -885,6 +1281,10 @@ def fetch_all_newsapi_military(days=7):
         'US troops deployed',
         'IRGC military exercise',
         'NATO exercise',
+        'base evacuation Middle East',
+        'military families departure Bahrain',
+        'Ukraine military',
+        'Russia offensive Ukraine',
     ]
 
     all_articles = []
@@ -904,8 +1304,9 @@ def fetch_all_newsapi_military(days=7):
 def fetch_reddit_military(days=7):
     """Fetch military-related Reddit posts"""
     all_posts = []
-    keywords = ['deployment', 'military', 'carrier', 'strike group', 'NATO', 'CENTCOM']
-    query = " OR ".join(keywords[:3])
+    keywords = ['deployment', 'military', 'carrier', 'strike group', 'NATO', 'CENTCOM',
+                'evacuation', 'Ukraine']
+    query = " OR ".join(keywords[:4])
 
     time_filter = "week" if days <= 7 else "month"
 
@@ -953,9 +1354,50 @@ def fetch_reddit_military(days=7):
 # CORE ANALYSIS ENGINE
 # ========================================
 
+def get_location_multiplier(text):
+    """
+    Scan article text for hotspot locations and return the highest multiplier.
+    If multiple hotspots are mentioned, take the maximum (not additive).
+    """
+    max_multiplier = 1.0
+    matched_location = None
+
+    for location, multiplier in LOCATION_MULTIPLIERS.items():
+        if location in text:
+            if multiplier > max_multiplier:
+                max_multiplier = multiplier
+                matched_location = location
+
+    return max_multiplier, matched_location
+
+
+def get_evacuation_subtype_weight(text):
+    """
+    For base_evacuation signals, determine the specific sub-type
+    and return the appropriate weight (military evac > NEO > ordered departure > voluntary).
+    """
+    # Check from highest to lowest priority
+    for subtype_id, subtype_data in sorted(
+        EVACUATION_SUBTYPE_WEIGHTS.items(),
+        key=lambda x: x[1]['weight'],
+        reverse=True
+    ):
+        for kw in subtype_data['keywords']:
+            if kw in text:
+                return subtype_data['weight'], subtype_id
+
+    # Default to base weight
+    return ASSET_CATEGORIES['base_evacuation']['weight'], 'unspecified'
+
+
 def analyze_article_military(article):
     """
     Analyze a single article for military deployment signals.
+
+    v2.0 enhancements:
+    - Location-aware scoring (Strait of Hormuz multiplier, etc.)
+    - Evacuation sub-type weight differentiation
+    - Context-aware scoring
     """
     title = (article.get('title') or '').lower()
     description = (article.get('description') or '').lower()
@@ -968,8 +1410,15 @@ def analyze_article_military(article):
         'regions': set(),
         'targets': set(),
         'score': 0,
-        'signals': []
+        'signals': [],
+        'location_multiplier': 1.0,
+        'hotspot_location': None
     }
+
+    # 0. Determine location multiplier for this article
+    loc_multiplier, hotspot = get_location_multiplier(text)
+    result['location_multiplier'] = loc_multiplier
+    result['hotspot_location'] = hotspot
 
     # 1. Detect which military actors are mentioned
     for actor_id, actor_data in MILITARY_ACTORS.items():
@@ -984,9 +1433,18 @@ def analyze_article_military(article):
                     for asset_kw in asset_data['keywords']:
                         if asset_kw in text:
                             result['asset_types'].add(asset_id)
-                            signal_score = asset_data['weight'] * actor_weight
 
-                            result['signals'].append({
+                            # Determine weight — special handling for evacuations
+                            if asset_id == 'base_evacuation':
+                                asset_weight, evac_subtype = get_evacuation_subtype_weight(text)
+                            else:
+                                asset_weight = asset_data['weight']
+                                evac_subtype = None
+
+                            # Apply location multiplier
+                            signal_score = asset_weight * actor_weight * loc_multiplier
+
+                            signal_entry = {
                                 'actor': actor_id,
                                 'actor_name': actor_data['name'],
                                 'actor_flag': actor_data['flag'],
@@ -996,12 +1454,19 @@ def analyze_article_military(article):
                                 'keyword': asset_kw,
                                 'actor_keyword': keyword,
                                 'weight': round(signal_score, 2),
+                                'base_weight': asset_weight,
+                                'location_multiplier': loc_multiplier,
+                                'hotspot_location': hotspot,
                                 'article_title': article.get('title', '')[:120],
                                 'article_url': article.get('url', ''),
                                 'source': article.get('source', {}).get('name', 'Unknown'),
                                 'published': article.get('publishedAt', '')
-                            })
+                            }
 
+                            if evac_subtype:
+                                signal_entry['evacuation_subtype'] = evac_subtype
+
+                            result['signals'].append(signal_entry)
                             result['score'] += signal_score
                             asset_matched = True
                             break
@@ -1011,6 +1476,8 @@ def analyze_article_military(article):
 
                 # If actor detected but no specific asset, still count it
                 if not asset_matched:
+                    signal_score = actor_weight * 1.0 * loc_multiplier
+
                     result['signals'].append({
                         'actor': actor_id,
                         'actor_name': actor_data['name'],
@@ -1020,13 +1487,16 @@ def analyze_article_military(article):
                         'asset_icon': '⚠️',
                         'keyword': keyword,
                         'actor_keyword': keyword,
-                        'weight': round(actor_weight * 1.0, 2),
+                        'weight': round(signal_score, 2),
+                        'base_weight': 1.0,
+                        'location_multiplier': loc_multiplier,
+                        'hotspot_location': hotspot,
                         'article_title': article.get('title', '')[:120],
                         'article_url': article.get('url', ''),
                         'source': article.get('source', {}).get('name', 'Unknown'),
                         'published': article.get('publishedAt', '')
                     })
-                    result['score'] += actor_weight
+                    result['score'] += signal_score
 
                 break  # One keyword match per actor per article
 
@@ -1059,8 +1529,10 @@ def calculate_regional_tension_multiplier(active_actors):
         return 1.15
     elif count == 3:
         return 1.3
+    elif count == 4:
+        return 1.45
     else:
-        return 1.5
+        return 1.5 + (0.05 * (count - 5))  # Scale beyond 5
 
 
 def determine_alert_level(score):
@@ -1118,6 +1590,7 @@ def scan_military_posture(days=7, force_refresh=False):
     per_actor_scores = {}
     active_actors = set()
     asset_type_counts = {}
+    evacuation_signals = []  # Track separately for dashboard alerts
 
     for article in all_articles:
         analysis = analyze_article_military(article)
@@ -1135,6 +1608,10 @@ def scan_military_posture(days=7, force_refresh=False):
 
                 asset = signal['asset']
                 asset_type_counts[asset] = asset_type_counts.get(asset, 0) + 1
+
+                # Track evacuation signals specifically
+                if asset == 'base_evacuation':
+                    evacuation_signals.append(signal)
 
     # ========================================
     # CALCULATE REGIONAL TENSION MULTIPLIER
@@ -1155,16 +1632,7 @@ def scan_military_posture(days=7, force_refresh=False):
         alert_level = determine_alert_level(score)
         threshold = ALERT_THRESHOLDS[alert_level]
 
-        target_signals = [
-            s for s in all_signals
-            if target in analyze_article_military({
-                'title': s.get('article_title', ''),
-                'description': '',
-                'content': ''
-            }).get('targets', [])
-            or s.get('actor_keyword', '') in str(ASSET_TARGET_MAPPING.get('centcom', {}))
-        ]
-
+        # Get signals relevant to this target
         relevant_signals = sorted(all_signals, key=lambda x: x['weight'], reverse=True)
 
         target_postures[target] = {
@@ -1192,10 +1660,49 @@ def scan_military_posture(days=7, force_refresh=False):
             'name': actor_data.get('name', actor_id),
             'flag': actor_data.get('flag', ''),
             'tier': actor_data.get('tier', 99),
+            'theatre': actor_data.get('theatre', 'unknown'),
             'total_score': round(score, 2),
             'signal_count': len(actor_signals),
             'top_signals': actor_signals[:5],
             'alert_level': determine_alert_level(score)
+        }
+
+    # Also include actors with 0 signals so they appear on the dashboard
+    for actor_id, actor_data in MILITARY_ACTORS.items():
+        if actor_id not in actor_summaries:
+            actor_summaries[actor_id] = {
+                'name': actor_data.get('name', actor_id),
+                'flag': actor_data.get('flag', ''),
+                'tier': actor_data.get('tier', 99),
+                'theatre': actor_data.get('theatre', 'unknown'),
+                'total_score': 0,
+                'signal_count': 0,
+                'top_signals': [],
+                'alert_level': 'normal'
+            }
+
+    # ========================================
+    # BUILD THEATRE GROUPINGS
+    # ========================================
+    theatre_data = {}
+
+    for theatre_id, theatre_info in REGIONAL_THEATRES.items():
+        theatre_actors = {}
+        theatre_total_score = 0
+
+        for actor_id in theatre_info['actors']:
+            if actor_id in actor_summaries:
+                theatre_actors[actor_id] = actor_summaries[actor_id]
+                theatre_total_score += actor_summaries[actor_id]['total_score']
+
+        theatre_data[theatre_id] = {
+            'label': theatre_info['label'],
+            'icon': theatre_info['icon'],
+            'order': theatre_info['order'],
+            'description': theatre_info['description'],
+            'actors': theatre_actors,
+            'total_score': round(theatre_total_score, 2),
+            'alert_level': determine_alert_level(theatre_total_score)
         }
 
     # ========================================
@@ -1214,8 +1721,20 @@ def scan_military_posture(days=7, force_refresh=False):
         'tension_multiplier': tension_multiplier,
         'target_postures': target_postures,
         'actor_summaries': actor_summaries,
+        'theatre_groupings': theatre_data,
         'asset_distribution': asset_type_counts,
-        'top_signals': sorted(all_signals, key=lambda x: x['weight'], reverse=True)[:20],
+        'evacuation_alerts': [
+            {
+                'subtype': s.get('evacuation_subtype', 'unspecified'),
+                'actor': s.get('actor_name', ''),
+                'title': s.get('article_title', ''),
+                'url': s.get('article_url', ''),
+                'weight': s.get('weight', 0),
+                'source': s.get('source', '')
+            }
+            for s in evacuation_signals
+        ],
+        'top_signals': sorted(all_signals, key=lambda x: x['weight'], reverse=True)[:25],
         'source_breakdown': {
             'defense_rss': len(rss_articles),
             'gdelt': len(gdelt_articles),
@@ -1224,13 +1743,14 @@ def scan_military_posture(days=7, force_refresh=False):
         },
         'last_updated': datetime.now(timezone.utc).isoformat(),
         'cached': False,
-        'version': '1.0.1'
+        'version': '2.0.0'
     }
 
     save_military_cache(result)
 
     print(f"[Military Tracker] ✅ Scan complete in {scan_time}s")
     print(f"[Military Tracker]    Signals: {len(all_signals)}, Actors: {len(active_actors)}, Targets: {len(target_postures)}")
+    print(f"[Military Tracker]    Evacuation alerts: {len(evacuation_signals)}")
 
     return result
 
@@ -1275,7 +1795,15 @@ def get_military_posture(target):
 
         banner_text = ''
         top_signals = posture.get('top_signals', [])
-        if top_signals and posture.get('show_banner'):
+
+        # Prioritize evacuation signals in banner text
+        evac_alerts = data.get('evacuation_alerts', [])
+        if evac_alerts and posture.get('show_banner'):
+            top_evac = evac_alerts[0]
+            banner_text = (
+                f"🚨 BASE EVACUATION: {top_evac.get('title', '')[:80]}"
+            )
+        elif top_signals and posture.get('show_banner'):
             top = top_signals[0]
             banner_text = (
                 f"{ALERT_THRESHOLDS[alert_level]['icon']} "
@@ -1294,7 +1822,8 @@ def get_military_posture(target):
             'detail_url': '/military.html',
             'top_signals': top_signals[:3],
             'tension_multiplier': data.get('tension_multiplier', 1.0),
-            'active_actors': data.get('active_actors', [])
+            'active_actors': data.get('active_actors', []),
+            'evacuation_alerts': evac_alerts[:3]
         }
 
     except Exception as e:
