@@ -276,6 +276,10 @@ TARGET_BASELINES = {
     'jordan': {
         'base_adjustment': +3,
         'description': 'Stable US ally, elevated due to regional spillover risk'
+    },
+    'israel': {
+        'base_adjustment': +12,
+        'description': 'Active multi-front conflict, elevated baseline due to ongoing operations'
     }
 }
 
@@ -299,6 +303,11 @@ REDDIT_SUBREDDITS = {
     "jordan": [
         "jordan", "geopolitics", "CredibleDefense",
         "anime_titties", "Israel", "syriancivilwar"
+    ],
+    "israel": [
+        "Israel", "geopolitics", "CredibleDefense",
+        "anime_titties", "ForbiddenBromance", "IsraelPalestine",
+        "IronDome", "worldnews"
     ]
 }
 
@@ -361,6 +370,31 @@ TARGET_KEYWORDS = {
             'Jordan', 'Amman', 'Jordanian', 'King Abdullah', 'Hashemite',
             'Tower 22', 'Captagon', 'Jordan border', 'Jordan airspace',
             'Jordan protest', 'Palestinian', 'ISIS Jordan'
+        ]
+    },
+    'israel': {
+        'keywords': [
+            'israel', 'israeli', 'idf', 'tel aviv', 'jerusalem', 'netanyahu',
+            'iron dome', 'iron beam', 'israel defense forces', 'knesset',
+            'shin bet', 'mossad', 'israel military', 'israel strike',
+            'israel airstrike', 'israel operation', 'israel gaza',
+            'israel lebanon', 'israel hezbollah', 'israel iran',
+            'west bank raid', 'jenin raid', 'nablus', 'tulkarm',
+            'israel houthis', 'eilat', 'haifa', 'golan heights',
+            'ben gurion', 'negev', 'dimona', 'israel reserves',
+            'israel mobilization', 'gaza operation', 'rafah',
+            'hamas tunnel', 'hostage', 'hostages gaza',
+            'צה״ל', 'כיפת ברזל', 'תקיפה', 'חיזבאללה', 'חמאס',
+            'טילים', 'רקטות', 'כוננות', 'מילואים', 'פיגוע',
+            'עזה', 'לבנון', 'איראן', 'תימן', 'חות׳ים',
+            'יהודה ושומרון', 'ג׳נין', 'שכם', 'גדר הביטחון'
+        ],
+        'reddit_keywords': [
+            'Israel', 'IDF', 'Netanyahu', 'Iron Dome', 'Gaza',
+            'Hezbollah', 'Hamas', 'West Bank', 'Jenin', 'Houthis',
+            'Tel Aviv', 'Jerusalem', 'Israeli military', 'strike',
+            'المقاومة', 'الكيان الصهيوني', 'صواريخ', 'حزب الله', 'حماس',
+            'القسام', 'طوفان الأقصى', 'جيش الاحتلال'
         ]
     }
 }
@@ -1116,7 +1150,430 @@ def calculate_reverse_threat(articles, source_actor='iran', target_actor='israel
         'risk_level': 'high' if final_probability > 0.40 else 'moderate' if final_probability > 0.20 else 'low',
         'calculation_method': 'weighted_keywords_with_retaliation_trigger'
     }
+# ========================================
+# ISRAEL-SPECIFIC THREAT CALCULATIONS
+# ========================================
 
+ISRAEL_INCOMING_THREAT_KEYWORDS = {
+    'iran_direct': {
+        'weight': 4.0,
+        'phrases': [
+            'iran strike israel', 'iran attack israel', 'iran threatens israel',
+            'iran missile israel', 'iran drone israel', 'iranian attack israel',
+            'irgc israel', 'tehran threatens israel', 'iran ballistic missile israel',
+            'iran cruise missile israel', 'iran retaliates israel', 'iran revenge israel',
+            'iranian drone swarm', 'iran nuclear israel', 'iran proxy israel',
+            'quds force israel', 'iran warns israel', 'supreme leader israel'
+        ]
+    },
+    'hezbollah': {
+        'weight': 3.5,
+        'phrases': [
+            'hezbollah rocket israel', 'hezbollah missile israel', 'hezbollah strike israel',
+            'hezbollah attack israel', 'hezbollah drone israel', 'hezbollah anti-tank',
+            'hezbollah northern israel', 'hezbollah barrage', 'hezbollah retaliation israel',
+            'hezbollah threatens israel', 'nasrallah warns israel', 'hezbollah infiltration',
+            'lebanon border attack', 'lebanese rocket fire', 'hezbollah precision missile',
+            'radwan force', 'hezbollah tunnel', 'hezbollah atgm', 'kornet israel'
+        ]
+    },
+    'hamas': {
+        'weight': 3.5,
+        'phrases': [
+            'hamas attack israel', 'hamas rocket israel', 'hamas infiltration',
+            'hamas tunnel attack', 'hamas hostage', 'october 7',
+            'hamas terror attack', 'gaza rocket israel', 'qassam rocket',
+            'hamas ambush', 'hamas suicide', 'hamas mortar israel',
+            'hamas drone israel', 'hamas naval', 'hamas raid',
+            'al-qassam brigades', 'izz ad-din al-qassam', 'nukhba force'
+        ]
+    },
+    'west_bank_gaza': {
+        'weight': 2.5,
+        'phrases': [
+            'west bank attack', 'west bank shooting', 'west bank stabbing',
+            'jenin attack', 'nablus attack', 'tulkarm attack',
+            'ramallah clashes', 'hebron shooting', 'intifada',
+            'settler attack', 'west bank violence', 'west bank raid',
+            'palestinian gunfire', 'car ramming israel', 'lone wolf attack israel',
+            'knife attack israel', 'west bank ied', 'checkpoint attack'
+        ]
+    },
+    'houthis': {
+        'weight': 3.0,
+        'phrases': [
+            'houthi missile israel', 'houthi drone israel', 'houthi attack israel',
+            'houthi ballistic israel', 'houthi cruise missile israel',
+            'yemen missile israel', 'ansarallah israel', 'houthi threatens israel',
+            'houthi red sea israel', 'houthi eilat', 'houthi tel aviv',
+            'houthi intercept israel', 'houthi long range israel'
+        ]
+    },
+    'syria_based': {
+        'weight': 2.5,
+        'phrases': [
+            'syria rocket israel', 'golan heights attack', 'syria drone israel',
+            'iranian proxy syria israel', 'syria border israel attack',
+            'quneitra attack', 'syrian militia israel', 'isis golan',
+            'iranian forces golan', 'druze golan attack', 'syria spillover israel'
+        ]
+    }
+}
+
+ISRAEL_OUTGOING_KEYWORDS = {
+    'israel_vs_lebanon': {
+        'weight': 3.0,
+        'phrases': [
+            'israel strike lebanon', 'idf strike lebanon', 'israel airstrike lebanon',
+            'israel bombs lebanon', 'israel attack beirut', 'israel hezbollah strike',
+            'idf operation lebanon', 'israel southern lebanon', 'israel dahiyeh',
+            'israel beirut strike', 'idf targets hezbollah', 'israel eliminates hezbollah',
+            'israel assassination lebanon', 'israel bunker buster lebanon'
+        ]
+    },
+    'israel_vs_gaza': {
+        'weight': 3.0,
+        'phrases': [
+            'israel strike gaza', 'idf gaza operation', 'israel bombs gaza',
+            'israel airstrike gaza', 'idf raid gaza', 'israel ground operation gaza',
+            'rafah operation', 'israel tunnel destruction', 'idf gaza city',
+            'israel khan yunis', 'israel jabalia', 'israel nuseirat',
+            'israel gaza humanitarian', 'israel hamas operation'
+        ]
+    },
+    'israel_vs_iran': {
+        'weight': 4.0,
+        'phrases': [
+            'israel strike iran', 'israel attack iran', 'israel iran nuclear',
+            'israel bombs iran', 'israel retaliates iran', 'idf iran operation',
+            'israel iran facility', 'israel isfahan', 'israel natanz',
+            'mossad iran', 'israel covert iran', 'israel cyber iran',
+            'israel threatens iran', 'netanyahu iran strike'
+        ]
+    },
+    'israel_vs_syria': {
+        'weight': 2.0,
+        'phrases': [
+            'israel strike syria', 'idf airstrike syria', 'israel bombs damascus',
+            'israel targets syria', 'israel iranian assets syria',
+            'israel weapons shipment syria', 'israel t4 airbase',
+            'israel strike aleppo', 'israel syria arms transfer'
+        ]
+    },
+    'israel_vs_west_bank': {
+        'weight': 2.0,
+        'phrases': [
+            'idf raid west bank', 'idf jenin operation', 'idf nablus raid',
+            'idf tulkarm operation', 'israel arrests west bank',
+            'idf west bank incursion', 'israel demolition west bank',
+            'israel counter terror west bank', 'shin bet arrest'
+        ]
+    },
+    'israel_vs_houthis': {
+        'weight': 2.5,
+        'phrases': [
+            'israel strike yemen', 'idf strike houthis', 'israel bombs yemen',
+            'israel retaliates houthis', 'israel hodeidah', 'israel sanaa strike',
+            'idf yemen port', 'israel houthi infrastructure'
+        ]
+    }
+}
+
+
+def calculate_israel_incoming_threats(articles, days_analyzed=7):
+    """
+    Calculate probability of kinetic action AGAINST Israel
+    
+    Threat vectors:
+    1. Iran direct (ballistic/cruise missiles, drones)
+    2. Hezbollah (rockets, missiles, ATGMs, drones)
+    3. Hamas (rockets, tunnels, infiltration)
+    4. West Bank / Gaza (shooting, stabbing, IEDs — distinct from Hamas)
+    5. Houthis (long-range ballistic/cruise missiles)
+    6. Syria-based threats (Iranian proxies, spillover)
+    """
+    
+    threat_scores = {
+        'iran_direct': {'score': 0, 'indicators': [], 'articles': 0},
+        'hezbollah': {'score': 0, 'indicators': [], 'articles': 0},
+        'hamas': {'score': 0, 'indicators': [], 'articles': 0},
+        'west_bank_gaza': {'score': 0, 'indicators': [], 'articles': 0},
+        'houthis': {'score': 0, 'indicators': [], 'articles': 0},
+        'syria_based': {'score': 0, 'indicators': [], 'articles': 0}
+    }
+    
+    category_map = {
+        'iran_direct': 'iran_direct',
+        'hezbollah': 'hezbollah',
+        'hamas': 'hamas',
+        'west_bank_gaza': 'west_bank_gaza',
+        'houthis': 'houthis',
+        'syria_based': 'syria_based'
+    }
+    
+    for article in articles:
+        content = f"{article.get('title', '')} {article.get('description', '')} {article.get('content', '')}".lower()
+        
+        for category, data in ISRAEL_INCOMING_THREAT_KEYWORDS.items():
+            mapped = category_map.get(category)
+            if not mapped:
+                continue
+            
+            for phrase in data['phrases']:
+                if phrase in content:
+                    threat_scores[mapped]['score'] += data['weight']
+                    threat_scores[mapped]['articles'] += 1
+                    threat_scores[mapped]['indicators'].append({
+                        'phrase': phrase,
+                        'weight': data['weight'],
+                        'article': article.get('title', '')[:80],
+                        'article_url': article.get('url', '')
+                    })
+                    break  # One match per category per article
+    
+    # Convert scores to probabilities
+    # Israel has higher caps than Jordan due to active conflict
+    results = {}
+    for key, data in threat_scores.items():
+        prob = min(data['score'] / 30.0, 0.75)  # Higher cap: 75%
+        
+        results[key] = {
+            'probability': prob,
+            'risk_level': (
+                'very_high' if prob > 0.50 else
+                'high' if prob > 0.35 else
+                'moderate' if prob > 0.20 else
+                'low'
+            ),
+            'indicators': sorted(data['indicators'], key=lambda x: x['weight'], reverse=True)[:5],
+            'total_indicators': len(data['indicators'])
+        }
+    
+    # Combined incoming threat (independent events)
+    probs = [results[k]['probability'] for k in results]
+    combined = 1.0
+    for p in probs:
+        combined *= (1 - p)
+    combined = 1 - combined
+    combined = min(combined, 0.95)
+    
+    return {
+        'iran_direct': results['iran_direct'],
+        'hezbollah': results['hezbollah'],
+        'hamas': results['hamas'],
+        'west_bank_gaza': results['west_bank_gaza'],
+        'houthis': results['houthis'],
+        'syria_based': results['syria_based'],
+        'combined': {
+            'probability': combined,
+            'risk_level': (
+                'very_high' if combined > 0.60 else
+                'high' if combined > 0.40 else
+                'moderate' if combined > 0.20 else
+                'low'
+            )
+        }
+    }
+
+
+def calculate_israel_outgoing_operations(articles, days_analyzed=7):
+    """
+    Calculate probability of Israeli OUTGOING military operations
+    
+    Unlike Jordan (defensive only), Israel is an active striker:
+    1. Israel → Lebanon (daily strikes on Hezbollah)
+    2. Israel → Gaza (ongoing operations)
+    3. Israel → Iran (strategic strikes)
+    4. Israel → Syria (periodic strikes on Iranian assets)
+    5. Israel → West Bank (counter-terror raids)
+    6. Israel → Yemen/Houthis (retaliatory strikes)
+    """
+    
+    outgoing_scores = {
+        'vs_lebanon': {'score': 0, 'indicators': []},
+        'vs_gaza': {'score': 0, 'indicators': []},
+        'vs_iran': {'score': 0, 'indicators': []},
+        'vs_syria': {'score': 0, 'indicators': []},
+        'vs_west_bank': {'score': 0, 'indicators': []},
+        'vs_houthis': {'score': 0, 'indicators': []}
+    }
+    
+    key_map = {
+        'israel_vs_lebanon': 'vs_lebanon',
+        'israel_vs_gaza': 'vs_gaza',
+        'israel_vs_iran': 'vs_iran',
+        'israel_vs_syria': 'vs_syria',
+        'israel_vs_west_bank': 'vs_west_bank',
+        'israel_vs_houthis': 'vs_houthis'
+    }
+    
+    for article in articles:
+        content = f"{article.get('title', '')} {article.get('description', '')} {article.get('content', '')}".lower()
+        
+        for category, data in ISRAEL_OUTGOING_KEYWORDS.items():
+            mapped = key_map.get(category)
+            if not mapped:
+                continue
+            
+            for phrase in data['phrases']:
+                if phrase in content:
+                    outgoing_scores[mapped]['score'] += data['weight']
+                    outgoing_scores[mapped]['indicators'].append({
+                        'phrase': phrase,
+                        'weight': data['weight'],
+                        'article': article.get('title', '')[:80],
+                        'article_url': article.get('url', '')
+                    })
+                    break
+    
+    results = {}
+    for key, data in outgoing_scores.items():
+        prob = min(data['score'] / 25.0, 0.80)  # Higher cap for outgoing
+        
+        results[key] = {
+            'probability': prob,
+            'risk_level': (
+                'very_high' if prob > 0.50 else
+                'high' if prob > 0.35 else
+                'moderate' if prob > 0.20 else
+                'low'
+            ),
+            'indicators': sorted(data['indicators'], key=lambda x: x['weight'], reverse=True)[:5],
+            'tooltip': {
+                'vs_lebanon': 'Probability of Israeli strikes on Hezbollah targets in Lebanon',
+                'vs_gaza': 'Probability of Israeli military operations in Gaza',
+                'vs_iran': 'Probability of Israeli direct strikes on Iranian territory/assets',
+                'vs_syria': 'Probability of Israeli strikes on Iranian assets in Syria',
+                'vs_west_bank': 'Probability of IDF counter-terror operations in the West Bank',
+                'vs_houthis': 'Probability of Israeli retaliatory strikes on Houthi targets in Yemen'
+            }.get(key, '')
+        }
+    
+    return results
+
+
+def build_israel_headlines(incoming_threats, outgoing_ops, all_articles):
+    """Build unified headlines list for Israel threat display"""
+    
+    headlines = []
+    seen_urls = set()
+    
+    # Incoming threat indicators
+    incoming_labels = {
+        'iran_direct': 'Iran Direct Threat',
+        'hezbollah': 'Hezbollah Threat',
+        'hamas': 'Hamas Threat',
+        'west_bank_gaza': 'West Bank/Gaza',
+        'houthis': 'Houthi Threat',
+        'syria_based': 'Syria-Based Threat'
+    }
+    
+    for threat_key, label in incoming_labels.items():
+        threat = incoming_threats.get(threat_key, {})
+        for indicator in threat.get('indicators', [])[:3]:
+            url = indicator.get('article_url', '')
+            if url and url not in seen_urls:
+                seen_urls.add(url)
+                matching = next((a for a in all_articles if a.get('url') == url), None)
+                headlines.append({
+                    'title': matching.get('title', indicator.get('article', ''))[:120] if matching else indicator.get('article', '')[:120],
+                    'url': url,
+                    'source': matching.get('source', {}).get('name', 'Unknown') if matching else 'Unknown',
+                    'published': matching.get('publishedAt', '') if matching else '',
+                    'threat_type': label,
+                    'weight': indicator.get('weight', 0),
+                    'phrase': indicator.get('phrase', ''),
+                    'why_included': f"Matched: '{indicator.get('phrase', '')}'",
+                    'color': 'red' if 'iran' in threat_key.lower() else 'orange'
+                })
+    
+    # Outgoing operation indicators
+    outgoing_labels = {
+        'vs_lebanon': 'Israel → Lebanon',
+        'vs_gaza': 'Israel → Gaza',
+        'vs_iran': 'Israel → Iran',
+        'vs_syria': 'Israel → Syria',
+        'vs_west_bank': 'Israel → West Bank',
+        'vs_houthis': 'Israel → Yemen'
+    }
+    
+    for op_key, label in outgoing_labels.items():
+        ops = outgoing_ops.get(op_key, {})
+        for indicator in ops.get('indicators', [])[:2]:
+            url = indicator.get('article_url', '')
+            if url and url not in seen_urls:
+                seen_urls.add(url)
+                matching = next((a for a in all_articles if a.get('url') == url), None)
+                headlines.append({
+                    'title': matching.get('title', indicator.get('article', ''))[:120] if matching else indicator.get('article', '')[:120],
+                    'url': url,
+                    'source': matching.get('source', {}).get('name', 'Unknown') if matching else 'Unknown',
+                    'published': matching.get('publishedAt', '') if matching else '',
+                    'threat_type': label,
+                    'weight': indicator.get('weight', 0),
+                    'phrase': indicator.get('phrase', ''),
+                    'why_included': f"Outgoing: '{indicator.get('phrase', '')}'",
+                    'color': 'blue'
+                })
+    
+    headlines.sort(key=lambda x: x['weight'], reverse=True)
+    return headlines[:15]
+
+
+def fetch_israel_news_rss():
+    """Fetch articles from Israeli news RSS feeds"""
+    articles = []
+    
+    feeds = {
+        'Times of Israel': 'https://www.timesofisrael.com/feed/',
+        'Jerusalem Post': 'https://www.jpost.com/rss/rssfeedsfrontpage.aspx',
+        'i24NEWS': 'https://www.i24news.tv/en/rss',
+    }
+    
+    for source_name, feed_url in feeds.items():
+        try:
+            response = requests.get(feed_url, timeout=15, headers={
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            })
+            
+            if response.status_code != 200:
+                continue
+            
+            try:
+                root = ET.fromstring(response.content)
+            except ET.ParseError:
+                continue
+            
+            items = root.findall('.//item')
+            
+            for item in items[:15]:
+                title_elem = item.find('title')
+                link_elem = item.find('link')
+                pubDate_elem = item.find('pubDate')
+                description_elem = item.find('description')
+                
+                if title_elem is not None and link_elem is not None:
+                    pub_date = pubDate_elem.text if pubDate_elem is not None else datetime.now(timezone.utc).isoformat()
+                    description = description_elem.text[:500] if description_elem is not None and description_elem.text else ''
+                    
+                    articles.append({
+                        'title': title_elem.text or '',
+                        'description': description,
+                        'url': link_elem.text or '',
+                        'publishedAt': pub_date,
+                        'source': {'name': source_name},
+                        'content': description,
+                        'language': 'en'
+                    })
+            
+            print(f"[{source_name}] ✓ Fetched {len([a for a in articles if a['source']['name'] == source_name])} articles")
+            
+        except Exception as e:
+            print(f"[{source_name}] Error: {str(e)[:100]}")
+            continue
+    
+    return articles
+    
 # ========================================
 # JORDAN-SPECIFIC THREAT CALCULATIONS
 # ========================================
@@ -5511,6 +5968,286 @@ def api_syria_conflict():
             'intensity_description': 'Unknown'
         }), 500
 
+        # ========================================
+# ISRAEL THREAT ENDPOINT
+# ========================================
+
+@app.route('/api/israel-threat', methods=['GET'])
+def api_israel_threat():
+    """
+    Israel Threat Exposure Index Endpoint
+    
+    Unique threat model:
+    - Incoming: Iran direct, Hezbollah, Hamas, West Bank/Gaza, Houthis, Syria-based
+    - Outgoing: Israel → Lebanon, Gaza, Iran, Syria, West Bank, Yemen
+    - Cross-references Iran and Hezbollah cards
+    Includes military posture data from Military Asset Tracker
+    """
+    try:
+        refresh = request.args.get('refresh', 'false').lower() == 'true'
+        days = int(request.args.get('days', 7))
+        
+        # Try cached data first
+        if not refresh:
+            cached = get_cached_result('israel')
+            if cached and is_cache_fresh(cached, max_age_hours=6):
+                print("[Israel] Returning cached data")
+                return jsonify(cached)
+        
+        print("[Israel] Performing fresh scan...")
+        
+        if not check_rate_limit():
+            cached = get_cached_result('israel')
+            if cached:
+                cached['stale_cache'] = True
+                return jsonify(cached)
+            return jsonify({
+                'success': False, 'error': 'Rate limit exceeded',
+                'probability': 0, 'rate_limited': True
+            }), 429
+        
+        # Fetch articles from all sources
+        query = ' OR '.join(TARGET_KEYWORDS['israel']['keywords'][:10])  # Top 10 to stay within query limits
+        
+        articles_en = fetch_newsapi_articles(query, days)
+        articles_gdelt_en = fetch_gdelt_articles(query, days, 'eng')
+        articles_gdelt_ar = fetch_gdelt_articles(query, days, 'ara')
+        articles_gdelt_he = fetch_gdelt_articles(query, days, 'heb')
+        articles_gdelt_fa = fetch_gdelt_articles(query, days, 'fas')
+        
+        articles_reddit = fetch_reddit_posts(
+            'israel',
+            TARGET_KEYWORDS['israel']['reddit_keywords'],
+            days
+        )
+        
+        # Israeli news RSS feeds
+        israel_rss = fetch_israel_news_rss()
+        
+        all_articles = (articles_en + articles_gdelt_en + articles_gdelt_ar +
+                       articles_gdelt_he + articles_gdelt_fa + articles_reddit +
+                       israel_rss)
+        
+        print(f"[Israel] Total articles: {len(all_articles)}")
+        
+        # Calculate base threat exposure using standard algorithm
+        scoring_result = calculate_threat_probability(all_articles, days, 'israel')
+        probability = scoring_result['probability']
+        momentum = scoring_result['momentum']
+        breakdown = scoring_result['breakdown']
+        
+        # Calculate Israel-specific incoming threats
+        incoming = calculate_israel_incoming_threats(all_articles, days)
+        
+        # Calculate Israel outgoing operations
+        outgoing = calculate_israel_outgoing_operations(all_articles, days)
+        
+        # Cross-reference: boost Iran incoming if Iran card shows high probability
+        iran_cache = get_cached_result('iran')
+        iran_tension = 0.0
+        if iran_cache:
+            iran_tension = iran_cache.get('probability', 0) / 100.0
+        
+        # Cross-reference: boost Hezbollah incoming if Lebanon card shows high probability
+        hez_cache = get_cached_result('hezbollah')
+        hez_tension = 0.0
+        if hez_cache:
+            hez_tension = hez_cache.get('probability', 0) / 100.0
+        
+        # Apply cross-reference boosts to incoming
+        if iran_tension > 0.50:
+            iran_boost = min(incoming['iran_direct']['probability'] + 0.15, 0.75)
+            incoming['iran_direct']['probability'] = iran_boost
+            incoming['iran_direct']['cross_reference_boost'] = 0.15
+        
+        if hez_tension > 0.50:
+            hez_boost = min(incoming['hezbollah']['probability'] + 0.15, 0.75)
+            incoming['hezbollah']['probability'] = hez_boost
+            incoming['hezbollah']['cross_reference_boost'] = 0.15
+        
+        # Military posture
+        try:
+            military_posture = get_military_posture('israel')
+            military_bonus = military_posture.get('military_bonus', 0)
+            if military_bonus > 0:
+                probability = min(99, probability + military_bonus)
+                print(f"[Israel] Military posture: {military_posture.get('alert_level', 'normal')} → +{military_bonus}% (new total: {probability}%)")
+        except Exception as mil_err:
+            print(f"[Israel] Military posture lookup failed: {mil_err}")
+            military_posture = {'alert_level': 'normal', 'military_bonus': 0, 'show_banner': False, 'banner_text': '', 'top_signals': []}
+        
+        # Build headlines
+        recent_headlines = build_israel_headlines(incoming, outgoing, all_articles)
+        
+        # Fallback headlines if specific matching found nothing
+        if not recent_headlines and scoring_result.get('top_contributors'):
+            seen_urls = set()
+            for contributor in scoring_result['top_contributors'][:10]:
+                for article in all_articles:
+                    if (article.get('source', {}).get('name', '') == contributor.get('source', '')
+                        and article.get('url') not in seen_urls):
+                        seen_urls.add(article['url'])
+                        recent_headlines.append({
+                            'title': article.get('title', '')[:120],
+                            'url': article.get('url', ''),
+                            'source': contributor.get('source', 'Unknown'),
+                            'published': article.get('publishedAt', ''),
+                            'threat_type': 'General Intelligence',
+                            'weight': abs(contributor.get('contribution', 0)),
+                            'phrase': '',
+                            'why_included': f"Top scoring (severity: {contributor.get('severity', 1.0)}x)",
+                            'color': 'blue'
+                        })
+                        break
+            recent_headlines.sort(key=lambda x: x['weight'], reverse=True)
+            recent_headlines = recent_headlines[:15]
+        
+        # Timeline
+        if probability < 30:
+            timeline = "180+ Days"
+        elif probability < 50:
+            timeline = "91-180 Days"
+        elif probability < 70:
+            timeline = "31-90 Days"
+        else:
+            timeline = "0-30 Days"
+        
+        # Confidence
+        unique_sources = len(set(a.get('source', {}).get('name', 'Unknown') for a in all_articles))
+        if len(all_articles) >= 20 and unique_sources >= 8:
+            confidence = "High"
+        elif len(all_articles) >= 10 and unique_sources >= 5:
+            confidence = "Medium"
+        else:
+            confidence = "Low"
+        
+        result = {
+            'success': True,
+            'probability': probability,
+            'timeline': timeline,
+            'confidence': confidence,
+            'momentum': momentum,
+            'total_articles': len(all_articles),
+            'unique_sources': unique_sources,
+            'recent_articles_48h': breakdown['recent_articles_48h'],
+            'scoring_breakdown': breakdown,
+            'incoming_threats': {
+                'iran_direct': {
+                    'probability': round(incoming['iran_direct']['probability'] * 100, 1),
+                    'risk_level': incoming['iran_direct']['risk_level'],
+                    'indicators': incoming['iran_direct']['indicators'][:3],
+                    'cross_reference_boost': round(incoming['iran_direct'].get('cross_reference_boost', 0) * 100, 1)
+                },
+                'hezbollah': {
+                    'probability': round(incoming['hezbollah']['probability'] * 100, 1),
+                    'risk_level': incoming['hezbollah']['risk_level'],
+                    'indicators': incoming['hezbollah']['indicators'][:3],
+                    'cross_reference_boost': round(incoming['hezbollah'].get('cross_reference_boost', 0) * 100, 1)
+                },
+                'hamas': {
+                    'probability': round(incoming['hamas']['probability'] * 100, 1),
+                    'risk_level': incoming['hamas']['risk_level'],
+                    'indicators': incoming['hamas']['indicators'][:3]
+                },
+                'west_bank_gaza': {
+                    'probability': round(incoming['west_bank_gaza']['probability'] * 100, 1),
+                    'risk_level': incoming['west_bank_gaza']['risk_level'],
+                    'indicators': incoming['west_bank_gaza']['indicators'][:3]
+                },
+                'houthis': {
+                    'probability': round(incoming['houthis']['probability'] * 100, 1),
+                    'risk_level': incoming['houthis']['risk_level'],
+                    'indicators': incoming['houthis']['indicators'][:3]
+                },
+                'syria_based': {
+                    'probability': round(incoming['syria_based']['probability'] * 100, 1),
+                    'risk_level': incoming['syria_based']['risk_level'],
+                    'indicators': incoming['syria_based']['indicators'][:3]
+                },
+                'combined': {
+                    'probability': round(incoming['combined']['probability'] * 100, 1),
+                    'risk_level': incoming['combined']['risk_level']
+                }
+            },
+            'outgoing_operations': {
+                'vs_lebanon': {
+                    'probability': round(outgoing['vs_lebanon']['probability'] * 100, 1),
+                    'risk_level': outgoing['vs_lebanon']['risk_level'],
+                    'tooltip': outgoing['vs_lebanon']['tooltip'],
+                    'indicators': outgoing['vs_lebanon']['indicators'][:3]
+                },
+                'vs_gaza': {
+                    'probability': round(outgoing['vs_gaza']['probability'] * 100, 1),
+                    'risk_level': outgoing['vs_gaza']['risk_level'],
+                    'tooltip': outgoing['vs_gaza']['tooltip'],
+                    'indicators': outgoing['vs_gaza']['indicators'][:3]
+                },
+                'vs_iran': {
+                    'probability': round(outgoing['vs_iran']['probability'] * 100, 1),
+                    'risk_level': outgoing['vs_iran']['risk_level'],
+                    'tooltip': outgoing['vs_iran']['tooltip'],
+                    'indicators': outgoing['vs_iran']['indicators'][:3]
+                },
+                'vs_syria': {
+                    'probability': round(outgoing['vs_syria']['probability'] * 100, 1),
+                    'risk_level': outgoing['vs_syria']['risk_level'],
+                    'tooltip': outgoing['vs_syria']['tooltip'],
+                    'indicators': outgoing['vs_syria']['indicators'][:3]
+                },
+                'vs_west_bank': {
+                    'probability': round(outgoing['vs_west_bank']['probability'] * 100, 1),
+                    'risk_level': outgoing['vs_west_bank']['risk_level'],
+                    'tooltip': outgoing['vs_west_bank']['tooltip'],
+                    'indicators': outgoing['vs_west_bank']['indicators'][:3]
+                },
+                'vs_houthis': {
+                    'probability': round(outgoing['vs_houthis']['probability'] * 100, 1),
+                    'risk_level': outgoing['vs_houthis']['risk_level'],
+                    'tooltip': outgoing['vs_houthis']['tooltip'],
+                    'indicators': outgoing['vs_houthis']['indicators'][:3]
+                }
+            },
+            'cross_references': {
+                'iran_card_probability': round(iran_tension * 100, 1),
+                'hezbollah_card_probability': round(hez_tension * 100, 1),
+                'note': 'When Iran or Hezbollah cards exceed 50%, incoming threat probabilities are boosted'
+            },
+            'military_posture': {
+                'alert_level': military_posture.get('alert_level', 'normal'),
+                'alert_label': military_posture.get('alert_label', 'Normal'),
+                'alert_color': military_posture.get('alert_color', 'green'),
+                'military_bonus': military_posture.get('military_bonus', 0),
+                'show_banner': military_posture.get('show_banner', False),
+                'banner_text': military_posture.get('banner_text', ''),
+                'top_signals': military_posture.get('top_signals', []),
+                'detail_url': '/military.html'
+            },
+            'recent_headlines': recent_headlines,
+            'last_updated': datetime.now(timezone.utc).isoformat(),
+            'cached': False,
+            'version': '3.0.0-israel'
+        }
+        
+        update_cache('israel', result)
+        
+        print(f"[Israel] Fresh scan complete: {probability}%")
+        return jsonify(result)
+        
+    except Exception as e:
+        print(f"Error in /api/israel-threat: {e}")
+        import traceback
+        traceback.print_exc()
+        
+        cached = get_cached_result('israel')
+        if cached:
+            cached['error_fallback'] = True
+            return jsonify(cached)
+        
+        return jsonify({
+            'success': False, 'error': str(e),
+            'probability': 0, 'timeline': 'Unknown'
+        }), 500
+        
 # ========================================
 # JORDAN THREAT ENDPOINT
 # ========================================
