@@ -1,6 +1,6 @@
 """
-Asifah Analytics — Military Asset & Deployment Tracker v2.1.0
-February 20, 2026
+Asifah Analytics — Military Asset & Deployment Tracker v2.2.0
+February 21, 2026
 
 Tracks military asset movements across multiple actors and regions.
 Feeds deployment scores into existing threat probability calculations.
@@ -44,6 +44,15 @@ OUTPUTS:
   - Standalone page data for military.html
 
 CHANGELOG:
+  v2.2.0 - Background scan & stability fix:
+           * Moved initial scan to background thread (prevents gunicorn
+             worker timeout crashes on cold start)
+           * Endpoint returns stale cache or empty skeleton while scan
+             runs — never blocks workers
+           * Removed manual _add_cors_headers() — Flask-CORS handles
+             all CORS globally from app.py
+           * Added _background_scan_running lock to prevent duplicate scans
+           * Added graceful empty response when no cache exists yet
   v2.1.0 - Multilingual intelligence expansion:
            * Added GDELT queries in 8 languages: Hebrew, Russian, Arabic,
              Farsi, Turkish, Ukrainian, French, Chinese
@@ -80,6 +89,7 @@ import json
 import time
 import math
 import os
+import threading
 
 # ========================================
 # CONFIGURATION
@@ -91,6 +101,10 @@ NEWSAPI_KEY = os.environ.get('NEWSAPI_KEY')
 # Cache TTL (4 hours — deployments don't change by the minute)
 MILITARY_CACHE_FILE = '/tmp/military_tracker_cache.json'
 MILITARY_CACHE_TTL_HOURS = 4
+
+# Background scan lock — prevents duplicate concurrent scans
+_background_scan_running = False
+_background_scan_lock = threading.Lock()
 
 # ========================================
 # REGIONAL THEATRE GROUPINGS (for frontend)
@@ -137,30 +151,23 @@ MILITARY_ACTORS = {
         'weight': 1.0,
         'feeds_into': ['strike_probability'],
         'keywords': [
-            # Command & institutional
             'centcom', 'us central command', 'pentagon deploys',
             'department of defense deployment', 'us forces middle east',
-            # Naval
             'carrier strike group', 'uss ', 'us navy gulf', 'us navy middle east',
             'amphibious ready group', 'us destroyer', 'us cruiser',
             'us submarine mediterranean', 'us submarine gulf',
-            # Air
             'bomber task force', 'b-1 lancer', 'b-2 spirit', 'b-52 middle east',
             'f-35 deployment middle east', 'f-22 deployment', 'usaf deploys',
             'kc-135', 'kc-46', 'aerial refueling middle east',
             'mq-9 reaper', 'rq-4 global hawk', 'us isr assets',
-            # Ground
             'us troops deployed middle east', 'us forces iraq',
             'us forces syria', 'us forces jordan',
             '82nd airborne', '101st airborne middle east',
             'marine expeditionary', 'us special operations',
-            # Air defense / missile
             'patriot battery deployed', 'thaad deployment',
             'iron dome us', 'us air defense middle east',
-            # Logistics
             'pre-positioned stocks', 'ammunition shipment',
             'military sealift command', 'us logistics middle east',
-            # Buildup / surge language
             'us military buildup', 'us force posture', 'us surge middle east',
             'massive fleet', 'armada', 'combat power',
             'us military assets middle east', 'military assets flock'
@@ -179,22 +186,17 @@ MILITARY_ACTORS = {
         'weight': 0.9,
         'feeds_into': ['strike_probability', 'regional_tension'],
         'keywords': [
-            # Ground forces
             'idf mobilization', 'idf mobilisation', 'israel reservists called',
             'israel reserves mobilized', 'idf northern command',
             'idf southern command', 'idf ground operation',
             'idf troops deployed', 'israel military buildup',
-            # Air
             'israeli air force exercise', 'iaf exercise', 'iaf drill',
             'f-35 israel', 'f-15 israel', 'israeli airstrike',
             'israel aerial refueling', 'israeli drone strike',
-            # Naval
             'israeli navy', 'israel submarine', 'israeli corvette',
             'israel naval blockade', 'israel red sea',
-            # Air defense
             'iron dome deployment', 'david sling', 'arrow battery',
             'israel air defense activation', 'iron dome intercept',
-            # Intelligence
             'mossad operation', 'shin bet alert', 'aman intelligence',
             'israel intelligence assessment'
         ],
@@ -212,26 +214,20 @@ MILITARY_ACTORS = {
         'weight': 0.8,
         'feeds_into': ['reverse_threat', 'regional_tension'],
         'keywords': [
-            # IRGC Navy
             'irgc navy', 'irgc naval', 'iranian warship', 'iranian frigate',
             'iranian destroyer', 'iranian submarine', 'iran fast attack craft',
             'bandar abbas naval', 'iran strait of hormuz', 'irgc boats',
-            # Missile forces
             'iran missile test', 'iran ballistic missile', 'iran cruise missile',
             'iran missile launch', 'shahab missile', 'fateh missile',
             'emad missile', 'iran hypersonic', 'irgc aerospace force',
-            # Air
             'iranian air force', 'iriaf', 'iran drone', 'shahed drone',
             'iran uav', 'iran mohajer', 'iranian fighter jet',
-            # Ground / exercises
             'irgc exercise', 'iran military exercise', 'iran war games',
             'irgc ground forces', 'basij mobilization',
             'great prophet exercise', 'iran military drill',
             'iran drills', 'iran naval drill', 'iran naval exercise',
-            # Proxy logistics
             'iran weapons shipment', 'iran arms transfer',
             'irgc quds force', 'iran smuggling weapons',
-            # Threats & posturing
             'iran threatens', 'iran retaliation', 'iran warns',
             'iranian bases within range', 'iran retaliatory strike',
             'iran nuclear weapon', 'iran enrichment',
@@ -248,26 +244,21 @@ MILITARY_ACTORS = {
         'weight': 0.6,
         'feeds_into': ['regional_tension'],
         'keywords': [
-            # Naval
             'plan gulf', 'chinese warship', 'chinese navy persian gulf',
             'pla navy gulf', 'china naval deployment middle east',
             'chinese carrier', 'chinese destroyer gulf',
             'chinese frigate gulf', 'china anti-piracy',
             'chinese submarine indian ocean',
-            # Basing
             'djibouti base china', 'china djibouti',
             'china military base', 'china port visit oman',
             'china port visit pakistan', 'gwadar china navy',
-            # Intelligence / space
             'china spy ship', 'china surveillance vessel',
             'china intelligence ship', 'yuan wang tracking ship',
-            # Exercises
             'china iran naval exercise', 'china russia naval exercise',
             'china military exercise middle east',
-            # Indo-Pacific
             'south china sea military', 'taiwan strait military',
             'pla exercise', 'chinese military exercise',
-            'china naval gun', 'plan warship'
+            'chinese naval gun', 'plan warship'
         ],
         'rss_feeds': []
     },
@@ -280,32 +271,24 @@ MILITARY_ACTORS = {
         'weight': 0.7,
         'feeds_into': ['regional_tension'],
         'keywords': [
-            # Mediterranean fleet
             'russian navy mediterranean', 'russian warship mediterranean',
             'russian submarine mediterranean', 'russia med fleet',
-            # Syria basing
             'tartus naval base', 'hmeimim air base', 'russia syria deployment',
             'russian forces syria', 'russian air force syria',
-            # Naval
             'russian warship', 'russian destroyer', 'russian frigate',
             'russian submarine', 'russia black sea fleet',
             'russia naval exercise', 'russian aircraft carrier',
-            # Air
             'russian bomber patrol', 'tu-95 patrol', 'tu-160',
             'russian air force middle east', 'su-35 syria',
-            # Arms / support
             'russia arms delivery', 'russia s-300', 'russia s-400',
             'russia weapons syria', 'russia iran military cooperation',
-            # Ukraine theatre
             'russian offensive ukraine', 'russia ukraine front',
             'russian forces ukraine', 'russia mobilization',
             'russian missile ukraine', 'russia drone ukraine',
             'russian artillery ukraine', 'wagner group',
             'russia nuclear posture', 'russia nuclear threat',
-            # Black Sea
             'russia black sea', 'russian black sea fleet',
             'sevastopol naval base', 'crimea military',
-            # Arctic
             'russia arctic military', 'northern fleet',
             'russia arctic exercise'
         ],
@@ -454,27 +437,21 @@ MILITARY_ACTORS = {
         'weight': 0.6,
         'feeds_into': ['regional_tension'],
         'keywords': [
-            # Military operations
             'ukraine military', 'ukrainian armed forces',
             'ukraine offensive', 'ukraine counteroffensive',
             'ukraine front line', 'ukraine defense',
-            # Specific regions
             'zaporizhzhia front', 'kherson front', 'bakhmut',
             'kursk incursion', 'ukraine kursk',
             'donetsk front', 'luhansk front',
-            # Weapons & systems
             'ukraine f-16', 'ukraine patriot', 'ukraine air defense',
             'ukraine himars', 'ukraine storm shadow',
             'ukraine atacms', 'ukraine drone warfare',
             'ukraine long range strike', 'ukraine missile',
-            # Naval
             'ukraine black sea', 'ukraine naval drone',
             'ukraine anti-ship', 'ukraine sea drone',
-            # Arms deliveries
             'ukraine arms delivery', 'ukraine weapons package',
             'ukraine military aid', 'ukraine ammunition',
             'ukraine defense package',
-            # Mobilization
             'ukraine mobilization', 'ukraine conscription',
             'ukraine reserves', 'ukraine recruitment'
         ],
@@ -492,11 +469,9 @@ MILITARY_ACTORS = {
         'weight': 0.5,
         'feeds_into': ['regional_tension'],
         'keywords': [
-            # General NATO ops
             'nato exercise', 'nato deployment', 'nato military exercise',
             'nato forces deployed', 'nato readiness', 'nato response force',
             'nato rapid reaction', 'allied command',
-            # Arctic / Greenland
             'nato arctic', 'nato arctic exercise', 'thule air base',
             'pituffik space base', 'greenland military', 'greenland defense',
             'denmark military greenland', 'danish armed forces greenland',
@@ -504,18 +479,14 @@ MILITARY_ACTORS = {
             'nato northern flank', 'arctic patrol',
             'us greenland military', 'us arctic strategy',
             'icebreaker arctic', 'arctic surveillance',
-            # Baltic / Northern Europe
             'nato baltic', 'nato baltic exercise', 'baltic air policing',
             'nato enhanced forward presence', 'nato eastern flank',
             'nato poland deployment', 'nato romania deployment',
-            # Mediterranean
             'nato mediterranean', 'standing nato maritime group',
             'snmg', 'nato sea guardian', 'nato med patrol',
-            # General European
             'nato defense spending', 'nato summit',
             'nato article 5', 'nato interoperability',
             'ramstein air base', 'shape nato', 'saceur',
-            # Ukraine support
             'nato ukraine', 'nato aid ukraine', 'ramstein format'
         ],
         'rss_feeds': [
@@ -669,44 +640,31 @@ ASSET_CATEGORIES = {
             'combined maritime forces', 'naval war games'
         ]
     },
-
-    # ================================================
-    # NEW: Base Evacuation / Drawdown (v2.0)
-    # ================================================
     'base_evacuation': {
         'label': 'Base Evacuation / Ordered Departure',
         'icon': '🚨',
-        'weight': 5.0,  # Base weight — modified by sub-type in analysis
+        'weight': 5.0,
         'description': 'Evacuation of military bases or embassy drawdowns. Highest threat signal.',
         'keywords': [
-            # Full military evacuation (weight: 5.0)
             'base evacuation', 'military evacuation', 'evacuated base',
             'evacuation ordered', 'personnel evacuated',
             'troops evacuated', 'evacuated troops',
             'evacuation of base', 'base drawdown',
-            # NEO / noncombatant (weight: 4.5)
             'noncombatant evacuation', 'neo operation',
             'neo packet', 'neo preparation',
-            # Ordered departure (weight: 4.0)
             'ordered departure', 'embassy ordered departure',
             'reduced footprint', 'nonessential personnel depart',
             'embassy drawdown', 'embassy evacuation',
             'partial evacuation', 'personnel relocated',
-            # Authorized voluntary departure (weight: 3.5)
             'voluntary departure', 'authorized departure',
             'dependent evacuation', 'dependents evacuated',
             'family departure', 'family evacuation',
             'military families evacuate', 'military families depart',
             'families prepare departure', 'families leaving',
-            # Related signals
             'embassy closure', 'consulate evacuation',
             'potential departures', 'prepare for evacuation'
         ]
     },
-
-    # ================================================
-    # NEW: Military Posturing / Threats (v2.0)
-    # ================================================
     'military_posturing': {
         'label': 'Military Posturing / Threats',
         'icon': '⚠️',
@@ -729,8 +687,6 @@ ASSET_CATEGORIES = {
 # ========================================
 # EVACUATION SUB-TYPE WEIGHTS
 # ========================================
-# Fine-grained weighting for different evacuation signals.
-# These override the base weight when a specific sub-type is detected.
 
 EVACUATION_SUBTYPE_WEIGHTS = {
     'military_evacuation': {
@@ -766,17 +722,12 @@ EVACUATION_SUBTYPE_WEIGHTS = {
 # ========================================
 # LOCATION MULTIPLIERS
 # ========================================
-# Hotspot locations that amplify scores when detected in article text.
-# An Iranian exercise in the Strait of Hormuz ≠ a routine drill in Tehran.
 
 LOCATION_MULTIPLIERS = {
-    # Critical chokepoints (3x)
     'strait of hormuz': 3.0,
     'bab el-mandeb': 3.0,
     'suez canal': 2.5,
     'taiwan strait': 3.0,
-
-    # Active conflict / high-tension zones (2.5x)
     'persian gulf': 2.0,
     'arabian sea': 2.0,
     'red sea': 2.0,
@@ -784,8 +735,6 @@ LOCATION_MULTIPLIERS = {
     'eastern mediterranean': 2.0,
     'black sea': 2.0,
     'sea of azov': 2.0,
-
-    # Specific hotspot bases/areas (2x)
     'al udeid': 2.5,
     'bahrain naval': 2.0,
     'camp arifjan': 1.5,
@@ -798,8 +747,6 @@ LOCATION_MULTIPLIERS = {
     'zaporizhzhia': 2.0,
     'crimea': 2.0,
     'kursk': 2.0,
-
-    # Broader regions (1.5x)
     'arctic': 1.5,
     'greenland': 1.5,
     'south china sea': 2.0,
@@ -812,9 +759,6 @@ LOCATION_MULTIPLIERS = {
 # ========================================
 
 ASSET_TARGET_MAPPING = {
-    # ============================
-    # CENTCOM AOR (Middle East)
-    # ============================
     'centcom': {
         'Al Udeid Air Base': {
             'location': 'Qatar',
@@ -917,10 +861,6 @@ ASSET_TARGET_MAPPING = {
             'description': 'US Air Force presence in Saudi Arabia.'
         },
     },
-
-    # ============================
-    # EUCOM AOR (Europe / Arctic)
-    # ============================
     'eucom': {
         'Pituffik Space Base (Thule)': {
             'location': 'Greenland (Denmark)',
@@ -1017,7 +957,6 @@ ALERT_THRESHOLDS = {
 # ========================================
 
 DEFENSE_RSS_FEEDS = {
-    # ── English-language defense media ──
     'The War Zone': 'https://www.twz.com/feed',
     'Breaking Defense': 'https://breakingdefense.com/feed/',
     'Defense One': 'https://www.defenseone.com/rss/all/',
@@ -1027,31 +966,19 @@ DEFENSE_RSS_FEEDS = {
     'CENTCOM': 'https://www.centcom.mil/RSS/',
     'NATO News': 'https://www.nato.int/cps/en/natohq/news.xml',
     'DVIDS': 'https://www.dvidshub.net/rss/news',
-
-    # ── Hebrew / Israeli defense media ──
     'Jerusalem Post': 'https://www.jpost.com/rss/rssfeedsmilitary.aspx',
     'Times of Israel': 'https://www.timesofisrael.com/feed/',
     'Ynet News': 'https://www.ynetnews.com/RSS/0,84,0,0,1,0',
     'Israel Hayom': 'https://www.israelhayom.com/feed/',
-
-    # ── Arabic-language defense / regional media ──
     'Al Jazeera English': 'https://www.aljazeera.com/xml/rss/all.xml',
     'Al Arabiya English': 'https://english.alarabiya.net/tools/rss',
     'Middle East Eye': 'https://www.middleeasteye.net/rss',
-
-    # ── Russian-language defense media ──
     'TASS Defense': 'https://tass.com/rss/v2.xml',
     'Moscow Times': 'https://www.themoscowtimes.com/rss/news',
-
-    # ── Turkish / regional media ──
     'Daily Sabah': 'https://www.dailysabah.com/rssFeed/defense',
     'TRT World': 'https://www.trtworld.com/rss',
-
-    # ── Ukraine conflict trackers ──
     'Kyiv Independent': 'https://kyivindependent.com/feed/',
     'Ukrinform': 'https://www.ukrinform.net/rss/block-lastnews',
-
-    # ── Iran / Farsi-adjacent English sources ──
     'Iran International': 'https://www.iranintl.com/en/feed',
     'Tasnim English': 'https://www.tasnimnews.com/en/rss',
 }
@@ -1107,17 +1034,77 @@ def is_military_cache_fresh():
         return False
 
 
+def _build_empty_skeleton():
+    """
+    Return a valid but empty military posture response.
+    Used when no cache exists yet and the background scan is still running.
+    The frontend gets a proper JSON structure with zero scores.
+    """
+    actor_summaries = {}
+    for actor_id, actor_data in MILITARY_ACTORS.items():
+        actor_summaries[actor_id] = {
+            'name': actor_data.get('name', actor_id),
+            'flag': actor_data.get('flag', ''),
+            'tier': actor_data.get('tier', 99),
+            'theatre': actor_data.get('theatre', 'unknown'),
+            'total_score': 0,
+            'signal_count': 0,
+            'top_signals': [],
+            'alert_level': 'normal'
+        }
+
+    theatre_data = {}
+    for theatre_id, theatre_info in REGIONAL_THEATRES.items():
+        theatre_actors = {}
+        for actor_id in theatre_info['actors']:
+            if actor_id in actor_summaries:
+                theatre_actors[actor_id] = actor_summaries[actor_id]
+        theatre_data[theatre_id] = {
+            'label': theatre_info['label'],
+            'icon': theatre_info['icon'],
+            'order': theatre_info['order'],
+            'description': theatre_info['description'],
+            'actors': theatre_actors,
+            'total_score': 0,
+            'alert_level': 'normal'
+        }
+
+    return {
+        'success': True,
+        'scan_time_seconds': 0,
+        'days_analyzed': 7,
+        'total_articles_scanned': 0,
+        'total_signals_detected': 0,
+        'active_actors': [],
+        'active_actor_count': 0,
+        'tension_multiplier': 1.0,
+        'target_postures': {},
+        'actor_summaries': actor_summaries,
+        'theatre_groupings': theatre_data,
+        'asset_distribution': {},
+        'evacuation_alerts': [],
+        'top_signals': [],
+        'source_breakdown': {
+            'defense_rss': 0,
+            'gdelt': 0,
+            'newsapi': 0,
+            'reddit': 0
+        },
+        'last_updated': datetime.now(timezone.utc).isoformat(),
+        'cached': False,
+        'scan_in_progress': True,
+        'message': 'Initial scan in progress. Data will appear shortly.',
+        'version': '2.2.0'
+    }
+
+
 # ========================================
 # DATA FETCHING — RSS FEEDS
 # ========================================
 
 def fetch_defense_rss(feed_name, feed_url, max_articles=15):
-    """
-    Fetch articles from a defense media RSS feed
-    Returns standardized article objects
-    """
+    """Fetch articles from a defense media RSS feed"""
     articles = []
-
     try:
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
@@ -1178,18 +1165,16 @@ def fetch_defense_rss(feed_name, feed_url, max_articles=15):
 def fetch_all_defense_rss():
     """Fetch articles from all configured defense RSS feeds"""
     all_articles = []
-
     for feed_name, feed_url in DEFENSE_RSS_FEEDS.items():
         articles = fetch_defense_rss(feed_name, feed_url)
         all_articles.extend(articles)
-        time.sleep(0.5)  # Rate limit courtesy
-
+        time.sleep(0.5)
     print(f"[Military RSS] Total defense RSS articles: {len(all_articles)}")
     return all_articles
 
 
 # ========================================
-# DATA FETCHING — GDELT (Military-specific queries)
+# DATA FETCHING — GDELT
 # ========================================
 
 def fetch_gdelt_military(query, days=7, language='eng'):
@@ -1203,9 +1188,7 @@ def fetch_gdelt_military(query, days=7, language='eng'):
             'format': 'json',
             'sourcelang': language
         }
-
         response = requests.get(GDELT_BASE_URL, params=params, timeout=15)
-
         if response.status_code != 200:
             return []
 
@@ -1223,7 +1206,6 @@ def fetch_gdelt_military(query, days=7, language='eng'):
                 'content': article.get('title', ''),
                 'feed_type': 'gdelt'
             })
-
         return standardized
 
     except Exception as e:
@@ -1232,17 +1214,9 @@ def fetch_gdelt_military(query, days=7, language='eng'):
 
 
 def fetch_all_gdelt_military(days=7):
-    """Fetch military articles from GDELT across multiple queries and languages.
+    """Fetch military articles from GDELT across multiple queries and languages."""
 
-    v2.1: Multilingual expansion — queries in Russian, Hebrew, Arabic, Farsi,
-    Turkish, Ukrainian, French, and Chinese to catch defense reporting that
-    English-only queries miss entirely (e.g., Israeli IDF reports, TASS
-    military dispatches, IRGC announcements in Farsi).
-    """
-
-    # ── ENGLISH queries (expanded — added Israel, Egypt, Turkey, more evac) ──
     english_queries = [
-        # Core ME queries
         'military deployment middle east',
         'carrier strike group persian gulf',
         'military exercise middle east',
@@ -1252,14 +1226,12 @@ def fetch_all_gdelt_military(days=7):
         'iran strait hormuz drill',
         'chinese warship persian gulf',
         'russian navy mediterranean',
-        # Evacuation / drawdown
         'military base evacuation middle east',
         'embassy evacuation middle east',
         'voluntary departure military',
         'military families evacuation',
         'ordered departure embassy',
         'noncombatant evacuation operation',
-        # Israel (MISSING before v2.1!)
         'IDF military operation',
         'Israel defense forces deployment',
         'Israel military buildup',
@@ -1268,7 +1240,6 @@ def fetch_all_gdelt_military(days=7):
         'Israeli airstrike',
         'Israel Hezbollah military',
         'IDF northern command',
-        # Regional allies
         'jordan military base',
         'qatar al udeid',
         'saudi military exercise',
@@ -1276,16 +1247,13 @@ def fetch_all_gdelt_military(days=7):
         'kuwait camp arifjan',
         'egypt military exercise',
         'egypt sinai troops',
-        # Turkey
         'turkish military operation syria',
         'turkey military exercise',
         'incirlik air base',
-        # Europe / NATO
         'nato exercise arctic',
         'nato military deployment',
         'greenland military defense',
         'nato baltic deployment',
-        # Ukraine / Russia
         'ukraine military front',
         'russia ukraine offensive',
         'ukraine weapons delivery',
@@ -1295,87 +1263,78 @@ def fetch_all_gdelt_military(days=7):
         'crimea military attack',
     ]
 
-    # ── HEBREW queries (Israeli defense reporting) ──
     hebrew_queries = [
-        'צה"ל פריסה',              # IDF deployment
-        'צה"ל תרגיל',              # IDF exercise
-        'כיפת ברזל',               # Iron Dome
-        'חיל האוויר תרגיל',        # Air Force exercise
-        'מילואים גיוס',            # Reserves mobilization
-        'חזבאללה צפון',            # Hezbollah north
-        'פיקוד צפון כוננות',       # Northern Command readiness
-        'חיל הים סיור',            # Navy patrol
+        'צה"ל פריסה',
+        'צה"ל תרגיל',
+        'כיפת ברזל',
+        'חיל האוויר תרגיל',
+        'מילואים גיוס',
+        'חזבאללה צפון',
+        'פיקוד צפון כוננות',
+        'חיל הים סיור',
     ]
 
-    # ── RUSSIAN queries (Russia/Ukraine military reporting) ──
     russian_queries = [
-        'военная операция украина',        # military operation ukraine
-        'черноморский флот',               # Black Sea Fleet
-        'вооруженные силы учения',         # armed forces exercises
-        'ракетный удар украина',           # missile strike ukraine
-        'мобилизация военная',             # military mobilization
-        'северный флот арктика',           # Northern Fleet Arctic
-        'военно-морской флот',             # Navy
-        'ПВО развертывание',               # Air defense deployment
+        'военная операция украина',
+        'черноморский флот',
+        'вооруженные силы учения',
+        'ракетный удар украина',
+        'мобилизация военная',
+        'северный флот арктика',
+        'военно-морской флот',
+        'ПВО развертывание',
     ]
 
-    # ── ARABIC queries (Gulf, Iran, regional military) ──
     arabic_queries = [
-        'الحرس الثوري تدريب',             # IRGC exercise
-        'قوات عسكرية الخليج',              # military forces Gulf
-        'تدريب عسكري السعودية',            # military exercise Saudi
-        'القوات المسلحة الإماراتية',       # UAE armed forces
-        'الجيش المصري تدريب',              # Egyptian army exercise
-        'القوات الأردنية',                 # Jordanian forces
-        'حزب الله عسكري',                  # Hezbollah military
-        'صواريخ باليستية إيران',           # ballistic missiles Iran
-        'القوات البحرية مضيق هرمز',       # naval forces Strait of Hormuz
-        'إخلاء قاعدة عسكرية',             # military base evacuation
+        'الحرس الثوري تدريب',
+        'قوات عسكرية الخليج',
+        'تدريب عسكري السعودية',
+        'القوات المسلحة الإماراتية',
+        'الجيش المصري تدريب',
+        'القوات الأردنية',
+        'حزب الله عسكري',
+        'صواريخ باليستية إيران',
+        'القوات البحرية مضيق هرمز',
+        'إخلاء قاعدة عسكرية',
     ]
 
-    # ── FARSI queries (Iranian military / IRGC) ──
     farsi_queries = [
-        'سپاه پاسداران رزمایش',           # IRGC exercise
-        'نیروی دریایی رزمایش',             # Navy exercise
-        'موشک بالستیک آزمایش',             # ballistic missile test
-        'پهپاد نظامی',                     # military drone
-        'نیروی هوافضا سپاه',               # IRGC Aerospace Force
-        'تنگه هرمز رزمایش',                # Strait of Hormuz exercise
+        'سپاه پاسداران رزمایش',
+        'نیروی دریایی رزمایش',
+        'موشک بالستیک آزمایش',
+        'پهپاد نظامی',
+        'نیروی هوافضا سپاه',
+        'تنگه هرمز رزمایش',
     ]
 
-    # ── TURKISH queries (Turkey military ops) ──
     turkish_queries = [
-        'türk silahlı kuvvetleri operasyon',   # Turkish armed forces operation
-        'türk donanması tatbikat',              # Turkish navy exercise
-        'suriye askeri operasyon',              # Syria military operation
-        'bayraktar insansız hava',              # Bayraktar drone
-        'incirlik üssü',                        # Incirlik base
+        'türk silahlı kuvvetleri operasyon',
+        'türk donanması tatbikat',
+        'suriye askeri operasyon',
+        'bayraktar insansız hava',
+        'incirlik üssü',
     ]
 
-    # ── UKRAINIAN queries (Ukrainian military reporting) ──
     ukrainian_queries = [
-        'збройні сили україни',            # Armed Forces of Ukraine
-        'фронт наступ',                    # front offensive
-        'мобілізація військова',            # military mobilization
-        'протиповітряна оборона',           # air defense
-        'зброя постачання',                 # weapons supply
+        'збройні сили україни',
+        'фронт наступ',
+        'мобілізація військова',
+        'протиповітряна оборона',
+        'зброя постачання',
     ]
 
-    # ── FRENCH queries (North Africa, Djibouti, Mediterranean) ──
     french_queries = [
-        'forces armées méditerranée',       # armed forces Mediterranean
-        'base militaire djibouti',          # military base Djibouti
-        'opération militaire sahel',         # military operation Sahel
+        'forces armées méditerranée',
+        'base militaire djibouti',
+        'opération militaire sahel',
     ]
 
-    # ── CHINESE queries (PLA / South China Sea) ──
     chinese_queries = [
-        '军事演习 南海',                     # military exercise South China Sea
-        '解放军 海军',                        # PLA Navy
-        '中国 军舰',                          # China warship
+        '军事演习 南海',
+        '解放军 海军',
+        '中国 军舰',
     ]
 
-    # ── Fetch all query blocks ──
     all_articles = []
 
     query_blocks = [
@@ -1405,7 +1364,7 @@ def fetch_all_gdelt_military(days=7):
 
 
 # ========================================
-# DATA FETCHING — NewsAPI (Military-specific)
+# DATA FETCHING — NewsAPI
 # ========================================
 
 def fetch_newsapi_military(query, days=7):
@@ -1472,10 +1431,9 @@ def fetch_reddit_military(days=7):
     keywords = ['deployment', 'military', 'carrier', 'strike group', 'NATO', 'CENTCOM',
                 'evacuation', 'Ukraine']
     query = " OR ".join(keywords[:4])
-
     time_filter = "week" if days <= 7 else "month"
 
-    for subreddit in REDDIT_MILITARY_SUBREDDITS[:5]:  # Limit to avoid rate limits
+    for subreddit in REDDIT_MILITARY_SUBREDDITS[:5]:
         try:
             url = f"https://www.reddit.com/r/{subreddit}/search.json"
             params = {
@@ -1507,7 +1465,6 @@ def fetch_reddit_military(days=7):
                             'content': post_data.get('selftext', ''),
                             'feed_type': 'reddit'
                         })
-
         except Exception:
             continue
 
@@ -1520,10 +1477,7 @@ def fetch_reddit_military(days=7):
 # ========================================
 
 def get_location_multiplier(text):
-    """
-    Scan article text for hotspot locations and return the highest multiplier.
-    If multiple hotspots are mentioned, take the maximum (not additive).
-    """
+    """Scan article text for hotspot locations and return the highest multiplier."""
     max_multiplier = 1.0
     matched_location = None
 
@@ -1537,11 +1491,7 @@ def get_location_multiplier(text):
 
 
 def get_evacuation_subtype_weight(text):
-    """
-    For base_evacuation signals, determine the specific sub-type
-    and return the appropriate weight (military evac > NEO > ordered departure > voluntary).
-    """
-    # Check from highest to lowest priority
+    """For base_evacuation signals, determine the specific sub-type."""
     for subtype_id, subtype_data in sorted(
         EVACUATION_SUBTYPE_WEIGHTS.items(),
         key=lambda x: x[1]['weight'],
@@ -1551,19 +1501,11 @@ def get_evacuation_subtype_weight(text):
             if kw in text:
                 return subtype_data['weight'], subtype_id
 
-    # Default to base weight
     return ASSET_CATEGORIES['base_evacuation']['weight'], 'unspecified'
 
 
 def analyze_article_military(article):
-    """
-    Analyze a single article for military deployment signals.
-
-    v2.0 enhancements:
-    - Location-aware scoring (Strait of Hormuz multiplier, etc.)
-    - Evacuation sub-type weight differentiation
-    - Context-aware scoring
-    """
+    """Analyze a single article for military deployment signals."""
     title = (article.get('title') or '').lower()
     description = (article.get('description') or '').lower()
     content = (article.get('content') or '').lower()
@@ -1580,33 +1522,28 @@ def analyze_article_military(article):
         'hotspot_location': None
     }
 
-    # 0. Determine location multiplier for this article
     loc_multiplier, hotspot = get_location_multiplier(text)
     result['location_multiplier'] = loc_multiplier
     result['hotspot_location'] = hotspot
 
-    # 1. Detect which military actors are mentioned
     for actor_id, actor_data in MILITARY_ACTORS.items():
         for keyword in actor_data['keywords']:
             if keyword in text:
                 result['actors'].add(actor_id)
                 actor_weight = actor_data['weight']
 
-                # 2. Detect asset type
                 asset_matched = False
                 for asset_id, asset_data in ASSET_CATEGORIES.items():
                     for asset_kw in asset_data['keywords']:
                         if asset_kw in text:
                             result['asset_types'].add(asset_id)
 
-                            # Determine weight — special handling for evacuations
                             if asset_id == 'base_evacuation':
                                 asset_weight, evac_subtype = get_evacuation_subtype_weight(text)
                             else:
                                 asset_weight = asset_data['weight']
                                 evac_subtype = None
 
-                            # Apply location multiplier
                             signal_score = asset_weight * actor_weight * loc_multiplier
 
                             signal_entry = {
@@ -1639,10 +1576,8 @@ def analyze_article_military(article):
                     if asset_matched:
                         break
 
-                # If actor detected but no specific asset, still count it
                 if not asset_matched:
                     signal_score = actor_weight * 1.0 * loc_multiplier
-
                     result['signals'].append({
                         'actor': actor_id,
                         'actor_name': actor_data['name'],
@@ -1663,9 +1598,8 @@ def analyze_article_military(article):
                     })
                     result['score'] += signal_score
 
-                break  # One keyword match per actor per article
+                break
 
-    # 3. Map to target regions
     for aor, bases in ASSET_TARGET_MAPPING.items():
         for base_name, base_data in bases.items():
             if base_name.lower() in text:
@@ -1673,7 +1607,6 @@ def analyze_article_military(article):
                 for target in base_data['targets']:
                     result['targets'].add(target)
 
-    # Convert sets to lists for JSON
     result['actors'] = list(result['actors'])
     result['asset_types'] = list(result['asset_types'])
     result['regions'] = list(result['regions'])
@@ -1684,9 +1617,7 @@ def analyze_article_military(article):
 
 
 def calculate_regional_tension_multiplier(active_actors):
-    """
-    Multiple militaries moving simultaneously = compounding tension.
-    """
+    """Multiple militaries moving simultaneously = compounding tension."""
     count = len(active_actors)
     if count <= 1:
         return 1.0
@@ -1697,7 +1628,7 @@ def calculate_regional_tension_multiplier(active_actors):
     elif count == 4:
         return 1.45
     else:
-        return 1.5 + (0.05 * (count - 5))  # Scale beyond 5
+        return 1.5 + (0.05 * (count - 5))
 
 
 def determine_alert_level(score):
@@ -1720,13 +1651,73 @@ def scan_military_posture(days=7, force_refresh=False):
     """
     Main entry point. Scans all sources, analyzes articles,
     and returns comprehensive military posture assessment.
+
+    v2.2 behavior:
+    - If fresh cache exists → return it immediately
+    - If stale cache exists → return it (with stale flag) and kick off
+      background refresh if one isn't already running
+    - If no cache at all → return empty skeleton (scan_in_progress=True)
+      while background scan populates it
+    - Only blocks on scan if force_refresh=True (manual refresh button)
     """
 
-    # Check cache first
+    # 1. Fresh cache? Return immediately.
     if not force_refresh and is_military_cache_fresh():
         cache = load_military_cache()
-        print("[Military Tracker] Returning cached data")
+        cache['cached'] = True
+        print("[Military Tracker] Returning fresh cached data")
         return cache
+
+    # 2. Stale cache exists? Return it while refreshing in background.
+    if not force_refresh:
+        stale_cache = load_military_cache()
+        if stale_cache and 'cached_at' in stale_cache:
+            stale_cache['cached'] = True
+            stale_cache['stale'] = True
+            # Kick off background refresh if not already running
+            _trigger_background_scan(days)
+            print("[Military Tracker] Returning stale cache, background refresh triggered")
+            return stale_cache
+
+        # 3. No cache at all? Return skeleton, trigger background scan.
+        _trigger_background_scan(days)
+        print("[Military Tracker] No cache found, returning skeleton while scan runs")
+        return _build_empty_skeleton()
+
+    # 4. force_refresh=True — do a blocking scan (user clicked refresh)
+    return _run_full_scan(days)
+
+
+def _trigger_background_scan(days=7):
+    """Start a background scan if one isn't already running."""
+    global _background_scan_running
+
+    with _background_scan_lock:
+        if _background_scan_running:
+            print("[Military Tracker] Background scan already in progress, skipping")
+            return
+        _background_scan_running = True
+
+    def _do_scan():
+        global _background_scan_running
+        try:
+            print("[Military Tracker] Background scan starting...")
+            _run_full_scan(days)
+        except Exception as e:
+            print(f"[Military Tracker] Background scan error: {e}")
+        finally:
+            with _background_scan_lock:
+                _background_scan_running = False
+
+    thread = threading.Thread(target=_do_scan, daemon=True)
+    thread.start()
+
+
+def _run_full_scan(days=7):
+    """
+    Execute the full scan pipeline. This is the heavy operation.
+    Called either blocking (force_refresh) or from background thread.
+    """
 
     print(f"[Military Tracker] Starting fresh scan ({days} days)...")
     scan_start = time.time()
@@ -1755,7 +1746,7 @@ def scan_military_posture(days=7, force_refresh=False):
     per_actor_scores = {}
     active_actors = set()
     asset_type_counts = {}
-    evacuation_signals = []  # Track separately for dashboard alerts
+    evacuation_signals = []
 
     for article in all_articles:
         analysis = analyze_article_military(article)
@@ -1774,7 +1765,6 @@ def scan_military_posture(days=7, force_refresh=False):
                 asset = signal['asset']
                 asset_type_counts[asset] = asset_type_counts.get(asset, 0) + 1
 
-                # Track evacuation signals specifically
                 if asset == 'base_evacuation':
                     evacuation_signals.append(signal)
 
@@ -1796,8 +1786,6 @@ def scan_military_posture(days=7, force_refresh=False):
     for target, score in per_target_scores.items():
         alert_level = determine_alert_level(score)
         threshold = ALERT_THRESHOLDS[alert_level]
-
-        # Get signals relevant to this target
         relevant_signals = sorted(all_signals, key=lambda x: x['weight'], reverse=True)
 
         target_postures[target] = {
@@ -1832,7 +1820,7 @@ def scan_military_posture(days=7, force_refresh=False):
             'alert_level': determine_alert_level(score)
         }
 
-    # Also include actors with 0 signals so they appear on the dashboard
+    # Include actors with 0 signals
     for actor_id, actor_data in MILITARY_ACTORS.items():
         if actor_id not in actor_summaries:
             actor_summaries[actor_id] = {
@@ -1908,7 +1896,7 @@ def scan_military_posture(days=7, force_refresh=False):
         },
         'last_updated': datetime.now(timezone.utc).isoformat(),
         'cached': False,
-        'version': '2.1.0'
+        'version': '2.2.0'
     }
 
     save_military_cache(result)
@@ -1927,7 +1915,6 @@ def scan_military_posture(days=7, force_refresh=False):
 def get_military_posture(target):
     """
     Quick lookup for a specific target's military posture.
-
     Called by existing threat endpoints:
       probability += posture['military_bonus']
     """
@@ -1961,7 +1948,6 @@ def get_military_posture(target):
         banner_text = ''
         top_signals = posture.get('top_signals', [])
 
-        # Prioritize evacuation signals in banner text
         evac_alerts = data.get('evacuation_alerts', [])
         if evac_alerts and posture.get('show_banner'):
             top_evac = evac_alerts[0]
@@ -2005,18 +1991,6 @@ def get_military_posture(target):
 
 
 # ========================================
-# CORS HELPER
-# ========================================
-
-def _add_cors_headers(response):
-    """Add CORS headers to a Flask response"""
-    response.headers['Access-Control-Allow-Origin'] = '*'
-    response.headers['Access-Control-Allow-Methods'] = 'GET, OPTIONS'
-    response.headers['Access-Control-Allow-Headers'] = 'Content-Type'
-    return response
-
-
-# ========================================
 # FLASK ENDPOINT REGISTRATION
 # ========================================
 
@@ -2024,38 +1998,35 @@ def register_military_endpoints(app):
     """
     Register military tracker endpoints with the Flask app.
     Called from main app.py: register_military_endpoints(app)
+
+    v2.2: Also starts a background scan 10 seconds after registration
+    so cache is populated without blocking gunicorn workers.
     """
 
     @app.route('/api/military-posture', methods=['GET', 'OPTIONS'])
     def api_military_posture():
-        """
-        Full military posture assessment.
-        Used by standalone military.html page.
-        """
-        from flask import request as flask_request
+        """Full military posture assessment for military.html"""
+        from flask import request as flask_request, jsonify
 
-        # Handle CORS preflight
         if flask_request.method == 'OPTIONS':
-            response = app.response_class(response='', status=200)
-            return _add_cors_headers(response)
+            return '', 200
 
         try:
             days = int(flask_request.args.get('days', 7))
             refresh = flask_request.args.get('refresh', 'false').lower() == 'true'
 
             result = scan_military_posture(days=days, force_refresh=refresh)
-            response = app.response_class(
+            return app.response_class(
                 response=json.dumps(result, default=str),
                 status=200,
                 mimetype='application/json'
             )
-            return _add_cors_headers(response)
 
         except Exception as e:
             print(f"[Military API] Error: {str(e)}")
             import traceback
             traceback.print_exc()
-            response = app.response_class(
+            return app.response_class(
                 response=json.dumps({
                     'success': False,
                     'error': str(e)[:200]
@@ -2063,32 +2034,25 @@ def register_military_endpoints(app):
                 status=500,
                 mimetype='application/json'
             )
-            return _add_cors_headers(response)
 
     @app.route('/api/military-posture/<target>', methods=['GET', 'OPTIONS'])
     def api_military_posture_target(target):
-        """
-        Quick posture check for a specific target.
-        Used by dashboard threat cards.
-        """
+        """Quick posture check for a specific target (used by dashboard cards)."""
         from flask import request as flask_request
 
-        # Handle CORS preflight
         if flask_request.method == 'OPTIONS':
-            response = app.response_class(response='', status=200)
-            return _add_cors_headers(response)
+            return '', 200
 
         try:
             posture = get_military_posture(target)
-            response = app.response_class(
+            return app.response_class(
                 response=json.dumps(posture, default=str),
                 status=200,
                 mimetype='application/json'
             )
-            return _add_cors_headers(response)
 
         except Exception as e:
-            response = app.response_class(
+            return app.response_class(
                 response=json.dumps({
                     'success': False,
                     'error': str(e)[:200]
@@ -2096,6 +2060,19 @@ def register_military_endpoints(app):
                 status=500,
                 mimetype='application/json'
             )
-            return _add_cors_headers(response)
 
     print("[Military Tracker] ✅ Endpoints registered: /api/military-posture, /api/military-posture/<target>")
+
+    # ========================================
+    # BACKGROUND SCAN ON STARTUP
+    # ========================================
+    # Wait 10 seconds for gunicorn to finish booting, then scan in background.
+    # This populates the cache without blocking any worker threads.
+
+    def _startup_scan():
+        time.sleep(10)
+        print("[Military Tracker] Startup background scan triggered...")
+        _trigger_background_scan(days=7)
+
+    startup_thread = threading.Thread(target=_startup_scan, daemon=True)
+    startup_thread.start()
