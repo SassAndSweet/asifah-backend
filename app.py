@@ -113,53 +113,7 @@ def is_cache_fresh(cached_data, max_age_hours=6):
 # ========================================
 
 app = Flask(__name__)
-CORS(app, resources={
-    r"/api/*": {
-        "origins": [
-            "https://asifahanalytics.com",
-            "https://www.asifahanalytics.com",
-            "http://localhost:*"
-        ],
-        "methods": ["GET", "POST", "OPTIONS"],
-        "allow_headers": ["Content-Type"]
-    },
-    r"/flight-cancellations": {
-        "origins": [
-            "https://asifahanalytics.com",
-            "https://www.asifahanalytics.com",
-            "http://localhost:*"
-        ],
-        "methods": ["GET", "OPTIONS"],
-        "allow_headers": ["Content-Type"]
-    },
-    r"/rate-limit": {
-        "origins": [
-            "https://asifahanalytics.com",
-            "https://www.asifahanalytics.com",
-            "http://localhost:*"
-        ],
-        "methods": ["GET", "OPTIONS"],
-        "allow_headers": ["Content-Type"]
-    },
-    r"/api/jordan-threat": {
-        "origins": [
-            "https://asifahanalytics.com",
-            "https://www.asifahanalytics.com",
-            "http://localhost:*"
-        ],
-        "methods": ["GET", "OPTIONS"],
-        "allow_headers": ["Content-Type"]
-    },
-    r"/scan-iran-protests": {
-        "origins": [
-            "https://asifahanalytics.com",
-            "https://www.asifahanalytics.com",
-            "http://localhost:*"
-        ],
-        "methods": ["GET", "OPTIONS"],
-        "allow_headers": ["Content-Type"]
-    }
-})
+CORS(app, resources={r"/*": {"origins": ["https://asifahanalytics.com", "https://www.asifahanalytics.com", "http://localhost:*"], "methods": ["GET", "POST", "OPTIONS"], "allow_headers": ["Content-Type"]}})
 
 register_military_endpoints(app)
 
