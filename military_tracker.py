@@ -2015,7 +2015,10 @@ def register_military_endpoints(app):
             days = int(flask_request.args.get('days', 7))
             refresh = flask_request.args.get('refresh', 'false').lower() == 'true'
 
-            result = scan_military_posture(days=days, force_refresh=refresh)
+            # Never block on refresh — trigger background scan and return cache
+          if refresh:
+              _trigger_background_scan(days)
+          result = scan_military_posture(days=days, force_refresh=False)
             return app.response_class(
                 response=json.dumps(result, default=str),
                 status=200,
