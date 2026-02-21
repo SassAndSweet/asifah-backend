@@ -2016,9 +2016,9 @@ def register_military_endpoints(app):
             refresh = flask_request.args.get('refresh', 'false').lower() == 'true'
 
             # Never block on refresh — trigger background scan and return cache
-          if refresh:
-              _trigger_background_scan(days)
-          result = scan_military_posture(days=days, force_refresh=False)
+            if refresh:
+                _trigger_background_scan(days)
+            result = scan_military_posture(days=days, force_refresh=False)
             return app.response_class(
                 response=json.dumps(result, default=str),
                 status=200,
