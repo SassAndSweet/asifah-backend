@@ -1158,64 +1158,150 @@ ISRAEL_INCOMING_THREAT_KEYWORDS = {
     'iran_direct': {
         'weight': 4.0,
         'phrases': [
+            # Compound English
             'iran strike israel', 'iran attack israel', 'iran threatens israel',
-            'iran missile israel', 'iran drone israel', 'iranian attack israel',
-            'irgc israel', 'tehran threatens israel', 'iran ballistic missile israel',
-            'iran cruise missile israel', 'iran retaliates israel', 'iran revenge israel',
-            'iranian drone swarm', 'iran nuclear israel', 'iran proxy israel',
-            'quds force israel', 'iran warns israel', 'supreme leader israel'
+            'iran missile israel', 'iranian attack israel', 'iran retaliates israel',
+            'iran ballistic missile israel', 'iran cruise missile israel',
+            # Loosened English
+            'iranian missile launch', 'iranian ballistic missile',
+            'iranian cruise missile', 'iranian drone swarm',
+            'iran retaliation', 'iranian retaliation',
+            'irgc threatens', 'irgc retaliation', 'irgc missile',
+            'irgc aerospace', 'irgc attack', 'irgc strike',
+            'quds force', 'iranian drone attack', 'shahed drone',
+            'iran warns', 'tehran threatens', 'tehran warns',
+            'supreme leader warns', 'khamenei threatens', 'khamenei warns',
+            'iran nuclear weapon', 'iran enrichment',
+            'iranian proxy attack', 'axis of resistance',
+            'iran revenge', 'severe consequences israel',
+            'iran unprecedented response',
+            # Hebrew
+            'איום איראני', 'טילים בליסטיים איראן', 'איראן מאיימת',
+            'משמרות המהפכה', 'כוח קודס',
+            # Arabic
+            'صواريخ إيرانية', 'الحرس الثوري', 'إيران تهدد',
+            'تهديد إيراني', 'الرد الإيراني'
         ]
     },
     'hezbollah': {
         'weight': 3.5,
         'phrases': [
-            'hezbollah rocket israel', 'hezbollah missile israel', 'hezbollah strike israel',
-            'hezbollah attack israel', 'hezbollah drone israel', 'hezbollah anti-tank',
-            'hezbollah northern israel', 'hezbollah barrage', 'hezbollah retaliation israel',
-            'hezbollah threatens israel', 'nasrallah warns israel', 'hezbollah infiltration',
-            'lebanon border attack', 'lebanese rocket fire', 'hezbollah precision missile',
-            'radwan force', 'hezbollah tunnel', 'hezbollah atgm', 'kornet israel'
+            # Compound English
+            'hezbollah rocket israel', 'hezbollah missile israel',
+            'hezbollah strike israel', 'hezbollah attack israel',
+            'hezbollah northern israel', 'hezbollah retaliation israel',
+            # Loosened English
+            'hezbollah rockets', 'hezbollah missile', 'hezbollah barrage',
+            'hezbollah attack', 'hezbollah strike', 'hezbollah drone',
+            'hezbollah anti-tank', 'hezbollah atgm', 'kornet',
+            'hezbollah infiltration', 'hezbollah precision',
+            'hezbollah threatens', 'hezbollah retaliation',
+            'hezbollah fires', 'hezbollah launches',
+            'radwan force', 'hezbollah tunnel',
+            'nasrallah warns', 'nasrallah threatens',
+            'lebanon border attack', 'lebanese rocket',
+            'rockets northern israel', 'rockets galilee',
+            'rockets haifa', 'sirens northern israel',
+            'red alert north', 'iron dome intercept',
+            # Hebrew
+            'רקטות מלבנון', 'חיזבאללה יורה', 'חיזבאללה תקיפה',
+            'כוח רדואן', 'אזעקות בצפון',
+            # Arabic
+            'صواريخ حزب الله', 'حزب الله يطلق', 'حزب الله يهدد',
+            'قوة الرضوان'
         ]
     },
     'hamas': {
         'weight': 3.5,
         'phrases': [
-            'hamas attack israel', 'hamas rocket israel', 'hamas infiltration',
-            'hamas tunnel attack', 'hamas hostage', 'october 7',
-            'hamas terror attack', 'gaza rocket israel', 'qassam rocket',
-            'hamas ambush', 'hamas suicide', 'hamas mortar israel',
-            'hamas drone israel', 'hamas naval', 'hamas raid',
-            'al-qassam brigades', 'izz ad-din al-qassam', 'nukhba force'
+            # Compound English
+            'hamas attack israel', 'hamas rocket israel',
+            'gaza rocket israel', 'hamas terror attack',
+            # Loosened English
+            'hamas attack', 'hamas rockets', 'hamas mortar',
+            'hamas infiltration', 'hamas tunnel',
+            'hamas drone', 'hamas ambush',
+            'hamas hostage', 'hostage crisis', 'hostages gaza',
+            'october 7', 'oct 7 attack',
+            'qassam rocket', 'qassam brigades',
+            'al-qassam', 'izz ad-din al-qassam', 'nukhba force',
+            'gaza rockets fired', 'rockets from gaza',
+            'rockets southern israel', 'rockets sderot',
+            'rockets ashkelon', 'rockets beersheba',
+            'sirens southern israel', 'red alert south',
+            'gaza ceasefire collapse', 'hamas violations',
+            # Hebrew
+            'רקטות מעזה', 'חמאס יורה', 'חמאס מתקפה',
+            'אזעקות בדרום', 'חטופים',
+            # Arabic
+            'صواريخ من غزة', 'كتائب القسام', 'طوفان الأقصى',
+            'حماس تطلق', 'المقاومة تقصف'
         ]
     },
     'west_bank_gaza': {
         'weight': 2.5,
         'phrases': [
+            # English
             'west bank attack', 'west bank shooting', 'west bank stabbing',
             'jenin attack', 'nablus attack', 'tulkarm attack',
             'ramallah clashes', 'hebron shooting', 'intifada',
             'settler attack', 'west bank violence', 'west bank raid',
-            'palestinian gunfire', 'car ramming israel', 'lone wolf attack israel',
-            'knife attack israel', 'west bank ied', 'checkpoint attack'
+            'palestinian gunfire', 'car ramming attack',
+            'lone wolf attack', 'knife attack',
+            'west bank ied', 'checkpoint attack',
+            'shooting attack israel', 'stabbing attack israel',
+            'terror attack israel', 'ramming attack israel',
+            'west bank militant', 'west bank gunman',
+            'jenin clashes', 'nablus clashes', 'tulkarm clashes',
+            # Hebrew
+            'פיגוע ירי', 'פיגוע דקירה', 'פיגוע דריסה',
+            'עימותים ג׳נין', 'עימותים שכם',
+            # Arabic
+            'عملية إطلاق نار', 'عملية طعن', 'اشتباكات جنين',
+            'مقاوم فلسطيني'
         ]
     },
     'houthis': {
         'weight': 3.0,
         'phrases': [
-            'houthi missile israel', 'houthi drone israel', 'houthi attack israel',
-            'houthi ballistic israel', 'houthi cruise missile israel',
-            'yemen missile israel', 'ansarallah israel', 'houthi threatens israel',
-            'houthi red sea israel', 'houthi eilat', 'houthi tel aviv',
-            'houthi intercept israel', 'houthi long range israel'
+            # Compound English
+            'houthi missile israel', 'houthi drone israel',
+            'houthi attack israel', 'houthi ballistic israel',
+            'yemen missile israel', 'ansarallah israel',
+            # Loosened English
+            'houthi missile launch', 'houthi ballistic missile',
+            'houthi cruise missile', 'houthi drone strike',
+            'houthi long range', 'houthi intercept',
+            'houthi threatens', 'houthi attack',
+            'houthi eilat', 'houthi tel aviv',
+            'houthi ben gurion', 'houthi lod',
+            'yemen drone', 'yemen ballistic',
+            'ansarallah missile', 'ansarallah attack',
+            'red sea missile', 'red sea drone',
+            'bab el-mandeb attack',
+            # Hebrew
+            'טיל מתימן', 'טיל חות׳י', 'יירוט מעל אילת',
+            # Arabic
+            'صاروخ يمني', 'الحوثي يطلق', 'أنصار الله تقصف'
         ]
     },
     'syria_based': {
         'weight': 2.5,
         'phrases': [
-            'syria rocket israel', 'golan heights attack', 'syria drone israel',
-            'iranian proxy syria israel', 'syria border israel attack',
-            'quneitra attack', 'syrian militia israel', 'isis golan',
-            'iranian forces golan', 'druze golan attack', 'syria spillover israel'
+            # English
+            'golan heights attack', 'golan rocket', 'golan drone',
+            'golan shelling', 'golan border incident',
+            'syria rocket israel', 'syria drone israel',
+            'quneitra attack', 'quneitra incident',
+            'iranian proxy golan', 'iranian forces golan',
+            'syrian militia attack', 'isis golan',
+            'druze golan attack', 'syria spillover',
+            'rockets golan', 'mortars golan',
+            'syria border incident', 'syrian border fire',
+            # Hebrew
+            'ירי מסוריה', 'רקטות רמת הגולן', 'אירוע גבול סוריה',
+            # Arabic
+            'قصف الجولان', 'صواريخ من سوريا'
         ]
     }
 }
@@ -1224,57 +1310,121 @@ ISRAEL_OUTGOING_KEYWORDS = {
     'israel_vs_lebanon': {
         'weight': 3.0,
         'phrases': [
-            'israel strike lebanon', 'idf strike lebanon', 'israel airstrike lebanon',
-            'israel bombs lebanon', 'israel attack beirut', 'israel hezbollah strike',
-            'idf operation lebanon', 'israel southern lebanon', 'israel dahiyeh',
-            'israel beirut strike', 'idf targets hezbollah', 'israel eliminates hezbollah',
-            'israel assassination lebanon', 'israel bunker buster lebanon'
+            # Compound English
+            'israel strike lebanon', 'idf strike lebanon',
+            'israel airstrike lebanon', 'israel bombs lebanon',
+            # Loosened English
+            'idf strikes beirut', 'idf strikes lebanon',
+            'idf targets lebanon', 'idf targets hezbollah',
+            'israeli airstrike beirut', 'israeli airstrike lebanon',
+            'strike southern lebanon', 'strike beirut',
+            'strike dahiyeh', 'bombing beirut',
+            'assassination lebanon', 'targeted killing lebanon',
+            'bunker buster lebanon', 'idf operation lebanon',
+            'idf southern lebanon', 'israeli strike hezbollah',
+            'eliminated hezbollah commander', 'hezbollah commander killed',
+            'senior hezbollah killed', 'idf eliminates',
+            # Hebrew
+            'תקיפה בלבנון', 'צה״ל תקף בלבנון', 'חיסול מפקד חיזבאללה',
+            # Arabic
+            'غارة على لبنان', 'قصف إسرائيلي لبنان', 'اغتيال قائد حزب الله'
         ]
     },
     'israel_vs_gaza': {
         'weight': 3.0,
         'phrases': [
-            'israel strike gaza', 'idf gaza operation', 'israel bombs gaza',
-            'israel airstrike gaza', 'idf raid gaza', 'israel ground operation gaza',
-            'rafah operation', 'israel tunnel destruction', 'idf gaza city',
-            'israel khan yunis', 'israel jabalia', 'israel nuseirat',
-            'israel gaza humanitarian', 'israel hamas operation'
+            # English
+            'israel strike gaza', 'idf strike gaza', 'idf strikes gaza',
+            'idf gaza operation', 'israel bombs gaza',
+            'israeli airstrike gaza', 'idf raid gaza',
+            'idf ground operation gaza', 'idf offensive gaza',
+            'rafah operation', 'rafah offensive', 'rafah incursion',
+            'tunnel destruction gaza', 'idf gaza city',
+            'idf khan yunis', 'idf jabalia', 'idf nuseirat',
+            'idf deir al-balah', 'idf rafah',
+            'gaza ground operation', 'gaza offensive',
+            'gaza airstrike', 'gaza bombing',
+            'hamas commander killed', 'hamas operative eliminated',
+            # Hebrew
+            'תקיפה ברצועה', 'צה״ל פועל בעזה', 'מבצע קרקעי עזה',
+            # Arabic
+            'غارة على غزة', 'قصف إسرائيلي غزة', 'عملية برية غزة'
         ]
     },
     'israel_vs_iran': {
         'weight': 4.0,
         'phrases': [
-            'israel strike iran', 'israel attack iran', 'israel iran nuclear',
-            'israel bombs iran', 'israel retaliates iran', 'idf iran operation',
-            'israel iran facility', 'israel isfahan', 'israel natanz',
-            'mossad iran', 'israel covert iran', 'israel cyber iran',
-            'israel threatens iran', 'netanyahu iran strike'
+            # English
+            'israel strike iran', 'israel attack iran',
+            'israel bombs iran', 'idf iran operation',
+            'israeli strike iran', 'israeli attack iran',
+            'strike iranian facility', 'strike isfahan',
+            'strike natanz', 'strike fordow', 'strike parchin',
+            'mossad operation iran', 'mossad iran',
+            'israel covert iran', 'israel cyber iran',
+            'sabotage iran nuclear', 'netanyahu iran strike',
+            'israel threatens iran', 'israel retaliates iran',
+            'israel iran nuclear facility',
+            'iaf long range strike', 'aerial refueling iran',
+            # Hebrew
+            'תקיפה באיראן', 'מתקפה על איראן', 'ישראל תוקפת איראן',
+            # Arabic
+            'ضربة إسرائيلية إيران', 'هجوم على إيران'
         ]
     },
     'israel_vs_syria': {
         'weight': 2.0,
         'phrases': [
-            'israel strike syria', 'idf airstrike syria', 'israel bombs damascus',
-            'israel targets syria', 'israel iranian assets syria',
-            'israel weapons shipment syria', 'israel t4 airbase',
-            'israel strike aleppo', 'israel syria arms transfer'
+            # English
+            'israel strike syria', 'idf airstrike syria',
+            'israeli airstrike syria', 'israeli strike syria',
+            'israel bombs damascus', 'strike damascus',
+            'strike aleppo', 'strike t4 airbase',
+            'strike syrian weapons', 'arms shipment syria',
+            'weapons transfer syria', 'israel targets syria',
+            'iranian assets syria destroyed', 'iaf syria',
+            'overnight strike syria', 'syria weapons depot',
+            # Hebrew
+            'תקיפה בסוריה', 'תקיפת נכסים איראניים בסוריה',
+            # Arabic
+            'غارة إسرائيلية سوريا', 'قصف دمشق'
         ]
     },
     'israel_vs_west_bank': {
         'weight': 2.0,
         'phrases': [
-            'idf raid west bank', 'idf jenin operation', 'idf nablus raid',
-            'idf tulkarm operation', 'israel arrests west bank',
-            'idf west bank incursion', 'israel demolition west bank',
-            'israel counter terror west bank', 'shin bet arrest'
+            # English
+            'idf raid west bank', 'idf raid jenin',
+            'idf raid nablus', 'idf raid tulkarm',
+            'idf jenin operation', 'idf nablus operation',
+            'idf tulkarm operation', 'idf west bank incursion',
+            'israel arrests west bank', 'shin bet arrest',
+            'shin bet operation', 'west bank demolition',
+            'counter terror west bank', 'wanted militant arrested',
+            'idf west bank clashes', 'idf helicopter west bank',
+            'jenin refugee camp operation', 'nablus old city raid',
+            # Hebrew
+            'מבצע בג׳נין', 'מבצע בשכם', 'מעצר מבוקשים',
+            # Arabic
+            'اقتحام جنين', 'اقتحام نابلس', 'اعتقالات الضفة'
         ]
     },
     'israel_vs_houthis': {
         'weight': 2.5,
         'phrases': [
-            'israel strike yemen', 'idf strike houthis', 'israel bombs yemen',
-            'israel retaliates houthis', 'israel hodeidah', 'israel sanaa strike',
-            'idf yemen port', 'israel houthi infrastructure'
+            # English
+            'israel strike yemen', 'idf strike yemen',
+            'idf strike houthis', 'israeli strike yemen',
+            'israel bombs yemen', 'strike hodeidah',
+            'strike sanaa', 'strike houthi',
+            'iaf yemen', 'iaf houthi',
+            'israel retaliates houthis', 'israel retaliates yemen',
+            'hodeidah port strike', 'yemen infrastructure strike',
+            'houthi target destroyed',
+            # Hebrew
+            'תקיפה בתימן', 'צה״ל תקף בתימן',
+            # Arabic
+            'غارة على اليمن', 'ضربة على الحديدة'
         ]
     }
 }
