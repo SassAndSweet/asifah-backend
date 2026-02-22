@@ -1,6 +1,6 @@
 """
-Asifah Analytics — Military Asset & Deployment Tracker v2.2.0
-February 21, 2026
+Asifah Analytics — Military Asset & Deployment Tracker v2.3.0
+February 22, 2026
 
 Tracks military asset movements across multiple actors and regions.
 Feeds deployment scores into existing threat probability calculations.
@@ -23,6 +23,8 @@ ACTORS TRACKED:
     - Turkey
   Tier 3 (Regional — Europe):
     - Ukraine
+    - Greenland / Denmark
+    - Poland
   Tier 4 (Alliance):
     - NATO (Europe / Arctic expansion)
 
@@ -44,6 +46,17 @@ OUTPUTS:
   - Standalone page data for military.html
 
 CHANGELOG:
+  v2.3.0 - Multilingual keyword matching + new actors:
+           * Added Greenland and Poland as Tier 3 European actors
+           * Added multilingual keywords to Russia, Ukraine, Iran, Israel
+             actors so GDELT non-English articles trigger score matches
+           * Added Polish and Danish/Norwegian GDELT query blocks
+           * Expanded Russian and Ukrainian GDELT queries
+           * Added drone incursion and airspace violation keywords
+             for Poland (border drone flyovers from Belarus/Russia)
+           * Added Greenland sovereignty and Arctic militarization keywords
+           * Added location multipliers for Poland border hotspots
+           * Total GDELT queries now 120+ across 11 languages
   v2.2.0 - Background scan & stability fix:
            * Moved initial scan to background thread (prevents gunicorn
              worker timeout crashes on cold start)
@@ -122,8 +135,8 @@ REGIONAL_THEATRES = {
         'label': 'European Theatre',
         'icon': '🌍',
         'order': 2,
-        'actors': ['nato', 'russia', 'turkey', 'ukraine'],
-        'description': 'EUCOM area — NATO, Russia, Arctic, Black Sea, Ukraine'
+        'actors': ['nato', 'russia', 'turkey', 'ukraine', 'greenland', 'poland'],
+        'description': 'EUCOM area — NATO, Russia, Arctic, Black Sea, Ukraine, Poland eastern flank'
     },
     'middle_east': {
         'label': 'Middle East & North Africa',
@@ -198,7 +211,12 @@ MILITARY_ACTORS = {
             'iron dome deployment', 'david sling', 'arrow battery',
             'israel air defense activation', 'iron dome intercept',
             'mossad operation', 'shin bet alert', 'aman intelligence',
-            'israel intelligence assessment'
+            'israel intelligence assessment',
+            # Hebrew keywords (match GDELT Hebrew articles)
+            'צה"ל', 'כיפת ברזל', 'חיל האוויר',
+            'פיקוד צפון', 'מילואים', 'חזבאללה',
+            'חיל הים', 'תרגיל', 'גיוס',
+            'כוננות', 'פריסה', 'סיור'
         ],
         'rss_feeds': []
     },
@@ -231,7 +249,14 @@ MILITARY_ACTORS = {
             'iran threatens', 'iran retaliation', 'iran warns',
             'iranian bases within range', 'iran retaliatory strike',
             'iran nuclear weapon', 'iran enrichment',
-            'iranian defense minister'
+            'iranian defense minister',
+            # Farsi keywords (match GDELT Farsi articles)
+            'سپاه پاسداران', 'رزمایش', 'نیروی دریایی',
+            'موشک بالستیک', 'پهپاد', 'نیروی هوافضا',
+            'تنگه هرمز', 'سپاه قدس',
+            # Arabic keywords (match Arabic-language Iran coverage)
+            'الحرس الثوري', 'صواريخ باليستية إيران',
+            'القوات البحرية الإيرانية', 'مضيق هرمز'
         ],
         'rss_feeds': []
     },
@@ -290,7 +315,17 @@ MILITARY_ACTORS = {
             'russia black sea', 'russian black sea fleet',
             'sevastopol naval base', 'crimea military',
             'russia arctic military', 'northern fleet',
-            'russia arctic exercise'
+            'russia arctic exercise',
+            # Russian keywords (match GDELT Russian-language articles)
+            'вооруженные силы', 'военная операция', 'ракетный удар',
+            'черноморский флот', 'северный флот', 'мобилизация',
+            'наступление', 'артиллерия', 'ПВО', 'учения',
+            'ядерное оружие', 'стратегические силы',
+            'крылатая ракета', 'баллистическая ракета',
+            'военно-морской флот', 'подводная лодка',
+            'бомбардировщик', 'истребитель',
+            'дрон', 'беспилотник', 'БПЛА',
+            'фронт', 'контрнаступление', 'оборона'
         ],
         'rss_feeds': []
     },
@@ -312,7 +347,9 @@ MILITARY_ACTORS = {
             'saudi yemen border', 'saudi military buildup',
             'saudi defense spending', 'saudi arms deal',
             'saudi intercept', 'saudi houthi',
-            'us cargo planes saudi', 'saudi base'
+            'us cargo planes saudi', 'saudi base',
+            # Arabic keywords
+            'القوات المسلحة السعودية', 'تدريب عسكري السعودية'
         ],
         'rss_feeds': []
     },
@@ -330,7 +367,9 @@ MILITARY_ACTORS = {
             'al dhafra air base', 'uae defense',
             'uae arms deal', 'uae military buildup',
             'uae evacuation', 'uae departure',
-            'emirates military', 'uae drone'
+            'emirates military', 'uae drone',
+            # Arabic keywords
+            'القوات المسلحة الإماراتية'
         ],
         'rss_feeds': []
     },
@@ -350,7 +389,9 @@ MILITARY_ACTORS = {
             'jordan military exercise', 'jordan defense',
             'jordan intercept', 'jordan air defense',
             'eager lion exercise', 'jordan base',
-            'us cargo planes jordan', 'strike eagles jordan'
+            'us cargo planes jordan', 'strike eagles jordan',
+            # Arabic keywords
+            'القوات الأردنية', 'الجيش الأردني'
         ],
         'rss_feeds': []
     },
@@ -401,7 +442,9 @@ MILITARY_ACTORS = {
             'egypt sinai operation', 'egyptian air force',
             'egypt rafale', 'egypt military buildup',
             'egypt libya border', 'egypt gaza border',
-            'egypt israel border troops', 'bright star exercise'
+            'egypt israel border troops', 'bright star exercise',
+            # Arabic keywords
+            'الجيش المصري', 'القوات المسلحة المصرية'
         ],
         'rss_feeds': []
     },
@@ -421,7 +464,10 @@ MILITARY_ACTORS = {
             'turkish navy mediterranean', 'turkish naval exercise',
             'turkey northern iraq', 'turkey pkk operation',
             'turkish ground operation syria',
-            'turkey nato', 'turkish military nato'
+            'turkey nato', 'turkish military nato',
+            # Turkish keywords
+            'türk silahlı kuvvetleri', 'türk donanması',
+            'hava kuvvetleri', 'askeri operasyon'
         ],
         'rss_feeds': []
     },
@@ -453,7 +499,119 @@ MILITARY_ACTORS = {
             'ukraine military aid', 'ukraine ammunition',
             'ukraine defense package',
             'ukraine mobilization', 'ukraine conscription',
-            'ukraine reserves', 'ukraine recruitment'
+            'ukraine reserves', 'ukraine recruitment',
+            # Ukrainian keywords (match GDELT Ukrainian articles)
+            'збройні сили', 'зброя', 'наступ', 'оборона',
+            'фронт', 'мобілізація', 'протиповітряна оборона',
+            'ракетний удар', 'артилерія', 'дрон', 'БПЛА',
+            'контрнаступ', 'зенітна ракета',
+            'постачання зброї', 'військова допомога',
+            'морський дрон', 'безпілотник',
+            # Russian keywords (many Ukraine war articles in Russian)
+            'украина наступление', 'украина фронт',
+            'украина оружие', 'украина мобилизация',
+            'ВСУ', 'вооруженные силы украины'
+        ],
+        'rss_feeds': []
+    },
+
+    'greenland': {
+        'name': 'Greenland',
+        'flag': '🇬🇱',
+        'tier': 3,
+        'theatre': 'europe',
+        'weight': 0.4,
+        'feeds_into': ['regional_tension'],
+        'keywords': [
+            # English — sovereignty & acquisition
+            'greenland sovereignty', 'greenland acquisition', 'greenland trump',
+            'greenland independence', 'greenland autonomy', 'greenland referendum',
+            'greenland self-rule', 'greenland self-determination',
+            'greenland purchase', 'buy greenland', 'us greenland deal',
+            'greenland strategic', 'greenland geopolitical',
+            # English — military & Arctic
+            'greenland military', 'greenland defense', 'greenland defence',
+            'greenland nato', 'greenland arctic', 'greenland us military',
+            'thule air base', 'pituffik space base',
+            'greenland radar', 'greenland early warning',
+            'greenland surveillance', 'greenland patrol',
+            'arctic military exercise', 'arctic sovereignty',
+            'arctic nato', 'arctic icebreaker',
+            'us arctic strategy', 'arctic military buildup',
+            # English — resources & China
+            'greenland rare earth', 'greenland critical minerals',
+            'greenland mining', 'greenland china', 'greenland mineral',
+            'greenland lithium', 'greenland uranium',
+            # English — Denmark relations
+            'denmark greenland', 'danish armed forces greenland',
+            'denmark military greenland', 'greenland denmark tensions',
+            'múte egede', 'naalakkersuisut',
+            # Danish keywords (match GDELT Danish articles)
+            'grønland', 'grønlands selvstyre', 'grønland forsvar',
+            'grønland suverænitet', 'grønland nato',
+            'grønland militær', 'pituffik', 'thule',
+            'arktisk forsvar', 'arktisk sikkerhed',
+            'forsvaret grønland',
+            # Greenlandic
+            'kalaallit nunaat', 'namminersorlutik',
+        ],
+        'rss_feeds': []
+    },
+
+    'poland': {
+        'name': 'Poland',
+        'flag': '🇵🇱',
+        'tier': 3,
+        'theatre': 'europe',
+        'weight': 0.5,
+        'feeds_into': ['regional_tension'],
+        'keywords': [
+            # English — military posture
+            'poland military', 'polish armed forces', 'polish army',
+            'poland defense spending', 'poland defence spending',
+            'poland military buildup', 'poland military modernization',
+            'poland nato', 'poland nato deployment',
+            'poland eastern flank', 'nato poland',
+            'us forces poland', 'us troops poland',
+            'poland patriot', 'poland air defense',
+            'poland himars', 'poland abrams', 'poland k2 tanks',
+            'poland f-35', 'poland military procurement',
+            # English — drone incursions & airspace violations
+            'poland drone incursion', 'drone over poland',
+            'drone crossed into poland', 'drone entered polish airspace',
+            'poland airspace violation', 'airspace violation poland',
+            'unidentified drone poland', 'mystery drone poland',
+            'drone flyover poland', 'drone overflight poland',
+            'poland border drone', 'drone from belarus',
+            'drone from ukraine entered poland', 'drone from russia poland',
+            'stray drone poland', 'wayward drone poland',
+            'poland scramble jets', 'poland intercept drone',
+            'poland shoot down drone', 'poland airspace incursion',
+            'object entered polish airspace', 'missile entered poland',
+            'projectile crossed into poland', 'poland airspace breach',
+            'przewodów', 'przewodow missile',
+            # English — border & Belarus
+            'poland border', 'poland belarus border',
+            'poland ukraine border', 'poland border crisis',
+            'poland border troops', 'poland border security',
+            'poland migration crisis', 'hybrid warfare poland',
+            'belarus hybrid attack', 'lukashenko poland border',
+            # English — exercises & bases
+            'poland military exercise', 'steadfast defender poland',
+            'dragon exercise poland', 'anakonda exercise',
+            'rzeszów', 'rzeszow logistics', 'poland logistics hub',
+            'redzikowo', 'aegis ashore poland',
+            'poland missile defense', 'poland shield',
+            'lask air base', 'poznań military',
+            # Polish keywords (match GDELT Polish articles)
+            'wojsko polskie', 'siły zbrojne',
+            'dron nad polską', 'naruszenie przestrzeni powietrznej',
+            'obrona powietrzna', 'ćwiczenia wojskowe',
+            'granica polsko-białoruska', 'granica polsko-ukraińska',
+            'modernizacja armii', 'zakupy wojskowe',
+            'NATO w Polsce', 'flanka wschodnia',
+            'incydent graniczny', 'obiekt w przestrzeni powietrznej',
+            'bezzałogowiec', 'dron zwiadowczy',
         ],
         'rss_feeds': []
     },
@@ -680,6 +838,26 @@ ASSET_CATEGORIES = {
             'bases within range', 'within our range',
             'will defend with full force', 'painful response'
         ]
+    },
+    'drone_incursion': {
+        'label': 'Drone Incursion / Airspace Violation',
+        'icon': '🛸',
+        'weight': 3.5,
+        'description': 'Unidentified drone or object entering sovereign airspace. Border threat signal.',
+        'keywords': [
+            'drone incursion', 'drone entered airspace',
+            'drone crossed border', 'airspace violation',
+            'unidentified drone', 'mystery drone',
+            'drone flyover', 'drone overflight',
+            'stray drone', 'wayward drone',
+            'object entered airspace', 'airspace breach',
+            'scramble jets drone', 'intercept drone',
+            'shoot down drone', 'drone shot down',
+            'missile crossed border', 'projectile entered airspace',
+            'border airspace incident',
+            'drone from belarus', 'drone from russia',
+            'uav crossed border', 'uav incursion'
+        ]
     }
 }
 
@@ -750,7 +928,18 @@ LOCATION_MULTIPLIERS = {
     'arctic': 1.5,
     'greenland': 1.5,
     'south china sea': 2.0,
-    'baltic': 1.5
+    'baltic': 1.5,
+    # Poland-specific hotspots (v2.3.0)
+    'rzeszów': 2.0,
+    'rzeszow': 2.0,
+    'redzikowo': 2.0,
+    'przewodów': 2.5,
+    'przewodow': 2.5,
+    'poland belarus border': 2.0,
+    'polish airspace': 2.0,
+    'suwalki gap': 2.5,
+    'kaliningrad': 2.0,
+    'lask air base': 1.5,
 }
 
 
@@ -899,8 +1088,8 @@ ASSET_TARGET_MAPPING = {
         },
         'Rzeszów': {
             'location': 'Poland',
-            'targets': ['ukraine_support'],
-            'description': 'Key logistics hub for Ukraine aid.'
+            'targets': ['ukraine_support', 'poland'],
+            'description': 'Key logistics hub for Ukraine aid. Near Ukrainian border.'
         },
         'Mihail Kogălniceanu': {
             'location': 'Romania',
@@ -911,6 +1100,26 @@ ASSET_TARGET_MAPPING = {
             'location': 'Romania',
             'targets': ['nato_eastern_flank'],
             'description': 'Aegis Ashore missile defense site.'
+        },
+        'Redzikowo': {
+            'location': 'Poland',
+            'targets': ['poland', 'nato_eastern_flank'],
+            'description': 'Aegis Ashore missile defense site. NATO BMD.'
+        },
+        'Łask Air Base': {
+            'location': 'Poland',
+            'targets': ['poland', 'nato_eastern_flank'],
+            'description': 'Polish Air Force base. NATO air policing.'
+        },
+        'Poznań': {
+            'location': 'Poland',
+            'targets': ['poland', 'nato_eastern_flank'],
+            'description': 'US Army V Corps forward HQ.'
+        },
+        'Suwalki Gap': {
+            'location': 'Poland/Lithuania border',
+            'targets': ['poland', 'nato_eastern_flank'],
+            'description': 'Critical NATO corridor between Kaliningrad and Belarus.'
         },
     }
 }
@@ -981,6 +1190,11 @@ DEFENSE_RSS_FEEDS = {
     'Ukrinform': 'https://www.ukrinform.net/rss/block-lastnews',
     'Iran International': 'https://www.iranintl.com/en/feed',
     'Tasnim English': 'https://www.tasnimnews.com/en/rss',
+    # v2.3.0 additions — Poland & Arctic
+    'Defence24 Poland': 'https://defence24.com/rss',
+    'Polish Press Agency': 'https://www.pap.pl/en/rss.xml',
+    'Arctic Today': 'https://www.arctictoday.com/feed/',
+    'High North News': 'https://www.highnorthnews.com/feed/',
 }
 
 REDDIT_MILITARY_SUBREDDITS = [
@@ -1094,7 +1308,7 @@ def _build_empty_skeleton():
         'cached': False,
         'scan_in_progress': True,
         'message': 'Initial scan in progress. Data will appear shortly.',
-        'version': '2.2.0'
+        'version': '2.3.0'
     }
 
 
@@ -1217,6 +1431,7 @@ def fetch_all_gdelt_military(days=7):
     """Fetch military articles from GDELT across multiple queries and languages."""
 
     english_queries = [
+        # --- CENTCOM / Middle East ---
         'military deployment middle east',
         'carrier strike group persian gulf',
         'military exercise middle east',
@@ -1232,6 +1447,7 @@ def fetch_all_gdelt_military(days=7):
         'military families evacuation',
         'ordered departure embassy',
         'noncombatant evacuation operation',
+        # --- Israel / IDF ---
         'IDF military operation',
         'Israel defense forces deployment',
         'Israel military buildup',
@@ -1240,6 +1456,7 @@ def fetch_all_gdelt_military(days=7):
         'Israeli airstrike',
         'Israel Hezbollah military',
         'IDF northern command',
+        # --- Gulf States ---
         'jordan military base',
         'qatar al udeid',
         'saudi military exercise',
@@ -1247,13 +1464,16 @@ def fetch_all_gdelt_military(days=7):
         'kuwait camp arifjan',
         'egypt military exercise',
         'egypt sinai troops',
+        # --- Turkey ---
         'turkish military operation syria',
         'turkey military exercise',
         'incirlik air base',
+        # --- NATO / Europe ---
         'nato exercise arctic',
         'nato military deployment',
         'greenland military defense',
         'nato baltic deployment',
+        # --- Ukraine / Russia war ---
         'ukraine military front',
         'russia ukraine offensive',
         'ukraine weapons delivery',
@@ -1261,6 +1481,36 @@ def fetch_all_gdelt_military(days=7):
         'ukraine drone strike russia',
         'russia mobilization military',
         'crimea military attack',
+        'ukraine front line advance',
+        'russia missile strike ukraine',
+        'ukraine air defense intercept',
+        'kursk incursion ukraine',
+        # --- Greenland / Arctic (v2.3.0) ---
+        'greenland sovereignty dispute',
+        'greenland trump acquisition',
+        'arctic military buildup',
+        'pituffik space base greenland',
+        'greenland rare earth minerals',
+        'greenland independence referendum',
+        'denmark greenland military',
+        'arctic nato exercise',
+        'us arctic strategy',
+        # --- Poland / Eastern Flank (v2.3.0) ---
+        'poland military buildup',
+        'poland defense spending',
+        'poland nato eastern flank',
+        'drone incursion poland',
+        'drone entered polish airspace',
+        'poland airspace violation',
+        'poland belarus border crisis',
+        'aegis ashore redzikowo poland',
+        'us troops poland deployment',
+        'poland scramble jets',
+        'unidentified object polish airspace',
+        'suwalki gap military',
+        'poland military modernization',
+        'poland F-35 purchase',
+        'hybrid warfare poland border',
     ]
 
     hebrew_queries = [
@@ -1275,6 +1525,7 @@ def fetch_all_gdelt_military(days=7):
     ]
 
     russian_queries = [
+        # Original queries
         'военная операция украина',
         'черноморский флот',
         'вооруженные силы учения',
@@ -1283,6 +1534,22 @@ def fetch_all_gdelt_military(days=7):
         'северный флот арктика',
         'военно-морской флот',
         'ПВО развертывание',
+        # v2.3.0 — expanded war-specific terms
+        'наступление фронт донецк',
+        'наступление фронт запорожье',
+        'артиллерия обстрел украина',
+        'крылатая ракета удар',
+        'баллистическая ракета удар',
+        'дрон удар украина',
+        'беспилотник атака',
+        'БПЛА удар',
+        'курск вторжение',
+        'контрнаступление украина',
+        'потери военные',
+        'подкрепление войска',
+        'фронт продвижение',
+        'ядерная угроза',
+        'мобилизация призыв',
     ]
 
     arabic_queries = [
@@ -1316,11 +1583,27 @@ def fetch_all_gdelt_military(days=7):
     ]
 
     ukrainian_queries = [
+        # Original queries
         'збройні сили україни',
         'фронт наступ',
         'мобілізація військова',
         'протиповітряна оборона',
         'зброя постачання',
+        # v2.3.0 — expanded war-specific terms
+        'ракетний удар росія',
+        'дрон атака',
+        'артилерія обстріл',
+        'контрнаступ запоріжжя',
+        'фронт донецьк',
+        'фронт луганськ',
+        'курськ операція',
+        'морський дрон чорне море',
+        'F-16 Україна',
+        'Patriot ППО',
+        'HIMARS удар',
+        'Storm Shadow ракета',
+        'мобілізація призов',
+        'військова допомога',
     ]
 
     french_queries = [
@@ -1335,6 +1618,37 @@ def fetch_all_gdelt_military(days=7):
         '中国 军舰',
     ]
 
+    # v2.3.0 — New language blocks
+    polish_queries = [
+        'wojsko polskie ćwiczenia',
+        'siły zbrojne modernizacja',
+        'dron nad Polską',
+        'naruszenie przestrzeni powietrznej',
+        'obrona powietrzna Polska',
+        'NATO flanka wschodnia',
+        'granica polsko-białoruska wojsko',
+        'granica polsko-ukraińska incydent',
+        'zakupy wojskowe Polska',
+        'Patriot Polska',
+        'F-35 Polska',
+        'Redzikowo tarcza',
+        'Suwałki korytarz',
+        'bezzałogowiec granica',
+    ]
+
+    danish_norwegian_queries = [
+        'grønland forsvar',
+        'grønland suverænitet',
+        'arktisk militær',
+        'Pituffik base',
+        'grønland NATO',
+        'Danmark forsvar grønland',
+        'arktisk sikkerhed',
+        'forsvaret Arktis',
+        'militær øvelse Arktis',
+        'Grønland selvstændighed',
+    ]
+
     all_articles = []
 
     query_blocks = [
@@ -1347,6 +1661,8 @@ def fetch_all_gdelt_military(days=7):
         (ukrainian_queries, 'ukr', 'Ukrainian'),
         (french_queries, 'fra', 'French'),
         (chinese_queries, 'zho', 'Chinese'),
+        (polish_queries, 'pol', 'Polish'),
+        (danish_norwegian_queries, 'dan', 'Danish'),
     ]
 
     for queries, lang_code, lang_name in query_blocks:
@@ -1409,6 +1725,10 @@ def fetch_all_newsapi_military(days=7):
         'military families departure Bahrain',
         'Ukraine military',
         'Russia offensive Ukraine',
+        # v2.3.0 additions
+        'Poland military NATO',
+        'drone Poland airspace',
+        'Greenland sovereignty Arctic',
     ]
 
     all_articles = []
@@ -1651,14 +1971,6 @@ def scan_military_posture(days=7, force_refresh=False):
     """
     Main entry point. Scans all sources, analyzes articles,
     and returns comprehensive military posture assessment.
-
-    v2.2 behavior:
-    - If fresh cache exists → return it immediately
-    - If stale cache exists → return it (with stale flag) and kick off
-      background refresh if one isn't already running
-    - If no cache at all → return empty skeleton (scan_in_progress=True)
-      while background scan populates it
-    - Only blocks on scan if force_refresh=True (manual refresh button)
     """
 
     # 1. Fresh cache? Return immediately.
@@ -1674,7 +1986,6 @@ def scan_military_posture(days=7, force_refresh=False):
         if stale_cache and 'cached_at' in stale_cache:
             stale_cache['cached'] = True
             stale_cache['stale'] = True
-            # Kick off background refresh if not already running
             _trigger_background_scan(days)
             print("[Military Tracker] Returning stale cache, background refresh triggered")
             return stale_cache
@@ -1714,17 +2025,12 @@ def _trigger_background_scan(days=7):
 
 
 def _run_full_scan(days=7):
-    """
-    Execute the full scan pipeline. This is the heavy operation.
-    Called either blocking (force_refresh) or from background thread.
-    """
+    """Execute the full scan pipeline."""
 
     print(f"[Military Tracker] Starting fresh scan ({days} days)...")
     scan_start = time.time()
 
-    # ========================================
     # FETCH FROM ALL SOURCES
-    # ========================================
     print("[Military Tracker] Phase 1: Fetching data...")
 
     rss_articles = fetch_all_defense_rss()
@@ -1736,9 +2042,7 @@ def _run_full_scan(days=7):
 
     print(f"[Military Tracker] Total articles to analyze: {len(all_articles)}")
 
-    # ========================================
     # ANALYZE ALL ARTICLES
-    # ========================================
     print("[Military Tracker] Phase 2: Analyzing articles...")
 
     all_signals = []
@@ -1768,9 +2072,7 @@ def _run_full_scan(days=7):
                 if asset == 'base_evacuation':
                     evacuation_signals.append(signal)
 
-    # ========================================
     # CALCULATE REGIONAL TENSION MULTIPLIER
-    # ========================================
     tension_multiplier = calculate_regional_tension_multiplier(active_actors)
 
     print(f"[Military Tracker] Active actors: {len(active_actors)} → Tension multiplier: {tension_multiplier}x")
@@ -1778,9 +2080,7 @@ def _run_full_scan(days=7):
     for target in per_target_scores:
         per_target_scores[target] = round(per_target_scores[target] * tension_multiplier, 2)
 
-    # ========================================
     # BUILD PER-TARGET POSTURE ASSESSMENTS
-    # ========================================
     target_postures = {}
 
     for target, score in per_target_scores.items():
@@ -1799,9 +2099,7 @@ def _run_full_scan(days=7):
             'tension_multiplier': tension_multiplier
         }
 
-    # ========================================
     # BUILD PER-ACTOR SUMMARIES
-    # ========================================
     actor_summaries = {}
 
     for actor_id, score in per_actor_scores.items():
@@ -1834,9 +2132,7 @@ def _run_full_scan(days=7):
                 'alert_level': 'normal'
             }
 
-    # ========================================
     # BUILD THEATRE GROUPINGS
-    # ========================================
     theatre_data = {}
 
     for theatre_id, theatre_info in REGIONAL_THEATRES.items():
@@ -1858,9 +2154,7 @@ def _run_full_scan(days=7):
             'alert_level': determine_alert_level(theatre_total_score)
         }
 
-    # ========================================
     # BUILD RESPONSE
-    # ========================================
     scan_time = round(time.time() - scan_start, 1)
 
     result = {
@@ -1896,7 +2190,7 @@ def _run_full_scan(days=7):
         },
         'last_updated': datetime.now(timezone.utc).isoformat(),
         'cached': False,
-        'version': '2.2.0'
+        'version': '2.3.0'
     }
 
     save_military_cache(result)
@@ -1998,9 +2292,6 @@ def register_military_endpoints(app):
     """
     Register military tracker endpoints with the Flask app.
     Called from main app.py: register_military_endpoints(app)
-
-    v2.2: Also starts a background scan 10 seconds after registration
-    so cache is populated without blocking gunicorn workers.
     """
 
     @app.route('/api/military-posture', methods=['GET', 'OPTIONS'])
@@ -2015,7 +2306,6 @@ def register_military_endpoints(app):
             days = int(flask_request.args.get('days', 7))
             refresh = flask_request.args.get('refresh', 'false').lower() == 'true'
 
-            # Never block on refresh — trigger background scan and return cache
             if refresh:
                 _trigger_background_scan(days)
             result = scan_military_posture(days=days, force_refresh=False)
@@ -2066,12 +2356,7 @@ def register_military_endpoints(app):
 
     print("[Military Tracker] ✅ Endpoints registered: /api/military-posture, /api/military-posture/<target>")
 
-    # ========================================
     # BACKGROUND SCAN ON STARTUP
-    # ========================================
-    # Wait 10 seconds for gunicorn to finish booting, then scan in background.
-    # This populates the cache without blocking any worker threads.
-
     def _startup_scan():
         time.sleep(10)
         print("[Military Tracker] Startup background scan triggered...")
