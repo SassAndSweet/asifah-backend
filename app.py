@@ -409,6 +409,7 @@ rate_limit_data = {
 # ========================================
 # U.S. STATE DEPT TRAVEL ADVISORIES
 # ========================================
+_travel_advisory_cache = {'data': None, 'fetched_at': None, 'ttl': 86400}  # 24hr cache
 TRAVEL_ADVISORY_API = "https://cadataapi.state.gov/api/TravelAdvisories"
 
 TRAVEL_ADVISORY_CODES = {
@@ -7556,14 +7557,39 @@ def _run_travel_advisory_scan():
 
 @app.route('/api/travel-advisories', methods=['GET'])
 def api_travel_advisories():
-    """Return U.S. State Dept travel advisories for ME targets."""
+    """Return U.S. State Dept travel advisories for ME targets. Cached 24h."""
     try:
+        force = request.args.get('force', 'false').lower() == 'true'
+        now = time.time()
+
+        # Return cached data if fresh (< 24h old)
+        if (not force
+                and _travel_advisory_cache['data'] is not None
+                and _travel_advisory_cache['fetched_at'] is not None
+                and (now - _travel_advisory_cache['fetched_at']) < _travel_advisory_cache['ttl']):
+            cached = _travel_advisory_cache['data'].copy()
+            cached['cached'] = True
+            return jsonify(cached)
+
+        # Fetch fresh data
         data = _run_travel_advisory_scan()
         data['timestamp'] = datetime.now(timezone.utc).isoformat()
         data['version'] = '2.2.0-HRANA'
+        data['cached'] = False
+
+        # Store in cache
+        _travel_advisory_cache['data'] = data
+        _travel_advisory_cache['fetched_at'] = now
+
         return jsonify(data)
     except Exception as e:
         print(f"[Travel Advisory] Endpoint error: {e}")
+        # If cache exists, return stale data rather than an error
+        if _travel_advisory_cache['data'] is not None:
+            stale = _travel_advisory_cache['data'].copy()
+            stale['cached'] = True
+            stale['stale'] = True
+            return jsonify(stale)
         return jsonify({'success': False, 'error': str(e), 'advisories': {}}), 500
         
 @app.route('/', methods=['GET'])
