@@ -7493,7 +7493,8 @@ def _run_travel_advisory_scan():
 
         for target, codes in TRAVEL_ADVISORY_CODES.items():
             for advisory in all_advisories:
-                category = advisory.get('Category', '')
+                category_list = advisory.get('Category', [])
+                category = category_list[0] if category_list else ''
                 if category in codes:
                     title = advisory.get('Title', '')
                     level_match = re.search(r'Level\s+(\d)', title)
