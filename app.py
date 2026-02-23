@@ -28,6 +28,7 @@ import re
 import math
 import json
 from pathlib import Path
+import threading
 from iran_protests import get_iran_oil_data
 from military_tracker import register_military_endpoints, get_military_posture
 
@@ -107,6 +108,274 @@ def is_cache_fresh(cached_data, max_age_hours=6):
     except Exception as e:
         print(f"[Cache] Error checking freshness: {e}")
         return False
+
+        # ========================================
+# BACKGROUND REFRESH THREAD
+# ========================================
+
+def _background_refresh_all_caches():
+    """
+    Background thread that refreshes all country card caches every 4 hours.
+    Runs the same scan logic each endpoint uses, so no user request ever
+    triggers a cold scan. Cache TTL is 6 hours, refresh every 4 hours,
+    meaning cache is always warm with a 2-hour buffer.
+    """
+    import time as _time
+
+    REFRESH_INTERVAL = 4 * 60 * 60  # 4 hours in seconds
+
+    # Map of cache keys → the endpoint paths that trigger fresh scans
+    # We'll call the internal scan functions directly instead of HTTP
+    TARGETS = ['iran', 'hezbollah', 'houthis', 'syria', 'jordan', 'israel']
+
+    while True:
+        print(f"\n[Background Refresh] Starting full cache refresh at {datetime.now(timezone.utc).isoformat()}")
+        start = _time.time()
+
+        for target in TARGETS:
+            try:
+                print(f"[Background Refresh] Refreshing {target}...")
+                cached = get_cached_result(target)
+
+                # Only refresh if cache is stale or missing
+                if cached and is_cache_fresh(cached, max_age_hours=4):
+                    age_h = (datetime.now(timezone.utc) - datetime.fromisoformat(cached['cached_at'])).total_seconds() / 3600
+                    print(f"[Background Refresh] {target} still fresh ({age_h:.1f}h old), skipping")
+                    continue
+
+                # Run the scan by importing the endpoint logic inline
+                # This calls the same code path as the API endpoints
+                _refresh_target(target)
+
+            except Exception as e:
+                print(f"[Background Refresh] ✗ {target} failed: {e}")
+
+            # Small delay between targets to avoid hammering APIs
+            _time.sleep(10)
+
+        elapsed = _time.time() - start
+        print(f"[Background Refresh] Complete in {elapsed:.1f}s. Sleeping {REFRESH_INTERVAL}s until next refresh.\n")
+        _time.sleep(REFRESH_INTERVAL)
+
+
+def _refresh_target(target):
+    """
+    Run a fresh scan for a single target and update the file cache.
+    Replicates the scan logic from each endpoint without needing Flask request context.
+    """
+    days = 7
+
+    if target in ('iran', 'hezbollah', 'houthis', 'syria'):
+        # These 4 use the same pattern: fetch articles → score → cache
+        query = ' OR '.join(TARGET_KEYWORDS[target]['keywords'])
+
+        articles_en = fetch_newsapi_articles(query, days)
+        articles_gdelt_en = fetch_gdelt_articles(query, days, 'eng')
+        articles_gdelt_ar = fetch_gdelt_articles(query, days, 'ara')
+        articles_gdelt_he = fetch_gdelt_articles(query, days, 'heb')
+
+        articles_gdelt_fa = []
+        if target == 'iran':
+            articles_gdelt_fa = fetch_gdelt_articles(query, days, 'fas')
+
+        articles_reddit = fetch_reddit_posts(
+            target,
+            TARGET_KEYWORDS[target]['reddit_keywords'],
+            days
+        )
+
+        all_articles = (articles_en + articles_gdelt_en + articles_gdelt_ar +
+                       articles_gdelt_he + articles_gdelt_fa + articles_reddit)
+
+        # RSS feeds
+        try:
+            rss_articles = fetch_all_rss()
+            for article in all_articles + rss_articles:
+                article['leadership'] = enhance_article_with_leadership(article)
+            all_articles.extend(rss_articles)
+        except Exception as e:
+            print(f"[Background Refresh] RSS error for {target}: {e}")
+
+        scoring_result = calculate_threat_probability(all_articles, days, target)
+        probability = scoring_result['probability']
+        momentum = scoring_result['momentum']
+        breakdown = scoring_result['breakdown']
+
+        # Military posture
+        try:
+            military_posture = get_military_posture(target)
+            military_bonus = military_posture.get('military_bonus', 0)
+            if military_bonus > 0:
+                probability = min(99, probability + military_bonus)
+        except Exception:
+            military_posture = {'alert_level': 'normal', 'military_bonus': 0, 'show_banner': False, 'banner_text': '', 'top_signals': []}
+
+        # Timeline
+        if probability < 30:
+            timeline = "180+ Days"
+        elif probability < 50:
+            timeline = "91-180 Days"
+        elif probability < 70:
+            timeline = "31-90 Days"
+        else:
+            timeline = "0-30 Days"
+
+        # Confidence
+        unique_sources = len(set(a.get('source', {}).get('name', 'Unknown') for a in all_articles))
+        if len(all_articles) >= 20 and unique_sources >= 8:
+            confidence = "High"
+        elif len(all_articles) >= 10 and unique_sources >= 5:
+            confidence = "Medium"
+        else:
+            confidence = "Low"
+
+        result = {
+            'success': True,
+            'probability': probability,
+            'timeline': timeline,
+            'confidence': confidence,
+            'momentum': momentum,
+            'total_articles': len(all_articles),
+            'unique_sources': unique_sources,
+            'recent_articles_48h': breakdown.get('recent_articles_48h', 0),
+            'military_posture': {
+                'alert_level': military_posture.get('alert_level', 'normal'),
+                'alert_label': military_posture.get('alert_label', 'Normal'),
+                'alert_color': military_posture.get('alert_color', 'green'),
+                'military_bonus': military_posture.get('military_bonus', 0),
+                'show_banner': military_posture.get('show_banner', False),
+                'banner_text': military_posture.get('banner_text', ''),
+                'top_signals': military_posture.get('top_signals', []),
+                'detail_url': '/military.html'
+            },
+            'last_updated': datetime.now(timezone.utc).isoformat(),
+            'cached': False,
+            'version': '3.0.0'
+        }
+
+        update_cache(target, result)
+        print(f"[Background Refresh] ✓ {target} cached (probability: {probability}%)")
+
+    elif target == 'jordan':
+        query = ' OR '.join(TARGET_KEYWORDS['jordan']['keywords'])
+
+        articles_en = fetch_newsapi_articles(query, days)
+        articles_gdelt_en = fetch_gdelt_articles(query, days, 'eng')
+        articles_gdelt_ar = fetch_gdelt_articles(query, days, 'ara')
+        articles_gdelt_he = fetch_gdelt_articles(query, days, 'heb')
+        articles_gdelt_fa = fetch_gdelt_articles(query, days, 'fas')
+        articles_reddit = fetch_reddit_posts('jordan', TARGET_KEYWORDS['jordan']['reddit_keywords'], days)
+
+        try:
+            jordan_rss = fetch_jordan_news_rss()
+        except Exception:
+            jordan_rss = []
+
+        all_articles = (articles_en + articles_gdelt_en + articles_gdelt_ar +
+                       articles_gdelt_he + articles_gdelt_fa + articles_reddit + jordan_rss)
+
+        scoring_result = calculate_threat_probability(all_articles, days, 'jordan')
+        probability = scoring_result['probability']
+
+        try:
+            military_posture = get_military_posture('jordan')
+            military_bonus = military_posture.get('military_bonus', 0)
+            if military_bonus > 0:
+                probability = min(99, probability + military_bonus)
+        except Exception:
+            military_posture = {'alert_level': 'normal', 'military_bonus': 0, 'show_banner': False, 'banner_text': '', 'top_signals': []}
+
+        if probability < 30:
+            timeline = "180+ Days"
+        elif probability < 50:
+            timeline = "91-180 Days"
+        elif probability < 70:
+            timeline = "31-90 Days"
+        else:
+            timeline = "0-30 Days"
+
+        unique_sources = len(set(a.get('source', {}).get('name', 'Unknown') for a in all_articles))
+        confidence = "High" if len(all_articles) >= 20 and unique_sources >= 8 else "Medium" if len(all_articles) >= 10 else "Low"
+
+        result = {
+            'success': True,
+            'probability': probability,
+            'timeline': timeline,
+            'confidence': confidence,
+            'momentum': scoring_result['momentum'],
+            'total_articles': len(all_articles),
+            'unique_sources': unique_sources,
+            'last_updated': datetime.now(timezone.utc).isoformat(),
+            'cached': False,
+            'version': '3.0.0-jordan'
+        }
+
+        update_cache('jordan', result)
+        print(f"[Background Refresh] ✓ jordan cached (probability: {probability}%)")
+
+    elif target == 'israel':
+        query = ' OR '.join(TARGET_KEYWORDS['israel']['keywords'][:10])
+
+        articles_en = fetch_newsapi_articles(query, days)
+        articles_gdelt_en = fetch_gdelt_articles(query, days, 'eng')
+        articles_gdelt_ar = fetch_gdelt_articles(query, days, 'ara')
+        articles_gdelt_he = fetch_gdelt_articles(query, days, 'heb')
+        articles_gdelt_fa = fetch_gdelt_articles(query, days, 'fas')
+        articles_reddit = fetch_reddit_posts('israel', TARGET_KEYWORDS['israel']['reddit_keywords'], days)
+
+        try:
+            israel_rss = fetch_israel_news_rss()
+        except Exception:
+            israel_rss = []
+
+        all_articles = (articles_en + articles_gdelt_en + articles_gdelt_ar +
+                       articles_gdelt_he + articles_gdelt_fa + articles_reddit + israel_rss)
+
+        scoring_result = calculate_threat_probability(all_articles, days, 'israel')
+        probability = scoring_result['probability']
+
+        try:
+            military_posture = get_military_posture('israel')
+            military_bonus = military_posture.get('military_bonus', 0)
+            if military_bonus > 0:
+                probability = min(99, probability + military_bonus)
+        except Exception:
+            military_posture = {'alert_level': 'normal', 'military_bonus': 0, 'show_banner': False, 'banner_text': '', 'top_signals': []}
+
+        if probability < 30:
+            timeline = "180+ Days"
+        elif probability < 50:
+            timeline = "91-180 Days"
+        elif probability < 70:
+            timeline = "31-90 Days"
+        else:
+            timeline = "0-30 Days"
+
+        unique_sources = len(set(a.get('source', {}).get('name', 'Unknown') for a in all_articles))
+        confidence = "High" if len(all_articles) >= 20 and unique_sources >= 8 else "Medium" if len(all_articles) >= 10 else "Low"
+
+        result = {
+            'success': True,
+            'probability': probability,
+            'timeline': timeline,
+            'confidence': confidence,
+            'momentum': scoring_result['momentum'],
+            'total_articles': len(all_articles),
+            'unique_sources': unique_sources,
+            'last_updated': datetime.now(timezone.utc).isoformat(),
+            'cached': False,
+            'version': '3.0.0-israel'
+        }
+
+        update_cache('israel', result)
+        print(f"[Background Refresh] ✓ israel cached (probability: {probability}%)")
+
+
+def start_background_refresh():
+    """Start the background refresh thread (daemon so it dies with the app)."""
+    thread = threading.Thread(target=_background_refresh_all_caches, daemon=True)
+    thread.start()
+    print("[Background Refresh] Thread started — will refresh all caches every 4 hours")
 
 # ========================================
 # FLASK APP INITIALIZATION
@@ -6708,7 +6977,40 @@ def cache_status():
         'version': '3.0.0'
     })
 
-
+@app.route('/api/cache/refresh-status', methods=['GET'])
+def cache_refresh_status():
+    """View cache freshness for all targets with human-readable ages"""
+    cache = load_cache()
+    
+    status = {}
+    for target in ['iran', 'hezbollah', 'houthis', 'syria', 'jordan', 'israel']:
+        data = cache.get(target)
+        if data and 'cached_at' in data:
+            cached_at = datetime.fromisoformat(data['cached_at'])
+            age = datetime.now(timezone.utc) - cached_at
+            age_minutes = age.total_seconds() / 60
+            
+            status[target] = {
+                'probability': data.get('probability', 0),
+                'cached_at': data['cached_at'],
+                'age_minutes': round(age_minutes, 1),
+                'age_human': f"{int(age_minutes)}m ago",
+                'is_fresh': age.total_seconds() < (6 * 3600),
+                'will_refresh_in': f"{max(0, int(4*60 - age_minutes))}m"
+            }
+        else:
+            status[target] = {
+                'cached': False,
+                'age_human': 'empty'
+            }
+    
+    return jsonify({
+        'success': True,
+        'refresh_interval': '4 hours',
+        'cache_ttl': '6 hours',
+        'targets': status
+    })
+    
 @app.route('/api/cache/clear', methods=['POST'])
 def clear_cache():
     """Clear all cached data (admin only)"""
@@ -7859,6 +8161,11 @@ def api_osint_feed():
             'posts': [],
             'error': str(e)[:200]
         }), 500
+
+# ========================================
+# START BACKGROUND REFRESH ON BOOT
+# ========================================
+start_background_refresh()
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
