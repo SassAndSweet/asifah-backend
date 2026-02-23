@@ -469,6 +469,17 @@ SOURCE_WEIGHTS = {
 # KEYWORD SEVERITY
 # ========================================
 KEYWORD_SEVERITY = {
+    'diplomatic_crisis': {
+        'keywords': [
+            'ordered departure', 'authorized departure',
+            'embassy evacuation', 'evacuate embassy',
+            'embassy closure', 'embassy closed',
+            'drawdown of personnel', 'drawdown of staff',
+            'suspend embassy operations',
+            'non-emergency personnel ordered',
+        ],
+        'multiplier': 3.5
+    },
     'critical': {
         'keywords': [
             'nuclear strike', 'nuclear attack', 'nuclear threat',
@@ -531,6 +542,60 @@ MIDDLE_EAST_COUNTRIES = {
 instagram_feed_cache = {
     'data': None,
     'expires_at': 0
+}
+
+# ========================================
+# v2.9 TRAVEL ADVISORY FLOOR SYSTEM
+# ========================================
+DIPLOMATIC_SIGNAL_KEYWORDS = {
+    'embassy_closure': {
+        'phrases': [
+            'embassy closed', 'embassy closure', 'suspend embassy operations',
+            'suspended embassy operations', 'shuttered embassy', 'closing the embassy',
+        ],
+        'floor_schedule': [
+            (14, 92),
+            (28, 80),
+            (45, 65),
+        ],
+    },
+    'ordered_departure': {
+        'phrases': [
+            'ordered departure', 'authorized departure',
+            'drawdown of personnel', 'drawdown of staff',
+            'embassy evacuation', 'evacuate embassy', 'evacuating embassy',
+            'non-emergency personnel ordered to leave',
+            'departure of non-emergency',
+            'family members ordered to depart',
+        ],
+        'floor_schedule': [
+            (14, 85),
+            (28, 70),
+            (45, 55),
+        ],
+    },
+    'level_4_do_not_travel': {
+        'phrases': [
+            'level 4: do not travel',
+            'do not travel',
+        ],
+        'floor_schedule': [
+            (14, 70),
+            (28, 55),
+            (45, 40),
+        ],
+    },
+    'level_3_reconsider': {
+        'phrases': [
+            'level 3: reconsider travel',
+            'reconsider travel',
+        ],
+        'floor_schedule': [
+            (14, 45),
+            (28, 35),
+            (45, 30),
+        ],
+    },
 }
 
 # ========================================
@@ -783,7 +848,7 @@ def detect_keyword_severity(text):
     
     text_lower = text.lower()
     
-    for severity_level in ['critical', 'high', 'elevated', 'moderate']:
+    for severity_level in ['diplomatic_crisis', 'critical', 'high', 'elevated', 'moderate']:
         for keyword in KEYWORD_SEVERITY[severity_level]['keywords']:
             if keyword in text_lower:
                 return KEYWORD_SEVERITY[severity_level]['multiplier']
@@ -802,6 +867,101 @@ def detect_deescalation(text):
             return True
     
     return False
+
+
+def detect_diplomatic_signals(articles):
+    """
+    Scan articles for official diplomatic action signals (OD, embassy closure, etc.).
+    Returns the highest-severity signal found and when it was first detected.
+    """
+    best_signal = {
+        'signal_type': None,
+        'signal_detected_at': None,
+        'signal_phrase': None,
+        'signal_source': None,
+        'signal_url': None,
+    }
+
+    # Priority order (lower index = higher priority)
+    signal_priority = ['embassy_closure', 'ordered_departure', 'level_4_do_not_travel', 'level_3_reconsider']
+    best_priority_index = len(signal_priority)
+
+    for article in articles:
+        title = (article.get('title') or '').lower()
+        description = (article.get('description') or '').lower()
+        content = (article.get('content') or '').lower()
+        full_text = f"{title} {description} {content}"
+
+        source_name = article.get('source', {}).get('name', 'Unknown')
+        published_date = article.get('publishedAt', '')
+
+        for signal_type in signal_priority:
+            signal_config = DIPLOMATIC_SIGNAL_KEYWORDS[signal_type]
+            priority_index = signal_priority.index(signal_type)
+
+            for phrase in signal_config['phrases']:
+                if phrase in full_text:
+                    try:
+                        if isinstance(published_date, str):
+                            pub_dt = datetime.fromisoformat(published_date.replace('Z', '+00:00'))
+                        else:
+                            pub_dt = published_date
+                        if pub_dt.tzinfo is None:
+                            pub_dt = pub_dt.replace(tzinfo=timezone.utc)
+                    except Exception:
+                        pub_dt = datetime.now(timezone.utc)
+
+                    if (priority_index < best_priority_index or
+                        (priority_index == best_priority_index and
+                         best_signal['signal_detected_at'] is not None and
+                         pub_dt > best_signal['signal_detected_at'])):
+
+                        best_priority_index = priority_index
+                        best_signal = {
+                            'signal_type': signal_type,
+                            'signal_detected_at': pub_dt,
+                            'signal_phrase': phrase,
+                            'signal_source': source_name,
+                            'signal_url': article.get('url', ''),
+                        }
+                    break
+
+    if best_signal['signal_type']:
+        print(f"[v2.9.0] DIPLOMATIC SIGNAL: {best_signal['signal_type']}")
+        print(f"  Phrase: \"{best_signal['signal_phrase']}\"")
+        print(f"  Source: {best_signal['signal_source']}")
+        print(f"  Date: {best_signal['signal_detected_at']}")
+
+    return best_signal
+
+
+def calculate_advisory_floor(signal_type, signal_detected_at):
+    """
+    Calculate the current probability floor based on signal type and time decay.
+    Returns int floor percentage, or 0 if no floor applies.
+    """
+    if not signal_type or not signal_detected_at:
+        return 0
+
+    signal_config = DIPLOMATIC_SIGNAL_KEYWORDS.get(signal_type)
+    if not signal_config:
+        return 0
+
+    now = datetime.now(timezone.utc)
+
+    if signal_detected_at.tzinfo is None:
+        signal_detected_at = signal_detected_at.replace(tzinfo=timezone.utc)
+
+    days_since = (now - signal_detected_at).total_seconds() / 86400
+
+    for max_days, floor_pct in signal_config['floor_schedule']:
+        if days_since <= max_days:
+            print(f"[v2.9.0] Advisory floor: {floor_pct}% ({signal_type}, {days_since:.1f}d since detection)")
+            return floor_pct
+
+    print(f"[v2.9.0] Advisory floor: 0% (signal expired, {days_since:.1f}d old)")
+    return 0
+
 
 # ========================================
 # MAIN THREAT PROBABILITY CALCULATOR
@@ -945,6 +1105,26 @@ def calculate_threat_probability(articles, days_analyzed=7, target='iran'):
     probability = max(10, min(probability, 95))
     
     # ========================================
+    # v2.9.0: TRAVEL ADVISORY FLOOR SYSTEM
+    # Highest number wins: OSINT score vs advisory floor
+    # ========================================
+    diplomatic_signal = detect_diplomatic_signals(articles)
+    advisory_floor = 0
+
+    if diplomatic_signal['signal_type']:
+        advisory_floor = calculate_advisory_floor(
+            diplomatic_signal['signal_type'],
+            diplomatic_signal['signal_detected_at']
+        )
+
+    if advisory_floor > 0 and advisory_floor > probability:
+        print(f"[v2.9.0] FLOOR OVERRIDE: OSINT={probability}% -> Advisory floor={advisory_floor}%")
+        probability = advisory_floor
+
+    # Final cap (advisory floor can push to 95% max, never 100%)
+    probability = min(probability, 95)
+
+    # ========================================
     # BUILD RESPONSE
     # ========================================
     return {
@@ -960,9 +1140,13 @@ def calculate_threat_probability(articles, days_analyzed=7, target='iran'):
             'momentum_multiplier': momentum_multiplier,
             'deescalation_count': deescalation_count,
             'adaptive_multiplier': 0.8,
+            'advisory_floor': advisory_floor,
+            'advisory_signal_type': diplomatic_signal.get('signal_type'),
+            'advisory_signal_phrase': diplomatic_signal.get('signal_phrase'),
+            'advisory_signal_source': diplomatic_signal.get('signal_source'),
             'time_decay_applied': True,
             'source_weighting_applied': True,
-            'formula': 'base(25) + adjustment + (weighted_score * 0.8)'
+            'formula': 'max(base(25) + adjustment + (weighted_score * 0.8), advisory_floor)'
         },
         'top_contributors': sorted(
             article_details, 
