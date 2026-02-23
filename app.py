@@ -407,6 +407,24 @@ rate_limit_data = {
 }
 
 # ========================================
+# U.S. STATE DEPT TRAVEL ADVISORIES
+# ========================================
+TRAVEL_ADVISORY_API = "https://cadataapi.state.gov/api/TravelAdvisories"
+
+TRAVEL_ADVISORY_CODES = {
+    'hezbollah': ['LE'],
+    'iran': ['IR'],
+    'houthis': ['YM']
+}
+
+TRAVEL_ADVISORY_LEVELS = {
+    1: {'label': 'Exercise Normal Precautions', 'short': 'Normal Precautions', 'color': '#10b981'},
+    2: {'label': 'Exercise Increased Caution', 'short': 'Increased Caution', 'color': '#f59e0b'},
+    3: {'label': 'Reconsider Travel', 'short': 'Reconsider Travel', 'color': '#f97316'},
+    4: {'label': 'Do Not Travel', 'short': 'Do Not Travel', 'color': '#ef4444'}
+}
+
+# ========================================
 # SOURCE WEIGHTS
 # ========================================
 SOURCE_WEIGHTS = {
@@ -7458,6 +7476,96 @@ def api_syria_conflicts():
 # ========================================
 # UTILITY ENDPOINTS
 # ========================================
+# ========================================
+# TRAVEL ADVISORY SCAN + ENDPOINT
+# ========================================
+def _run_travel_advisory_scan():
+    """Fetch U.S. State Dept travel advisories for ME targets."""
+    try:
+        response = requests.get(TRAVEL_ADVISORY_API, timeout=15)
+        if response.status_code != 200:
+            print(f"[Travel Advisory] API returned HTTP {response.status_code}")
+            return {'success': False, 'advisories': {}}
+
+        all_advisories = response.json()
+        results = {}
+
+        for target, codes in TRAVEL_ADVISORY_CODES.items():
+            for advisory in all_advisories:
+                category = advisory.get('Category', '')
+                if category in codes:
+                    title = advisory.get('Title', '')
+                    level_match = re.search(r'Level\s+(\d)', title)
+                    level = int(level_match.group(1)) if level_match else 0
+                    level_info = TRAVEL_ADVISORY_LEVELS.get(level, {})
+
+                    summary_html = advisory.get('Summary', '')
+                    import re as re2
+                    first_p = re2.search(r'<p[^>]*>(.*?)</p>', summary_html, re2.DOTALL | re2.IGNORECASE)
+                    short_summary = ''
+                    if first_p:
+                        short_summary = re2.sub(r'<[^>]+>', '', first_p.group(1)).strip()[:300]
+                    if not short_summary:
+                        short_summary = re2.sub(r'<[^>]+>', '', summary_html).strip()[:300]
+
+                    published = advisory.get('Published', '')
+                    updated = advisory.get('Updated', '')
+                    link = advisory.get('Link', '')
+
+                    recently_changed = False
+                    change_description = ''
+                    try:
+                        updated_dt = datetime.fromisoformat(updated)
+                        if updated_dt.tzinfo is None:
+                            updated_dt = updated_dt.replace(tzinfo=timezone.utc)
+                        days_since = (datetime.now(timezone.utc) - updated_dt).days
+                        if days_since <= 30:
+                            recently_changed = True
+                            summary_lower = summary_html.lower()
+                            if 'advisory level was increased' in summary_lower or 'upgraded' in summary_lower:
+                                change_description = f'Advisory level INCREASED (updated {days_since} days ago)'
+                            elif 'advisory level was decreased' in summary_lower or 'downgraded' in summary_lower:
+                                change_description = f'Advisory level DECREASED (updated {days_since} days ago)'
+                            else:
+                                change_description = f'Updated {days_since} days ago'
+                    except Exception:
+                        pass
+
+                    results[target] = {
+                        'country_code': category,
+                        'title': title,
+                        'level': level,
+                        'level_label': level_info.get('label', 'Unknown'),
+                        'level_short': level_info.get('short', 'Unknown'),
+                        'level_color': level_info.get('color', '#6b7280'),
+                        'short_summary': short_summary,
+                        'link': link,
+                        'published': published,
+                        'updated': updated,
+                        'recently_changed': recently_changed,
+                        'change_description': change_description
+                    }
+                    break
+
+        return {'success': True, 'advisories': results}
+
+    except Exception as e:
+        print(f"[Travel Advisory] Error: {e}")
+        return {'success': False, 'advisories': {}}
+
+
+@app.route('/api/travel-advisories', methods=['GET'])
+def api_travel_advisories():
+    """Return U.S. State Dept travel advisories for ME targets."""
+    try:
+        data = _run_travel_advisory_scan()
+        data['timestamp'] = datetime.now(timezone.utc).isoformat()
+        data['version'] = '2.2.0-HRANA'
+        return jsonify(data)
+    except Exception as e:
+        print(f"[Travel Advisory] Endpoint error: {e}")
+        return jsonify({'success': False, 'error': str(e), 'advisories': {}}), 500
+        
 @app.route('/', methods=['GET'])
 def home():
     """Root endpoint"""
