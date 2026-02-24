@@ -1,6 +1,13 @@
 """
-Lebanon Stability Backend v2.8.0
+Lebanon Stability Backend v2.9.0
 Standalone microservice for Lebanon Stability Index
+
+CHANGELOG v2.9.0:
+- FIXED: Cache now uses Upstash Redis (persistent!) instead of /tmp (ephemeral)
+- FIXED: Expanded Hezbollah activity keyword matching
+- FIXED: Currency 24h change now compares to yesterday's cached rate
+- FIXED: beautifulsoup4 import moved to top level with graceful fallback
+- ADDED: /api/bey-flights stub endpoint for future Aviation Edge integration
 
 Tracks:
 - Currency collapse (LBP/USD)
@@ -20,12 +27,20 @@ import re
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
+# Optional: BeautifulSoup for bond scraping
+try:
+    from bs4 import BeautifulSoup
+    BS4_AVAILABLE = True
+except ImportError:
+    BS4_AVAILABLE = False
+    print("[WARNING] beautifulsoup4 not installed - bond scraping will use fallback")
+
 # ========================================
 # FLASK APP INITIALIZATION
 # ========================================
 app = Flask(__name__)
 
-# CORS Configuration - Match main backend pattern
+# CORS Configuration
 CORS(app, resources={
     r"/scan-lebanon-stability": {
         "origins": [
@@ -36,7 +51,7 @@ CORS(app, resources={
         "methods": ["GET", "POST", "OPTIONS"],
         "allow_headers": ["Content-Type"]
     },
-    r"/api/lebanon-trends": {
+    r"/api/*": {
         "origins": [
             "https://asifahanalytics.com",
             "https://www.asifahanalytics.com",
@@ -60,6 +75,13 @@ CORS(app, resources={
 # CONFIGURATION
 # ========================================
 
+# Upstash Redis (persistent cache - replaces /tmp file!)
+UPSTASH_URL = os.environ.get('UPSTASH_REDIS_REST_URL')
+UPSTASH_TOKEN = os.environ.get('UPSTASH_REDIS_REST_TOKEN')
+
+REDIS_CACHE_KEY = 'lebanon_cache'
+
+# Fallback to /tmp only if Redis is not configured
 CACHE_FILE = '/tmp/lebanon_stability_cache.json'
 
 # ========================================
@@ -235,7 +257,7 @@ def calculate_lebanon_gold_reserves():
 # ========================================
 
 def fetch_lebanon_currency():
-    """Fetch LBP/USD black market rate"""
+    """Fetch LBP/USD rate with 24h change from cache"""
     try:
         print("[Lebanon Currency] Fetching LBP/USD...")
         
@@ -249,7 +271,24 @@ def fetch_lebanon_currency():
             if current_rate:
                 print(f"[Lebanon Currency] ✅ Current USD/LBP: {current_rate:,.0f}")
                 
-                estimated_change = 0
+                # v2.9.0: Compare to yesterday's cached rate for real 24h change
+                yesterday_rate = current_rate  # Default: no change
+                try:
+                    cache = load_lebanon_cache()
+                    history = cache.get('history', {})
+                    yesterday = (datetime.now(timezone.utc) - timedelta(days=1)).date().isoformat()
+                    cached_yesterday = history.get(yesterday, {})
+                    if cached_yesterday.get('currency_rate', 0) > 0:
+                        yesterday_rate = cached_yesterday['currency_rate']
+                        print(f"[Lebanon Currency] Yesterday's rate from cache: {yesterday_rate:,.0f}")
+                except Exception as cache_err:
+                    print(f"[Lebanon Currency] Cache lookup failed (using current as baseline): {str(cache_err)[:80]}")
+                
+                # Calculate actual change
+                if yesterday_rate > 0:
+                    estimated_change = ((current_rate - yesterday_rate) / yesterday_rate) * 100
+                else:
+                    estimated_change = 0
                 
                 if estimated_change > 0.1:
                     trend = "weakening"
@@ -267,10 +306,10 @@ def fetch_lebanon_currency():
                     'devaluation_pct': ((current_rate - 1500) / 1500) * 100,
                     'last_updated': data.get('time_last_update_utc', ''),
                     'source': 'ExchangeRate-API',
-                    'change_24h': estimated_change,
+                    'change_24h': round(estimated_change, 2),
                     'trend': trend,
                     'pressure': pressure,
-                    'yesterday_rate': current_rate
+                    'yesterday_rate': yesterday_rate
                 }
         
         print("[Lebanon Currency] Using estimated rate")
@@ -298,6 +337,10 @@ def scrape_lebanon_bonds():
     try:
         print("[Lebanon Bonds] Scraping...")
         
+        if not BS4_AVAILABLE:
+            print("[Lebanon Bonds] BeautifulSoup not available, using fallback")
+            return scrape_lebanon_bonds_fallback()
+        
         url = "https://www.investing.com/rates-bonds/lebanon-10-year-bond-yield"
         
         headers = {
@@ -309,7 +352,6 @@ def scrape_lebanon_bonds():
         if response.status_code != 200:
             return scrape_lebanon_bonds_fallback()
         
-        from bs4 import BeautifulSoup
         soup = BeautifulSoup(response.content, 'html.parser')
         
         value_elem = soup.find('span', {'data-test': 'instrument-price-last'})
@@ -353,7 +395,7 @@ def scrape_lebanon_bonds_fallback():
 # ========================================
 
 def track_hezbollah_activity(days=7):
-    """Track Hezbollah rearmament indicators"""
+    """Track Hezbollah rearmament indicators with expanded keyword matching"""
     try:
         print("[Hezbollah] Scanning activity...")
         
@@ -397,11 +439,26 @@ def track_hezbollah_activity(days=7):
             except:
                 continue
         
-        rearmament_count = sum(1 for a in all_articles if 'rearm' in a['title'].lower())
-        strike_count = sum(1 for a in all_articles if 'strike' in a['title'].lower())
+        # v2.9.0: Expanded keyword matching for more accurate scoring
+        rearmament_keywords = [
+            'rearm', 'weapon', 'missile', 'rocket', 'arsenal', 'munition',
+            'smuggl', 'arms transfer', 'military capabilit', 'drone',
+            'precision guided', 'weapons depot', 'arms shipment', 'iranian supply'
+        ]
+        strike_keywords = [
+            'strike', 'bomb', 'attack', 'shell', 'raid', 'airstrike',
+            'operation', 'offensive', 'idf', 'incursion', 'bombardment',
+            'targeted killing', 'air raid', 'military operation'
+        ]
+        
+        rearmament_count = sum(1 for a in all_articles 
+            if any(kw in a['title'].lower() for kw in rearmament_keywords))
+        strike_count = sum(1 for a in all_articles 
+            if any(kw in a['title'].lower() for kw in strike_keywords))
         
         activity_score = min((rearmament_count * 5 + strike_count * 3), 100)
         
+        print(f"[Hezbollah] Rearmament mentions: {rearmament_count}, Strike mentions: {strike_count}")
         print(f"[Hezbollah] Activity score: {activity_score}/100")
         
         return {
@@ -516,11 +573,82 @@ def calculate_lebanon_stability(currency_data, bond_data, hezbollah_data):
     }
 
 # ========================================
-# CACHE MANAGEMENT
+# CACHE MANAGEMENT (v2.9.0: Upstash Redis!)
 # ========================================
 
+def _redis_available():
+    """Check if Upstash Redis is configured"""
+    return bool(UPSTASH_URL and UPSTASH_TOKEN)
+
+
+def _redis_get(key):
+    """GET from Upstash Redis REST API"""
+    try:
+        response = requests.get(
+            f"{UPSTASH_URL}/get/{key}",
+            headers={"Authorization": f"Bearer {UPSTASH_TOKEN}"},
+            timeout=5
+        )
+        data = response.json()
+        if data.get('result'):
+            return json.loads(data['result'])
+        return None
+    except Exception as e:
+        print(f"[Redis] GET error: {str(e)[:100]}")
+        return None
+
+
+def _redis_set(key, value):
+    """SET to Upstash Redis REST API"""
+    try:
+        response = requests.post(
+            f"{UPSTASH_URL}",
+            headers={
+                "Authorization": f"Bearer {UPSTASH_TOKEN}",
+                "Content-Type": "application/json"
+            },
+            json=["SET", key, json.dumps(value)],
+            timeout=5
+        )
+        result = response.json()
+        if result.get('result') == 'OK':
+            print(f"[Redis] ✅ Saved key: {key}")
+            return True
+        else:
+            print(f"[Redis] SET response: {result}")
+            return False
+    except Exception as e:
+        print(f"[Redis] SET error: {str(e)[:100]}")
+        return False
+
+
 def load_lebanon_cache():
-    """Load cache"""
+    """Load cache from Redis (preferred) or /tmp (fallback)"""
+    
+    # Try Redis first
+    if _redis_available():
+        print("[Cache] Loading from Upstash Redis...")
+        data = _redis_get(REDIS_CACHE_KEY)
+        if data:
+            days = len(data.get('history', {}))
+            print(f"[Cache] ✅ Loaded from Redis ({days} days of history)")
+            return data
+        else:
+            print("[Cache] Redis returned empty - starting fresh")
+            initial_cache = {
+                'last_updated': datetime.now(timezone.utc).isoformat(),
+                'history': {},
+                'metadata': {
+                    'description': 'Daily Lebanon stability snapshots',
+                    'started': datetime.now(timezone.utc).date().isoformat(),
+                    'storage': 'upstash_redis'
+                }
+            }
+            _redis_set(REDIS_CACHE_KEY, initial_cache)
+            return initial_cache
+    
+    # Fallback to /tmp file (WARNING: ephemeral on Render!)
+    print("[Cache] ⚠️ Redis not configured, using /tmp (data will not persist!)")
     try:
         if Path(CACHE_FILE).exists():
             with open(CACHE_FILE, 'r') as f:
@@ -531,7 +659,8 @@ def load_lebanon_cache():
                 'history': {},
                 'metadata': {
                     'description': 'Daily Lebanon stability snapshots',
-                    'started': datetime.now(timezone.utc).date().isoformat()
+                    'started': datetime.now(timezone.utc).date().isoformat(),
+                    'storage': 'tmp_file_WARNING_ephemeral'
                 }
             }
             with open(CACHE_FILE, 'w') as f:
@@ -543,12 +672,21 @@ def load_lebanon_cache():
 
 
 def save_lebanon_cache(cache_data):
-    """Save cache"""
+    """Save cache to Redis (preferred) or /tmp (fallback)"""
+    cache_data['last_updated'] = datetime.now(timezone.utc).isoformat()
+    
+    # Try Redis first
+    if _redis_available():
+        success = _redis_set(REDIS_CACHE_KEY, cache_data)
+        if success:
+            return
+        print("[Cache] ⚠️ Redis save failed, falling back to /tmp")
+    
+    # Fallback to /tmp
     try:
-        cache_data['last_updated'] = datetime.now(timezone.utc).isoformat()
         with open(CACHE_FILE, 'w') as f:
             json.dump(cache_data, f, indent=2)
-        print(f"[Cache] Saved {len(cache_data.get('history', {}))} days")
+        print(f"[Cache] Saved to /tmp ({len(cache_data.get('history', {}))} days)")
     except Exception as e:
         print(f"[Cache] Error: {str(e)}")
 
@@ -576,6 +714,7 @@ def update_lebanon_cache(currency_data, bond_data, hezbollah_data, stability_sco
                 del cache['history'][old_date]
         
         save_lebanon_cache(cache)
+        print(f"[Cache] ✅ Updated for {today} ({len(cache['history'])} total days)")
         
     except Exception as e:
         print(f"[Cache] Error: {str(e)}")
@@ -620,7 +759,8 @@ def get_lebanon_trends(days=30):
         return {
             'success': True,
             'days_collected': len(sorted_dates),
-            'trends': trends
+            'trends': trends,
+            'storage': 'redis' if _redis_available() else 'tmp_file'
         }
         
     except Exception as e:
@@ -664,6 +804,11 @@ def scan_lebanon_stability():
             gold_data
         )
         
+        # Report cache status
+        cache = load_lebanon_cache()
+        cache_days = len(cache.get('history', {}))
+        cache_storage = 'redis' if _redis_available() else 'tmp_file'
+        
         return jsonify({
             'success': True,
             'stability': stability,
@@ -679,7 +824,12 @@ def scan_lebanon_stability():
                 'parliamentary_election_date': '2026-05-10',
                 'days_until_election': stability.get('days_until_election', 0)
             },
-            'version': '2.8.0-lebanon'
+            'cache_status': {
+                'storage': cache_storage,
+                'days_collected': cache_days,
+                'persistent': cache_storage == 'redis'
+            },
+            'version': '2.9.0-lebanon'
         })
         
     except Exception as e:
@@ -708,30 +858,59 @@ def api_lebanon_trends():
         }), 500
 
 
+@app.route('/api/bey-flights', methods=['GET'])
+def api_bey_flights():
+    """
+    BEY flight data endpoint (stub for future integration)
+    Will support Aviation Edge, OpenSky, or ADS-B Exchange
+    """
+    # TODO: Integrate free flight data source
+    return jsonify({
+        'success': False,
+        'message': 'BEY flight tracking coming soon. Evaluating free data sources.',
+        'planned_sources': ['OpenSky Network', 'ADS-B Exchange', 'FlightAware AeroAPI'],
+        'airport': 'BEY',
+        'icao': 'OLBA'
+    })
+
+
 @app.route('/', methods=['GET'])
 def home():
     """Root endpoint"""
     return jsonify({
         'status': 'Lebanon Stability Backend',
-        'version': '2.8.0',
+        'version': '2.9.0',
+        'cache': 'redis' if _redis_available() else 'tmp_file',
         'endpoints': {
             '/scan-lebanon-stability': 'Lebanon stability scan',
-            '/api/lebanon-trends': 'Historical trends (30d sparklines)'
+            '/api/lebanon-trends': 'Historical trends (30d sparklines)',
+            '/api/bey-flights': 'BEY flight data (coming soon)',
+            '/health': 'Health check'
         }
     })
 
 
 @app.route('/health', methods=['GET'])
 def health():
-    """Health check"""
+    """Health check with Redis status"""
+    redis_status = 'not_configured'
+    if _redis_available():
+        # Quick ping to verify Redis is reachable
+        try:
+            test = _redis_get('__health_check__')
+            redis_status = 'connected'
+        except:
+            redis_status = 'configured_but_unreachable'
+    
     return jsonify({
         'status': 'healthy',
         'service': 'lebanon-stability',
-        'version': '2.8.0',
+        'version': '2.9.0',
+        'cache_backend': redis_status,
         'timestamp': datetime.now(timezone.utc).isoformat()
     })
 
 
 if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 5001))  # Different port from main backend
+    port = int(os.environ.get('PORT', 5001))
     app.run(host='0.0.0.0', port=port, debug=False)
