@@ -430,12 +430,26 @@ def track_hezbollah_activity(days=7):
                         pubDate_elem = item.find('pubDate')
                         
                         if title_elem is not None:
-                            all_articles.append({
-                                'title': title_elem.text or '',
-                                'url': link_elem.text if link_elem is not None else '',
-                                'published': pubDate_elem.text if pubDate_elem is not None else '',
-                                'keyword': keyword
-                            })
+                            # Filter: only include articles within the date range
+                            include = True
+                            pub_date_str = pubDate_elem.text if pubDate_elem is not None else ''
+                            if pub_date_str:
+                                try:
+                                    from email.utils import parsedate_to_datetime
+                                    pub_date = parsedate_to_datetime(pub_date_str)
+                                    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+                                    if pub_date < cutoff:
+                                        include = False
+                                except:
+                                    pass  # If we can't parse the date, include it
+                            
+                            if include:
+                                all_articles.append({
+                                    'title': title_elem.text or '',
+                                    'url': link_elem.text if link_elem is not None else '',
+                                    'published': pub_date_str,
+                                    'keyword': keyword
+                                })
             except:
                 continue
         
@@ -813,7 +827,7 @@ def scan_lebanon_stability():
         
         currency_data = fetch_lebanon_currency()
         bond_data = scrape_lebanon_bonds()
-        hezbollah_data = track_hezbollah_activity(days=7)
+        hezbollah_data = track_hezbollah_activity(days=30)
         
         try:
             gold_data = calculate_lebanon_gold_reserves()
