@@ -612,7 +612,28 @@ def calculate_lebanon_stability(currency_data, bond_data, hezbollah_data):
         trend = "improving"
     
     print(f"[Lebanon Stability] ✅ Score: {stability_score}/100 ({risk_level})")
-    print(f"[Lebanon Stability] Components: base={base_score}, currency=-{currency_impact}, bonds=-{bond_impact}, hez=-{hezbollah_impact:.0f}, president=+{pr
+    print(f"[Lebanon Stability] Components: base={base_score}, currency=-{currency_impact}, bonds=-{bond_impact}, hez=-{hezbollah_impact:.0f}, president=+{presidential_bonus}, election=+{election_bonus}, ceasefire=+{ceasefire_bonus}, humanitarian={humanitarian_drag}")
+
+    return {
+        'score': stability_score,
+        'risk_level': risk_level,
+        'risk_color': risk_color,
+        'trend': trend,
+        'components': {
+            'base': base_score,
+            'currency_impact': -currency_impact,
+            'bond_impact': -bond_impact,
+            'hezbollah_impact': round(-hezbollah_impact, 1),
+            'presidential_bonus': presidential_bonus,
+            'election_bonus': election_bonus,
+            'ceasefire_bonus': ceasefire_bonus,
+            'humanitarian_drag': humanitarian_drag
+        },
+        'days_with_president': days_with_president,
+        'days_until_election': days_until_election,
+        'ceasefire_active': ceasefire_active,
+        'version': '2.9.1-recalibrated'
+    }
 
 # ========================================
 # CACHE MANAGEMENT (v2.9.0: Upstash Redis!)
