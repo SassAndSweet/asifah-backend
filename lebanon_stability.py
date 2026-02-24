@@ -484,40 +484,67 @@ def track_hezbollah_activity(days=7):
 # ========================================
 
 def calculate_lebanon_stability(currency_data, bond_data, hezbollah_data):
-    """Calculate Lebanon stability score (0-100)"""
+    """
+    Calculate Lebanon stability score (0-100)
+    
+    v2.9.1 RECALIBRATED:
+    - Currency: penalizes RATE OF CHANGE, not absolute level (cap -15)
+    - Bonds: reduced cap to -10 (default is priced in since 2020)
+    - NEW: Ceasefire bonus +8
+    - NEW: Humanitarian floor -5 (chronic crisis baseline)
+    - President +10, Election +5, Hezbollah 0 to -20 unchanged
+    """
     
     base_score = 50
     
-    print("[Lebanon Stability] Calculating score...")
+    print("[Lebanon Stability] Calculating score (v2.9.1 recalibrated)...")
     
-    # Currency collapse impact
+    # ── Currency: rate of CHANGE, not absolute level ──
+    # Lebanon's 5900% devaluation is structural, not an ongoing shock.
+    # Penalize based on whether it's getting worse.
     currency_impact = 0
     if currency_data:
-        current_rate = currency_data.get('usd_to_lbp', 90000)
-        devaluation_pct = ((current_rate - 1500) / 1500) * 100
-        currency_impact = min((devaluation_pct / 100), 30)
-        print(f"[Lebanon Stability] Currency impact: -{currency_impact:.1f}")
+        current_rate = currency_data.get('usd_to_lbp', 89500)
+        change_24h = abs(currency_data.get('change_24h', 0))
+        
+        if change_24h > 5:
+            currency_impact = 15   # Rapid deterioration
+        elif change_24h > 2:
+            currency_impact = 10   # Moderate deterioration
+        elif change_24h > 0.5:
+            currency_impact = 5    # Slow drift
+        else:
+            currency_impact = 2    # Stable (still some drag — it's Lebanon)
+        
+        print(f"[Lebanon Stability] Currency impact: -{currency_impact} (24h change: {change_24h:.2f}%)")
     
-    # Bond yield stress
+    # ── Bonds: reduced weight — default priced in since 2020 ──
     bond_impact = 0
     if bond_data:
         bond_yield = bond_data.get('yield', 0)
-        bond_impact = min((bond_yield / 2), 25)
-        print(f"[Lebanon Stability] Bond impact: -{bond_impact:.1f}")
+        if bond_yield > 80:
+            bond_impact = 10       # Extreme distress
+        elif bond_yield > 40:
+            bond_impact = 7        # Severe (current ~45%)
+        elif bond_yield > 20:
+            bond_impact = 4        # Elevated
+        else:
+            bond_impact = 2        # Recovering
+        print(f"[Lebanon Stability] Bond impact: -{bond_impact} (yield: {bond_yield}%)")
     
-    # Hezbollah activity
+    # ── Hezbollah activity (unchanged) ──
     hezbollah_impact = 0
     if hezbollah_data:
         activity_score = hezbollah_data.get('activity_score', 0)
         hezbollah_impact = (activity_score / 100) * 20
         print(f"[Lebanon Stability] Hezbollah impact: -{hezbollah_impact:.1f}")
     
-    # Presidential bonus
+    # ── Presidential bonus ──
     presidential_bonus = 10
     president_elected_date = datetime(2025, 1, 9, tzinfo=timezone.utc)
     days_with_president = (datetime.now(timezone.utc) - president_elected_date).days
     
-    # Election proximity bonus
+    # ── Election proximity bonus ──
     election_bonus = 0
     election_date = datetime(2026, 5, 10, tzinfo=timezone.utc)
     days_until_election = (election_date - datetime.now(timezone.utc)).days
@@ -525,9 +552,24 @@ def calculate_lebanon_stability(currency_data, bond_data, hezbollah_data):
     if 0 <= days_until_election <= 90:
         election_bonus = 5
     
-    # Final score
-    stability_score = (base_score - currency_impact - bond_impact - 
-                      hezbollah_impact + presidential_bonus + election_bonus)
+    # ── NEW: Ceasefire bonus ──
+    # Nov 2024 ceasefire with Israel — major stabilizing factor
+    ceasefire_active = True  # TODO: make dynamic via news scanning
+    ceasefire_bonus = 8 if ceasefire_active else 0
+    
+    # ── NEW: Humanitarian floor ──
+    # Chronic crisis drag: power, water, healthcare, brain drain
+    humanitarian_drag = -5
+    
+    # ── Final score ──
+    stability_score = (base_score 
+                      - currency_impact 
+                      - bond_impact 
+                      - hezbollah_impact 
+                      + presidential_bonus 
+                      + election_bonus
+                      + ceasefire_bonus
+                      + humanitarian_drag)
     
     stability_score = max(0, min(100, stability_score))
     stability_score = int(stability_score)
@@ -546,31 +588,17 @@ def calculate_lebanon_stability(currency_data, bond_data, hezbollah_data):
         risk_level = "Critical"
         risk_color = "red"
     
-    # Trend
+    # Trend — smarter logic
     trend = "stable"
     if hezbollah_data and hezbollah_data.get('activity_score', 0) > 50:
         trend = "worsening"
-    elif days_with_president < 60:
+    elif currency_data and currency_data.get('change_24h', 0) > 2:
+        trend = "worsening"
+    elif days_until_election <= 90 and days_with_president > 180:
         trend = "improving"
     
     print(f"[Lebanon Stability] ✅ Score: {stability_score}/100 ({risk_level})")
-    
-    return {
-        'score': stability_score,
-        'risk_level': risk_level,
-        'risk_color': risk_color,
-        'trend': trend,
-        'components': {
-            'base': base_score,
-            'currency_impact': -currency_impact,
-            'bond_impact': -bond_impact,
-            'hezbollah_impact': -hezbollah_impact,
-            'presidential_bonus': presidential_bonus,
-            'election_bonus': election_bonus
-        },
-        'days_until_election': days_until_election if days_until_election > 0 else 0,
-        'days_with_president': days_with_president
-    }
+    print(f"[Lebanon Stability] Components: base={base_score}, currency=-{currency_impact}, bonds=-{bond_impact}, hez=-{hezbollah_impact:.0f}, president=+{pr
 
 # ========================================
 # CACHE MANAGEMENT (v2.9.0: Upstash Redis!)
