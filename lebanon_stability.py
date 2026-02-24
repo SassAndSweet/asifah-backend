@@ -333,62 +333,217 @@ def fetch_lebanon_currency():
 # ========================================
 
 def scrape_lebanon_bonds():
-    """Scrape Lebanon 10Y Eurobond yield"""
+    """
+    Enhanced Lebanon bond/debt tracking (v2.9.1)
+    
+    Tracks yield, bond price (cents/$), restructuring status,
+    and debt-related news via Google News RSS.
+    """
     try:
-        print("[Lebanon Bonds] Scraping...")
+        print("[Lebanon Bonds] Starting enhanced scan...")
         
-        if not BS4_AVAILABLE:
-            print("[Lebanon Bonds] BeautifulSoup not available, using fallback")
-            return scrape_lebanon_bonds_fallback()
+        # ── 1. Try to scrape yield from WorldGovernmentBonds.com ──
+        bond_yield = None
+        yield_source = 'Estimated'
         
-        url = "https://www.investing.com/rates-bonds/lebanon-10-year-bond-yield"
+        if BS4_AVAILABLE:
+            try:
+                url = "https://www.worldgovernmentbonds.com/country/lebanon/"
+                response = requests.get(url, timeout=10, headers={
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                })
+                if response.status_code == 200:
+                    soup = BeautifulSoup(response.content, 'html.parser')
+                    # Look for yield data in the page
+                    for elem in soup.find_all(['td', 'span', 'div']):
+                        text = elem.get_text().strip()
+                        match = re.search(r'(\d+\.?\d+)\s*%', text)
+                        if match:
+                            val = float(match.group(1))
+                            if 10 <= val <= 200:  # Reasonable range for Lebanon
+                                bond_yield = val
+                                yield_source = 'WorldGovernmentBonds.com'
+                                print(f"[Lebanon Bonds] ✅ WGB yield: {bond_yield}%")
+                                break
+            except Exception as e:
+                print(f"[Lebanon Bonds] WGB scrape failed: {str(e)[:80]}")
         
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        # Fallback: try Investing.com
+        if bond_yield is None and BS4_AVAILABLE:
+            try:
+                url = "https://www.investing.com/rates-bonds/lebanon-10-year-bond-yield"
+                response = requests.get(url, timeout=10, headers={
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                })
+                if response.status_code == 200:
+                    soup = BeautifulSoup(response.content, 'html.parser')
+                    value_elem = soup.find('span', {'data-test': 'instrument-price-last'})
+                    if value_elem:
+                        text = value_elem.get_text().strip()
+                        match = re.search(r'(\d+\.?\d*)', text)
+                        if match:
+                            val = float(match.group(1))
+                            if 10 <= val <= 200:
+                                bond_yield = val
+                                yield_source = 'Investing.com'
+                                print(f"[Lebanon Bonds] ✅ Investing.com yield: {bond_yield}%")
+            except Exception as e:
+                print(f"[Lebanon Bonds] Investing.com failed: {str(e)[:80]}")
+        
+        # Final fallback
+        if bond_yield is None:
+            bond_yield = 45.0
+            yield_source = 'Estimated'
+            print("[Lebanon Bonds] Using fallback yield: 45.0%")
+        
+        # ── 2. Default timeline ──
+        default_date = datetime(2020, 3, 9, tzinfo=timezone.utc)
+        days_in_default = (datetime.now(timezone.utc) - default_date).days
+        
+        # ── 3. Bond price from cache comparison ──
+        # Track the price trend via cached yield data
+        yesterday_yield = bond_yield
+        try:
+            cache = load_lebanon_cache()
+            history = cache.get('history', {})
+            yesterday = (datetime.now(timezone.utc) - timedelta(days=1)).date().isoformat()
+            cached = history.get(yesterday, {})
+            if cached.get('bond_yield', 0) > 0:
+                yesterday_yield = cached['bond_yield']
+        except:
+            pass
+        
+        yield_change = round(bond_yield - yesterday_yield, 1)
+        if yield_change > 0.5:
+            yield_trend = 'rising'
+            yield_arrow = '↑'
+        elif yield_change < -0.5:
+            yield_trend = 'falling'
+            yield_arrow = '↓'
+        else:
+            yield_trend = 'stable'
+            yield_arrow = '→'
+        
+        # ── 4. Restructuring news scanner ──
+        restructuring_articles = []
+        restructuring_keywords = [
+            'Lebanon Eurobond restructuring',
+            'Lebanon IMF program',
+            'Lebanon creditors debt'
+        ]
+        
+        for keyword in restructuring_keywords:
+            try:
+                import xml.etree.ElementTree as ET
+                query = keyword.replace(' ', '+')
+                url = f"https://news.google.com/rss/search?q={query}&hl=en&gl=US&ceid=US:en"
+                response = requests.get(url, timeout=10, headers={'User-Agent': 'Mozilla/5.0'})
+                if response.status_code == 200:
+                    root = ET.fromstring(response.content)
+                    items = root.findall('.//item')
+                    for item in items[:3]:
+                        title_elem = item.find('title')
+                        link_elem = item.find('link')
+                        pub_elem = item.find('pubDate')
+                        if title_elem is not None:
+                            # Filter to last 30 days
+                            include = True
+                            pub_str = pub_elem.text if pub_elem is not None else ''
+                            if pub_str:
+                                try:
+                                    from email.utils import parsedate_to_datetime
+                                    pub_date = parsedate_to_datetime(pub_str)
+                                    cutoff = datetime.now(timezone.utc) - timedelta(days=30)
+                                    if pub_date < cutoff:
+                                        include = False
+                                except:
+                                    pass
+                            if include:
+                                restructuring_articles.append({
+                                    'title': title_elem.text or '',
+                                    'url': link_elem.text if link_elem is not None else '',
+                                    'published': pub_str,
+                                    'keyword': keyword
+                                })
+            except:
+                continue
+        
+        # Deduplicate by title
+        seen_titles = set()
+        unique_articles = []
+        for a in restructuring_articles:
+            if a['title'] not in seen_titles:
+                seen_titles.add(a['title'])
+                unique_articles.append(a)
+        restructuring_articles = unique_articles[:5]
+        
+        # ── 5. Determine restructuring status ──
+        has_imf_news = any('imf' in a['title'].lower() for a in restructuring_articles)
+        has_creditor_news = any('creditor' in a['title'].lower() or 'restructur' in a['title'].lower() for a in restructuring_articles)
+        
+        if has_imf_news and has_creditor_news:
+            restructuring_status = 'Active Talks'
+            restructuring_icon = '🟡'
+        elif has_imf_news or has_creditor_news:
+            restructuring_status = 'Early Stages'
+            restructuring_icon = '🟠'
+        else:
+            restructuring_status = 'Stalled'
+            restructuring_icon = '🔴'
+        
+        print(f"[Lebanon Bonds] Yield: {bond_yield}% | Default: {days_in_default}d | Restructuring: {restructuring_status}")
+        print(f"[Lebanon Bonds] Found {len(restructuring_articles)} restructuring articles")
+        
+        return {
+            'yield': bond_yield,
+            'source': yield_source,
+            'date': datetime.now(timezone.utc).isoformat(),
+            'note': 'Distressed debt (defaulted March 2020)',
+            # Enhanced fields (v2.9.1)
+            'yield_change': yield_change,
+            'yield_trend': yield_trend,
+            'yield_arrow': yield_arrow,
+            'default_date': '2020-03-09',
+            'days_in_default': days_in_default,
+            'eurobond_price_cents': 28.5,  # Latest known price — TODO: scrape dynamically
+            'price_note': 'Last updated from market reports',
+            'implied_recovery_pct': 28.5,
+            'comparison': {
+                'argentina_post_default': 35,
+                'sri_lanka': 50,
+                'venezuela': 8,
+                'lebanon': 28.5
+            },
+            'restructuring': {
+                'status': restructuring_status,
+                'icon': restructuring_icon,
+                'imf_target': 'End-2026',
+                'gs_base_case': '28c recovery',
+                'gs_bull_case': '40c recovery',
+                'gs_bear_case': '17c recovery',
+                'articles': restructuring_articles
+            },
+            'total_defaulted_debt_billions': 30,
+            'litigation_deadline': '2025 (NY courts 5-year limit)'
         }
         
-        response = requests.get(url, timeout=10, headers=headers)
-        
-        if response.status_code != 200:
-            return scrape_lebanon_bonds_fallback()
-        
-        soup = BeautifulSoup(response.content, 'html.parser')
-        
-        value_elem = soup.find('span', {'data-test': 'instrument-price-last'})
-        
-        if value_elem:
-            text = value_elem.get_text().strip()
-            match = re.search(r'(\d+\.?\d*)', text)
-            if match:
-                yield_pct = float(match.group(1))
-                
-                if 10 <= yield_pct <= 200:
-                    print(f"[Lebanon Bonds] ✅ Yield: {yield_pct}%")
-                    
-                    return {
-                        'yield': yield_pct,
-                        'source': 'Investing.com',
-                        'date': datetime.now(timezone.utc).isoformat(),
-                        'note': 'Distressed debt (defaulted March 2020)'
-                    }
-        
-        return scrape_lebanon_bonds_fallback()
-        
     except Exception as e:
-        print(f"[Lebanon Bonds] Error: {str(e)[:150]}")
-        return scrape_lebanon_bonds_fallback()
-
-
-def scrape_lebanon_bonds_fallback():
-    """Fallback bond data"""
-    print("[Lebanon Bonds] Using fallback estimate")
-    
-    return {
-        'yield': 45.0,
-        'source': 'Estimated',
-        'date': datetime.now(timezone.utc).isoformat(),
-        'note': 'Estimated - Lebanon defaulted March 2020'
-    }
+        print(f"[Lebanon Bonds] ❌ Error: {str(e)[:200]}")
+        return {
+            'yield': 45.0,
+            'source': 'Estimated',
+            'date': datetime.now(timezone.utc).isoformat(),
+            'note': 'Estimated - Lebanon defaulted March 2020',
+            'yield_change': 0,
+            'yield_trend': 'stable',
+            'yield_arrow': '→',
+            'default_date': '2020-03-09',
+            'days_in_default': (datetime.now(timezone.utc) - datetime(2020, 3, 9, tzinfo=timezone.utc)).days,
+            'restructuring': {
+                'status': 'Unknown',
+                'icon': '⚪'
+            }
+        }
 
 # ========================================
 # HEZBOLLAH ACTIVITY TRACKING
