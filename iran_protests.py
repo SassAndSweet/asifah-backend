@@ -469,7 +469,12 @@ def fetch_gdelt_articles(query, days=7, language='eng'):
             print(f"[Iran] GDELT {language}: Failed after retries")
             return []
 
-        data = response.json()
+        try:
+            data = response.json()
+        except (json.JSONDecodeError, ValueError) as e:
+            print(f"[Iran] GDELT {language}: JSON parse error: {str(e)[:100]}")
+            print(f"[Iran] GDELT {language}: Response starts with: {response.text[:200]}")
+            return []
         articles = data.get('articles', [])
 
         lang_code = {'eng': 'en', 'ara': 'ar', 'heb': 'he', 'fas': 'fa'}.get(language, 'en')
@@ -486,13 +491,12 @@ def fetch_gdelt_articles(query, days=7, language='eng'):
             })
 
         # Filter out misclassified articles (GDELT sourcelang is unreliable)
-        if language != 'eng':
-            lang_code = {'ara': 'ar', 'heb': 'he', 'fas': 'fa'}.get(language, 'en')
-            before_count = len(standardized)
-            standardized = [a for a in standardized if validate_article_language(a, lang_code)]
-            filtered = before_count - len(standardized)
-            if filtered > 0:
-                print(f"[Iran] GDELT {language}: Filtered {filtered} misclassified articles")
+        lang_code = {'eng': 'en', 'ara': 'ar', 'heb': 'he', 'fas': 'fa'}.get(language, 'en')
+        before_count = len(standardized)
+        standardized = [a for a in standardized if validate_article_language(a, lang_code)]
+        filtered = before_count - len(standardized)
+        if filtered > 0:
+            print(f"[Iran] GDELT {language}: Filtered {filtered} misclassified articles")
 
         print(f"[Iran] GDELT {language}: {len(standardized)} articles")
         return standardized
@@ -525,7 +529,11 @@ def validate_article_language(article, expected_lang):
         farsi_chars = sum(1 for c in text if '\u0600' <= c <= '\u06FF' or '\uFB50' <= c <= '\uFDFF')
         return farsi_chars >= len(text) * 0.15
     
-    return True  # Don't filter English
+    if expected_lang == 'en':
+        # English: basic Latin chars (A-Z, a-z) should dominate
+        latin_chars = sum(1 for c in text if 'A' <= c <= 'Z' or 'a' <= c <= 'z')
+        return latin_chars >= len(text) * 0.30
+    return True
 
 
 def fetch_reddit_posts(days=7):
@@ -779,6 +787,33 @@ def extract_hrana_structured_data(articles):
 # ============================================
 # CASUALTY EXTRACTION (from article text)
 # ============================================
+
+# Max plausible numbers for a 7-day window of Iran protests
+# These caps prevent historical references and unrelated large numbers
+# from polluting the extraction (e.g., "7,000 killed in Iran-Iraq war")
+CASUALTY_CAPS = {
+    'deaths': 500,      # Single-week cap; Mahsa Amini peak was ~50/week
+    'injuries': 2000,
+    'arrests': 5000
+}
+
+# False positive phrases: sentences containing these are skipped
+FALSE_POSITIVE_PATTERNS = [
+    r'iran[- ]iraq war',
+    r'world war',
+    r'earthquake',
+    r'flood',
+    r'covid',
+    r'pandemic',
+    r'historical',
+    r'since \d{4}',          # "7,000 killed since 1988"
+    r'over the past \d+ years',
+    r'in the \d{4}s',        # "in the 1980s"
+    r'decades? ago',
+    r'anniversary',
+    r'commemorate',
+]
+
 CASUALTY_KEYWORDS = {
     'deaths': [
         'killed', 'dead', 'died', 'death toll', 'fatalities', 'deaths',
@@ -799,8 +834,27 @@ CASUALTY_KEYWORDS = {
 }
 
 
+def is_false_positive(sentence):
+    """Check if a sentence is a historical/unrelated reference"""
+    for pattern in FALSE_POSITIVE_PATTERNS:
+        if re.search(pattern, sentence, re.IGNORECASE):
+            return True
+    return False
+
+
 def extract_casualty_data(articles):
-    """Extract casualty numbers from articles using regex patterns"""
+    """
+    Extract casualty numbers from articles using multiple regex strategies.
+
+    Strategy 1: "NUMBER keyword" - e.g., "3 killed", "20 people arrested"
+    Strategy 2: "keyword NUMBER" - e.g., "killed 3", "death toll: 45"
+    Strategy 3: "NUMBER were/have been keyword" - e.g., "3 were killed"
+
+    Includes:
+    - False positive filtering (historical refs, wars, earthquakes)
+    - Sanity caps (no single 7-day extraction > 500 deaths)
+    - Logging when caps are hit (so you can see what triggered it)
+    """
     casualties = {
         'deaths': 0,
         'injuries': 0,
@@ -809,10 +863,19 @@ def extract_casualty_data(articles):
         'details': []
     }
 
-    number_patterns = [
-        r'(\d{1,3}(?:,\d{3})*)\s+(?:people\s+)?.{0,20}?',
-        r'(?:more than|over|at least)\s+(\d{1,3}(?:,\d{3})*)\s+(?:people\s+)?.{0,30}?',
-        r'(\d{1,3}(?:,\d{3})*)\s+people\s+(?:have been|had been|have)\s+.{0,20}?',
+    # --- Pattern templates: {keyword} is replaced per keyword ---
+
+    # Number BEFORE keyword (most common: "3 killed", "20 people arrested")
+    number_before_kw = [
+        r'(\d{1,6})\s+(?:people\s+)?(?:were\s+|have\s+been\s+)?{keyword}',
+        r'(?:more than|over|at least|nearly|approximately|about|around)\s+(\d{1,6})\s+(?:people\s+)?(?:were\s+|have\s+been\s+)?{keyword}',
+        r'(\d{1,6})\s+(?:people|protesters?|demonstrators?|citizens?|iranians?)\s+(?:were\s+|have\s+been\s+)?{keyword}',
+    ]
+
+    # Keyword BEFORE number ("death toll: 45", "arrested 120 people")
+    kw_before_number = [
+        r'{keyword}\s+(?:of\s+)?(?:more than\s+|at least\s+|over\s+)?(\d{1,6})',
+        r'{keyword}\s*(?::|to|rose to|reached|climbed to|stands at)\s*(?:more than\s+|at least\s+)?(\d{1,6})',
     ]
 
     for article in articles:
@@ -823,29 +886,63 @@ def extract_casualty_data(articles):
         source = article.get('source', {}).get('name', 'Unknown')
         url = article.get('url', '')
 
+        # Split into sentences for context-aware matching
         sentences = re.split(r'[.!?]\s+', text)
 
-        for category, keywords in CASUALTY_KEYWORDS.items():
-            for sentence in sentences:
+        for sentence in sentences:
+            # Skip historical / unrelated references
+            if is_false_positive(sentence):
+                continue
+
+            for category, keywords in CASUALTY_KEYWORDS.items():
                 for keyword in keywords:
-                    if keyword in sentence:
+                    if keyword not in sentence:
+                        continue
+
+                    best_num = 0
+
+                    # Try number-before-keyword patterns
+                    for tmpl in number_before_kw:
+                        pattern = tmpl.format(keyword=re.escape(keyword))
+                        match = re.search(pattern, sentence, re.IGNORECASE)
+                        if match:
+                            try:
+                                num = int(match.group(1).replace(',', ''))
+                                if num > best_num:
+                                    best_num = num
+                            except (ValueError, IndexError):
+                                pass
+
+                    # Try keyword-before-number patterns
+                    for tmpl in kw_before_number:
+                        pattern = tmpl.format(keyword=re.escape(keyword))
+                        match = re.search(pattern, sentence, re.IGNORECASE)
+                        if match:
+                            try:
+                                num = int(match.group(1).replace(',', ''))
+                                if num > best_num:
+                                    best_num = num
+                            except (ValueError, IndexError):
+                                pass
+
+                    # Apply sanity cap — skip if over threshold
+                    cap = CASUALTY_CAPS.get(category, 5000)
+                    if best_num > cap:
+                        print(f"[Iran] Casualty cap hit: {category}={best_num} from '{source}' "
+                              f"(cap={cap}), sentence: '{sentence[:150]}...'")
+                        continue
+
+                    # Update if this is the highest credible number we've seen
+                    if best_num > 0 and best_num > casualties[category]:
+                        casualties[category] = best_num
                         casualties['sources'].add(source)
-                        for pattern in number_patterns:
-                            match = re.search(pattern + re.escape(keyword), sentence, re.IGNORECASE)
-                            if match:
-                                num_str = match.group(1).replace(',', '')
-                                try:
-                                    num = int(num_str)
-                                    if num > casualties[category]:
-                                        casualties[category] = num
-                                        casualties['details'].append({
-                                            'type': category, 'count': num,
-                                            'source': source, 'url': url
-                                        })
-                                except:
-                                    pass
-                                break
-                        break
+                        casualties['details'].append({
+                            'type': category,
+                            'count': best_num,
+                            'source': source,
+                            'url': url,
+                            'sentence': sentence[:200]
+                        })
 
     casualties['sources'] = list(casualties['sources'])
     print(f"[Iran] Casualties: deaths={casualties['deaths']}, "
