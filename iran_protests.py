@@ -464,38 +464,39 @@ def fetch_gdelt_articles(query, days=7, language='eng'):
                     time.sleep(2)
                     continue
                 raise
+
         if not response or response.status_code != 200:
             print(f"[Iran] GDELT {language}: Failed after retries")
             return []
+
         data = response.json()
         articles = data.get('articles', [])
 
-            lang_code = {'eng': 'en', 'ara': 'ar', 'heb': 'he', 'fas': 'fa'}.get(language, 'en')
-            standardized = []
-            for article in articles:
-                standardized.append({
-                    'title': article.get('title', ''),
-                    'description': article.get('title', ''),
-                    'url': article.get('url', ''),
-                    'publishedAt': article.get('seendate', ''),
-                    'source': {'name': article.get('domain', 'GDELT')},
-                    'content': article.get('title', ''),
-                    'language': lang_code
-                })
-            # Filter out misclassified articles (GDELT sourcelang is unreliable)
-            if language != 'eng':
-                lang_code = {'ara': 'ar', 'heb': 'he', 'fas': 'fa'}.get(language, 'en')
-                before_count = len(standardized)
-                standardized = [a for a in standardized if validate_article_language(a, lang_code)]
-                filtered = before_count - len(standardized)
-                if filtered > 0:
-                    print(f"[Iran] GDELT {language}: Filtered {filtered} misclassified articles")
+        lang_code = {'eng': 'en', 'ara': 'ar', 'heb': 'he', 'fas': 'fa'}.get(language, 'en')
+        standardized = []
+        for article in articles:
+            standardized.append({
+                'title': article.get('title', ''),
+                'description': article.get('title', ''),
+                'url': article.get('url', ''),
+                'publishedAt': article.get('seendate', ''),
+                'source': {'name': article.get('domain', 'GDELT')},
+                'content': article.get('title', ''),
+                'language': lang_code
+            })
 
-            print(f"[Iran] GDELT {language}: {len(standardized)} articles")
-            return standardized
+        # Filter out misclassified articles (GDELT sourcelang is unreliable)
+        if language != 'eng':
+            lang_code = {'ara': 'ar', 'heb': 'he', 'fas': 'fa'}.get(language, 'en')
+            before_count = len(standardized)
+            standardized = [a for a in standardized if validate_article_language(a, lang_code)]
+            filtered = before_count - len(standardized)
+            if filtered > 0:
+                print(f"[Iran] GDELT {language}: Filtered {filtered} misclassified articles")
 
-        print(f"[Iran] GDELT {language}: HTTP {response.status_code}")
-        return []
+        print(f"[Iran] GDELT {language}: {len(standardized)} articles")
+        return standardized
+
     except Exception as e:
         print(f"[Iran] GDELT {language} error: {e}")
         return []
