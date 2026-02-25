@@ -2056,9 +2056,8 @@ def scan_military_posture(days=7, force_refresh=False):
             print("[Military Tracker] Returning stale cache, background refresh triggered")
             return stale_cache
 
-        # 3. No cache at all? Return skeleton, trigger background scan.
-        _trigger_background_scan(days)
-        print("[Military Tracker] No cache found, returning skeleton while scan runs")
+        # 3. No cache at all? Return skeleton (periodic scan will fill it).
+        print("[Military Tracker] No cache found, returning skeleton. Periodic scan will populate.")
         return _build_empty_skeleton()
 
     # 4. force_refresh=True — do a blocking scan (user clicked refresh)
@@ -2422,11 +2421,22 @@ def register_military_endpoints(app):
 
     print("[Military Tracker] ✅ Endpoints registered: /api/military-posture, /api/military-posture/<target>")
 
-    # BACKGROUND SCAN ON STARTUP
-    def _startup_scan():
-        time.sleep(10)
-        print("[Military Tracker] Startup background scan triggered...")
-        _trigger_background_scan(days=7)
+    # PERIODIC BACKGROUND SCAN (every 12 hours)
+    def _periodic_scan():
+        time.sleep(10)  # Let gunicorn settle
+        while True:
+            try:
+                print("[Military Tracker] Periodic scan starting...")
+                _trigger_background_scan(days=7)
+                # Wait for scan to finish before sleeping
+                time.sleep(60)  # Give scan time to start
+                while _background_scan_running:
+                    time.sleep(30)
+                print("[Military Tracker] Periodic scan complete. Sleeping 12 hours.")
+                time.sleep(43200)  # 12 hours
+            except Exception as e:
+                print(f"[Military Tracker] Periodic scan error: {e}")
+                time.sleep(3600)  # Retry in 1 hour on error
 
-    startup_thread = threading.Thread(target=_startup_scan, daemon=True)
-    startup_thread.start()
+    periodic_thread = threading.Thread(target=_periodic_scan, daemon=True)
+    periodic_thread.start()
