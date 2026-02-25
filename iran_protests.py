@@ -856,15 +856,15 @@ def extract_casualty_data(articles):
 
     # Number BEFORE keyword (most common: "3 killed", "20 people arrested")
     number_before_kw = [
-        r'(\d{1,6})\s+(?:people\s+)?(?:were\s+|have\s+been\s+)?{keyword}',
-        r'(?:more than|over|at least|nearly|approximately|about|around)\s+(\d{1,6})\s+(?:people\s+)?(?:were\s+|have\s+been\s+)?{keyword}',
-        r'(\d{1,6})\s+(?:people|protesters?|demonstrators?|citizens?|iranians?)\s+(?:were\s+|have\s+been\s+)?{keyword}',
+        r'(\d{{1,6}})\s+(?:people\s+)?(?:were\s+|have\s+been\s+)?{keyword}',
+        r'(?:more than|over|at least|nearly|approximately|about|around)\s+(\d{{1,6}})\s+(?:people\s+)?(?:were\s+|have\s+been\s+)?{keyword}',
+        r'(\d{{1,6}})\s+(?:people|protesters?|demonstrators?|citizens?|iranians?)\s+(?:were\s+|have\s+been\s+)?{keyword}',
     ]
 
     # Keyword BEFORE number ("death toll: 45", "arrested 120 people")
     kw_before_number = [
-        r'{keyword}\s+(?:of\s+)?(?:more than\s+|at least\s+|over\s+)?(\d{1,6})',
-        r'{keyword}\s*(?::|to|rose to|reached|climbed to|stands at)\s*(?:more than\s+|at least\s+)?(\d{1,6})',
+        r'{keyword}\s+(?:of\s+)?(?:more than\s+|at least\s+|over\s+)?(\d{{1,6}})',
+        r'{keyword}\s*(?::|to|rose to|reached|climbed to|stands at)\s*(?:more than\s+|at least\s+)?(\d{{1,6}})',
     ]
 
     for article in articles:
@@ -1299,176 +1299,171 @@ def build_enhanced_casualties(casualties, hrana_data, cache):
 # ============================================
 # MAIN SCAN ENDPOINT
 # ============================================
+def _run_iran_scan(days=7):
+    """
+    Core scan logic — called by both periodic thread and endpoint.
+    Returns the response dict (not a Flask Response).
+    """
+    cache = load_cache()
+
+    print("[Iran] === Starting fresh data fetch ===")
+
+    # --- Fetch all data sources ---
+    newsapi_articles = []
+    try:
+        newsapi_articles = fetch_newsapi_articles('Iran protests OR Iran demonstrations OR Iran unrest', days)
+    except Exception as e:
+        print(f"NewsAPI error: {e}")
+
+    gdelt_query = 'iran protest OR iran demonstrations OR iran unrest OR iran crisis'
+    gdelt_en = fetch_gdelt_articles(gdelt_query, days, 'eng')
+    gdelt_ar = fetch_gdelt_articles(gdelt_query, days, 'ara')
+    gdelt_fa = fetch_gdelt_articles(gdelt_query, days, 'fas')
+    gdelt_he = fetch_gdelt_articles(gdelt_query, days, 'heb')
+
+    reddit_posts = fetch_reddit_posts(days)
+    iranwire_articles = fetch_iranwire_rss()
+    hrana_articles = fetch_hrana_rss()
+
+    all_articles = (newsapi_articles + gdelt_en + gdelt_ar + gdelt_fa +
+                    gdelt_he + reddit_posts + iranwire_articles + hrana_articles)
+    print(f"[Iran] Total articles: {len(all_articles)}")
+
+    # --- Extract structured data ---
+    hrana_data = extract_hrana_structured_data(hrana_articles)
+    casualties_regex = extract_casualty_data(all_articles)
+
+    # Merge: HRANA priority over regex
+    if hrana_data['is_hrana_verified']:
+        casualties = {
+            'deaths': max(hrana_data['confirmed_deaths'], casualties_regex['deaths']),
+            'deaths_under_investigation': hrana_data['deaths_under_investigation'],
+            'injuries': max(hrana_data['seriously_injured'], casualties_regex['injuries']),
+            'arrests': max(hrana_data['total_arrests'], casualties_regex['arrests']),
+            'sources': list(set(['HRANA (verified)'] + casualties_regex['sources'])),
+            'details': casualties_regex['details'],
+            'hrana_verified': True,
+            'hrana_source': hrana_data['source_article'],
+            'hrana_updated': hrana_data['last_updated']
+        }
+    else:
+        casualties = casualties_regex
+        casualties['hrana_verified'] = False
+
+    # --- Dynamic city extraction ---
+    cities = extract_cities_from_articles(all_articles)
+    num_cities = len(cities) if cities else (hrana_data.get('cities_affected') or 0)
+
+    # --- Economic data ---
+    exchange_rate = get_exchange_rate()
+    oil_data = get_brent_oil_price()
+    reserves = get_iran_oil_reserves()
+    production_status = get_iran_oil_production_status(all_articles)
+
+    # --- Regime Stability Index ---
+    stability = calculate_regime_stability(
+        all_articles, casualties, exchange_rate, oil_data,
+        num_cities, hrana_data, cache
+    )
+
+    # --- Enhanced casualties (7d/30d/cumulative/trends) ---
+    casualties_enhanced = build_enhanced_casualties(casualties, hrana_data, cache)
+
+    # --- Government status ---
+    government = get_government_status()
+
+    # --- Calculate intensity (simple metric for backward compat) ---
+    articles_per_day = len(all_articles) / days if days > 0 else 0
+    intensity_score = min(
+        articles_per_day * 2 + num_cities * 4 +
+        casualties['deaths'] * 0.5 + casualties['injuries'] * 0.2 +
+        casualties['arrests'] * 0.1,
+        100
+    )
+
+    # --- Build response ---
+    response_data = {
+        'success': True,
+        'timestamp': datetime.now(timezone.utc).isoformat(),
+        'days_analyzed': days,
+        'total_articles': len(all_articles),
+        'intensity': int(intensity_score),
+        'regime_stability': stability,
+        'exchange_rate': exchange_rate,
+        'casualties': {
+            'deaths': casualties.get('deaths', 0),
+            'deaths_under_investigation': casualties.get('deaths_under_investigation', 0),
+            'injuries': casualties.get('injuries', 0),
+            'arrests': casualties.get('arrests', 0),
+            'verified_sources': casualties.get('sources', []),
+            'details': casualties.get('details', []),
+            'hrana_verified': casualties.get('hrana_verified', False),
+            'hrana_source': casualties.get('hrana_source'),
+            'hrana_updated': casualties.get('hrana_updated')
+        },
+        'casualties_enhanced': casualties_enhanced,
+        'cities': cities,
+        'num_cities_affected': num_cities,
+        'oil_data': {
+            'oil_price': oil_data,
+            'reserves': reserves,
+            'sparkline': {
+                'success': True,
+                'data': oil_data.get('sparkline', []),
+                'source': 'alpha_vantage' if oil_data.get('sparkline') else 'unavailable'
+            },
+            'production_status': production_status
+        },
+        'government': government,
+        'articles_en': [a for a in all_articles if a.get('language') == 'en'
+                        and not a.get('source', {}).get('name', '').startswith('r/')][:20],
+        'articles_fa': [a for a in all_articles if a.get('language') == 'fa'][:20],
+        'articles_ar': [a for a in all_articles if a.get('language') == 'ar'][:20],
+        'articles_he': [a for a in all_articles if a.get('language') == 'he'][:20],
+        'articles_reddit': [a for a in all_articles
+                            if a.get('source', {}).get('name', '').startswith('r/')][:20],
+        'articles_iranwire': iranwire_articles[:20],
+        'articles_hrana': hrana_articles[:20],
+        'cached': False,
+        'version': '3.0.0'
+    }
+
+    # Save to cache
+    cache["cached_response"] = response_data
+    cache["last_full_fetch"] = datetime.now().isoformat()
+    save_cache(cache)
+    print(f"[Iran] Scan complete. Stability: {stability['stability_score']}, "
+          f"Risk: {stability['risk_level']}")
+
+    return response_data
+
+
 def scan_iran_protests_handler():
     """
-    Main handler for /scan-iran-protests endpoint
-    Returns all data the Iran dashboard needs
+    Endpoint handler — ALWAYS serves from cache.
+    Background thread handles refreshing.
     """
     try:
-        days = int(request.args.get('days', 7))
-
-        # Load persistent cache
         cache = load_cache()
 
-        # Check if we have fresh cached response (< 25 min old)
-        last_fetch = cache.get("last_full_fetch")
-        if last_fetch:
+        if "cached_response" in cache:
+            last_fetch = cache.get("last_full_fetch", "unknown")
             try:
                 fetch_time = datetime.fromisoformat(last_fetch)
                 age_minutes = (datetime.now() - fetch_time).total_seconds() / 60
-                if age_minutes < 25 and "cached_response" in cache:
-                    print(f"[Iran] Serving cached response ({age_minutes:.0f}min old)")
-                    cached = cache["cached_response"]
-                    cached["cached"] = True
-                    cached["cache_age_minutes"] = round(age_minutes, 1)
-                    return jsonify(cached)
             except:
-                pass
+                age_minutes = -1
 
-        print("[Iran] === Starting fresh data fetch ===")
+            print(f"[Iran] Serving cached response ({age_minutes:.0f}min old)")
+            cached = cache["cached_response"]
+            cached["cached"] = True
+            cached["cache_age_minutes"] = round(age_minutes, 1)
+            return jsonify(cached)
 
-        # --- Fetch all data sources ---
-        newsapi_articles = []
-        try:
-            newsapi_articles = fetch_newsapi_articles('Iran protests OR Iran demonstrations OR Iran unrest', days)
-        except Exception as e:
-            print(f"NewsAPI error: {e}")
-
-        gdelt_query = 'iran protest OR iran demonstrations OR iran unrest OR iran crisis'
-        gdelt_en = fetch_gdelt_articles(gdelt_query, days, 'eng')
-        gdelt_ar = fetch_gdelt_articles(gdelt_query, days, 'ara')
-        gdelt_fa = fetch_gdelt_articles(gdelt_query, days, 'fas')
-        gdelt_he = fetch_gdelt_articles(gdelt_query, days, 'heb')
-
-        reddit_posts = fetch_reddit_posts(days)
-        iranwire_articles = fetch_iranwire_rss()
-        hrana_articles = fetch_hrana_rss()
-
-        all_articles = (newsapi_articles + gdelt_en + gdelt_ar + gdelt_fa +
-                        gdelt_he + reddit_posts + iranwire_articles + hrana_articles)
-        print(f"[Iran] Total articles: {len(all_articles)}")
-
-        # --- Extract structured data ---
-        hrana_data = extract_hrana_structured_data(hrana_articles)
-        casualties_regex = extract_casualty_data(all_articles)
-
-        # Merge: HRANA priority over regex
-        if hrana_data['is_hrana_verified']:
-            casualties = {
-                'deaths': max(hrana_data['confirmed_deaths'], casualties_regex['deaths']),
-                'deaths_under_investigation': hrana_data['deaths_under_investigation'],
-                'injuries': max(hrana_data['seriously_injured'], casualties_regex['injuries']),
-                'arrests': max(hrana_data['total_arrests'], casualties_regex['arrests']),
-                'sources': list(set(['HRANA (verified)'] + casualties_regex['sources'])),
-                'details': casualties_regex['details'],
-                'hrana_verified': True,
-                'hrana_source': hrana_data['source_article'],
-                'hrana_updated': hrana_data['last_updated']
-            }
-        else:
-            casualties = casualties_regex
-            casualties['hrana_verified'] = False
-
-        # --- Dynamic city extraction ---
-        cities = extract_cities_from_articles(all_articles)
-        num_cities = len(cities) if cities else (hrana_data.get('cities_affected') or 0)
-
-        # --- Economic data ---
-        exchange_rate = get_exchange_rate()
-        oil_data = get_brent_oil_price()
-        reserves = get_iran_oil_reserves()
-        production_status = get_iran_oil_production_status(all_articles)
-
-        # --- Regime Stability Index ---
-        stability = calculate_regime_stability(
-            all_articles, casualties, exchange_rate, oil_data,
-            num_cities, hrana_data, cache
-        )
-
-        # --- Enhanced casualties (7d/30d/cumulative/trends) ---
-        casualties_enhanced = build_enhanced_casualties(casualties, hrana_data, cache)
-
-        # --- Government status ---
-        government = get_government_status()
-
-        # --- Calculate intensity (simple metric for backward compat) ---
-        articles_per_day = len(all_articles) / days if days > 0 else 0
-        intensity_score = min(
-            articles_per_day * 2 + num_cities * 4 +
-            casualties['deaths'] * 0.5 + casualties['injuries'] * 0.2 +
-            casualties['arrests'] * 0.1,
-            100
-        )
-
-        # --- Build response ---
-        response_data = {
-            'success': True,
-            'timestamp': datetime.now(timezone.utc).isoformat(),
-            'days_analyzed': days,
-            'total_articles': len(all_articles),
-            'intensity': int(intensity_score),
-
-            # NEW: Multi-component stability
-            'regime_stability': stability,
-
-            # Exchange rate (NEW - was missing)
-            'exchange_rate': exchange_rate,
-
-            # Casualties (original format for backward compat)
-            'casualties': {
-                'deaths': casualties.get('deaths', 0),
-                'deaths_under_investigation': casualties.get('deaths_under_investigation', 0),
-                'injuries': casualties.get('injuries', 0),
-                'arrests': casualties.get('arrests', 0),
-                'verified_sources': casualties.get('sources', []),
-                'details': casualties.get('details', []),
-                'hrana_verified': casualties.get('hrana_verified', False),
-                'hrana_source': casualties.get('hrana_source'),
-                'hrana_updated': casualties.get('hrana_updated')
-            },
-
-            # NEW: Enhanced casualties (what frontend expects)
-            'casualties_enhanced': casualties_enhanced,
-
-            # Dynamic cities (was hardcoded)
-            'cities': cities,
-            'num_cities_affected': num_cities,
-
-            # Oil data (moved from separate endpoint)
-            'oil_data': {
-                'oil_price': oil_data,
-                'reserves': reserves,
-                'sparkline': {
-                    'success': True,
-                    'data': oil_data.get('sparkline', []),
-                    'source': 'alpha_vantage' if oil_data.get('sparkline') else 'unavailable'
-                },
-                'production_status': production_status
-            },
-
-            # NEW: Government status card
-            'government': government,
-
-            # Articles by language
-            'articles_en': [a for a in all_articles if a.get('language') == 'en'
-                            and not a.get('source', {}).get('name', '').startswith('r/')][:20],
-            'articles_fa': [a for a in all_articles if a.get('language') == 'fa'][:20],
-            'articles_ar': [a for a in all_articles if a.get('language') == 'ar'][:20],
-            'articles_he': [a for a in all_articles if a.get('language') == 'he'][:20],
-            'articles_reddit': [a for a in all_articles
-                                if a.get('source', {}).get('name', '').startswith('r/')][:20],
-            'articles_iranwire': iranwire_articles[:20],
-            'articles_hrana': hrana_articles[:20],
-
-            'cached': False,
-            'version': '3.0.0'
-        }
-
-        # Save to cache
-        cache["cached_response"] = response_data
-        cache["last_full_fetch"] = datetime.now().isoformat()
-        save_cache(cache)
-
+        # No cache at all — first boot, run once synchronously
+        print("[Iran] No cache found, running initial scan...")
+        days = int(request.args.get('days', 7))
+        response_data = _run_iran_scan(days=days)
         return jsonify(response_data)
 
     except Exception as e:
@@ -1520,6 +1515,42 @@ def get_iran_oil_data_handler():
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 
+# ============================================
+# PERIODIC BACKGROUND SCAN (same pattern as military)
+# ============================================
+_iran_scan_thread = None
+
+def start_iran_periodic_scan(app):
+    """Launch background thread that refreshes Iran data every 6 hours"""
+    global _iran_scan_thread
+    if _iran_scan_thread is not None:
+        print("[Iran] Periodic scan already running, skipping duplicate")
+        return
+
+    def periodic_scan():
+        import time as _time
+        INTERVAL = 6 * 60 * 60  # 6 hours
+
+        # Initial delay — let other background tasks start first
+        _time.sleep(30)
+
+        while True:
+            try:
+                print(f"[Iran] Periodic scan starting at {datetime.now(timezone.utc).isoformat()}")
+                with app.test_request_context('/scan-iran-protests?days=7'):
+                    _run_iran_scan(days=7)
+                print(f"[Iran] Periodic scan complete. Sleeping {INTERVAL}s until next refresh.")
+            except Exception as e:
+                print(f"[Iran] Periodic scan error: {e}")
+                import traceback
+                traceback.print_exc()
+
+            _time.sleep(INTERVAL)
+
+    import threading
+    _iran_scan_thread = threading.Thread(target=periodic_scan, daemon=True)
+    _iran_scan_thread.start()
+    print("[Iran] Periodic scan thread started (6-hour interval)")
 
 # ============================================
 # FLASK ROUTE REGISTRATION
@@ -1538,3 +1569,6 @@ def register_iran_routes(app):
         return get_iran_oil_data_handler()
 
     print("[Iran] Routes registered: /scan-iran-protests, /api/iran-oil-data")
+
+    # Start background scan thread
+    start_iran_periodic_scan(app)
