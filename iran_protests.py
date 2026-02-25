@@ -452,7 +452,7 @@ def fetch_gdelt_articles(query, days=7, language='eng'):
             'sourcelang': language
         }
 
-        response = requests.get(GDELT_BASE_URL, params=params, timeout=15)
+        response = requests.get(GDELT_BASE_URL, params=params, timeout=25)
         if response.status_code == 200:
             data = response.json()
             articles = data.get('articles', [])
@@ -469,6 +469,15 @@ def fetch_gdelt_articles(query, days=7, language='eng'):
                     'content': article.get('title', ''),
                     'language': lang_code
                 })
+            # Filter out misclassified articles (GDELT sourcelang is unreliable)
+            if language != 'eng':
+                lang_code = {'ara': 'ar', 'heb': 'he', 'fas': 'fa'}.get(language, 'en')
+                before_count = len(standardized)
+                standardized = [a for a in standardized if validate_article_language(a, lang_code)]
+                filtered = before_count - len(standardized)
+                if filtered > 0:
+                    print(f"[Iran] GDELT {language}: Filtered {filtered} misclassified articles")
+
             print(f"[Iran] GDELT {language}: {len(standardized)} articles")
             return standardized
 
@@ -477,6 +486,32 @@ def fetch_gdelt_articles(query, days=7, language='eng'):
     except Exception as e:
         print(f"[Iran] GDELT {language} error: {e}")
         return []
+
+
+def validate_article_language(article, expected_lang):
+    """
+    Basic validation that article content matches expected language.
+    GDELT sourcelang filter is unreliable — returns Korean, Chinese, Hindi etc. as 'ara'.
+    """
+    text = f"{article.get('title', '')} {article.get('description', '')}".strip()
+    if not text:
+        return False
+
+    # Check for expected script characters
+    if expected_lang == 'ar':
+        # Arabic: U+0600-U+06FF
+        arabic_chars = sum(1 for c in text if '\u0600' <= c <= '\u06FF')
+        return arabic_chars >= len(text) * 0.15
+    elif expected_lang == 'he':
+        # Hebrew: U+0590-U+05FF
+        hebrew_chars = sum(1 for c in text if '\u0590' <= c <= '\u05FF')
+        return hebrew_chars >= len(text) * 0.15
+    elif expected_lang == 'fa':
+        # Farsi uses Arabic script (U+0600-U+06FF) plus some extras (U+FB50-U+FDFF, U+FE70-U+FEFF)
+        farsi_chars = sum(1 for c in text if '\u0600' <= c <= '\u06FF' or '\uFB50' <= c <= '\uFDFF')
+        return farsi_chars >= len(text) * 0.15
+    
+    return True  # Don't filter English
 
 
 def fetch_reddit_posts(days=7):
@@ -582,18 +617,26 @@ def fetch_iranwire_rss():
 
 
 def fetch_hrana_rss():
-    """Fetch articles from HRANA RSS feed - COMPLETE PARSER (was truncated in app.py)"""
+    """Fetch articles from HRANA RSS feed - COMPLETE PARSER"""
     articles = []
-    feed_url = 'https://en-hrana.org/feed/'
+    feed_urls = [
+        'https://www.en-hrana.org/feed/',
+        'https://en-hrana.org/feed/',
+        'https://en.hrana.org/feed/',
+    ]
 
-    try:
-        print("[Iran] HRANA: Fetching RSS...")
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-            'Accept': 'application/rss+xml, application/xml, text/xml, */*',
-            'Accept-Language': 'en-US,en;q=0.9'
-        }
-        response = requests.get(feed_url, headers=headers, timeout=20)
+    for feed_url in feed_urls:
+        try:
+            print(f"[Iran] HRANA: Trying {feed_url}...")
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                'Accept-Language': 'en-US,en;q=0.9',
+                'Accept-Encoding': 'gzip, deflate, br',
+                'Connection': 'keep-alive',
+                'Cache-Control': 'no-cache',
+            }
+            response = requests.get(feed_url, headers=headers, timeout=20)
 
         if response.status_code != 200:
             print(f"[Iran] HRANA: HTTP {response.status_code}")
@@ -633,11 +676,15 @@ def fetch_hrana_rss():
         return articles
 
     except requests.Timeout:
-        print("[Iran] HRANA: Timeout")
-        return []
-    except Exception as e:
-        print(f"[Iran] HRANA error: {str(e)[:100]}")
-        return []
+            print(f"[Iran] HRANA: Timeout on {feed_url}")
+            continue
+        except Exception as e:
+            print(f"[Iran] HRANA error on {feed_url}: {str(e)[:100]}")
+            continue
+
+    if not articles:
+        print("[Iran] HRANA: All feed URLs failed")
+    return articles
 
 
 # ============================================
