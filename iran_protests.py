@@ -29,7 +29,7 @@ from flask import jsonify, request
 # ============================================
 NEWSAPI_KEY = os.environ.get('NEWSAPI_KEY')
 ALPHA_VANTAGE_KEY = os.environ.get('ALPHA_VANTAGE_KEY', 'NUW8NKIRMXNMRTD9')
-GDELT_BASE_URL = "http://api.gdeltproject.org/api/v2/doc/doc"
+GDELT_BASE_URL = "https://api.gdeltproject.org/api/v2/doc/doc"
 
 # Upstash Redis (persistent cache across Render cold starts)
 UPSTASH_REDIS_URL = os.environ.get('UPSTASH_REDIS_URL')
