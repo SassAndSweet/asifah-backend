@@ -1,6 +1,6 @@
 """
-Asifah Analytics — Military Asset & Deployment Tracker v2.3.0
-February 22, 2026
+Asifah Analytics — Military Asset & Deployment Tracker v2.4.0
+February 25, 2026
 
 Tracks military asset movements across multiple actors and regions.
 Feeds deployment scores into existing threat probability calculations.
@@ -46,6 +46,11 @@ OUTPUTS:
   - Standalone page data for military.html
 
 CHANGELOG:
+  v2.4.0 - Upstash Redis persistent cache:
+           * Replaced /tmp file cache with Upstash Redis
+           * Cache now survives Render deploys and cold starts
+           * Same pattern as Iran and Lebanon modules
+           * /tmp file used as local fallback only
   v2.3.0 - Multilingual keyword matching + new actors:
            * Added Greenland and Poland as Tier 3 European actors
            * Added multilingual keywords to Russia, Ukraine, Iran, Israel
@@ -111,7 +116,11 @@ import threading
 GDELT_BASE_URL = "https://api.gdeltproject.org/api/v2/doc/doc"
 NEWSAPI_KEY = os.environ.get('NEWSAPI_KEY')
 
-# Cache TTL (4 hours — deployments don't change by the minute)
+# Upstash Redis (persistent cache across Render cold starts)
+UPSTASH_REDIS_URL = os.environ.get('UPSTASH_REDIS_URL')
+UPSTASH_REDIS_TOKEN = os.environ.get('UPSTASH_REDIS_TOKEN')
+
+# Local fallback cache (wiped on deploy, used when Redis unavailable)
 MILITARY_CACHE_FILE = '/tmp/military_tracker_cache.json'
 MILITARY_CACHE_TTL_HOURS = 4
 
@@ -1207,32 +1216,78 @@ REDDIT_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.3
 
 
 # ========================================
-# CACHE MANAGEMENT
+# UPSTASH REDIS CACHE (v2.4.0)
+# Persistent across Render deploys/cold starts
+# Same pattern as Iran and Lebanon modules
 # ========================================
 
+MILITARY_REDIS_KEY = 'military_tracker_cache'
+
+
 def load_military_cache():
-    """Load cached military tracker data"""
+    """Load cached military tracker data from Upstash Redis, fallback to /tmp"""
+    # Try Upstash Redis first
+    if UPSTASH_REDIS_URL and UPSTASH_REDIS_TOKEN:
+        try:
+            resp = requests.get(
+                f"{UPSTASH_REDIS_URL}/get/{MILITARY_REDIS_KEY}",
+                headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"},
+                timeout=5
+            )
+            data = resp.json()
+            if data.get("result"):
+                cache = json.loads(data["result"])
+                print(f"[Military Cache] Loaded from Redis (cached_at: {cache.get('cached_at', 'unknown')})")
+                return cache
+            print("[Military Cache] No existing cache in Redis")
+        except Exception as e:
+            print(f"[Military Cache] Redis load error: {e}")
+
+    # Fallback to /tmp file
     try:
         from pathlib import Path
         if Path(MILITARY_CACHE_FILE).exists():
             with open(MILITARY_CACHE_FILE, 'r') as f:
                 cache = json.load(f)
+                print("[Military Cache] Loaded from /tmp fallback")
                 return cache
-        return {}
     except Exception as e:
-        print(f"[Military Cache] Error loading: {e}")
-        return {}
+        print(f"[Military Cache] /tmp load error: {e}")
+
+    return {}
 
 
 def save_military_cache(data):
-    """Save military tracker data to cache"""
+    """Save military tracker data to Upstash Redis + /tmp fallback"""
+    data['cached_at'] = datetime.now(timezone.utc).isoformat()
+
+    # Save to Upstash Redis
+    if UPSTASH_REDIS_URL and UPSTASH_REDIS_TOKEN:
+        try:
+            payload = json.dumps(data, default=str)
+            resp = requests.post(
+                f"{UPSTASH_REDIS_URL}/set/{MILITARY_REDIS_KEY}",
+                headers={
+                    "Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}",
+                    "Content-Type": "application/json"
+                },
+                json={"value": payload},
+                timeout=10
+            )
+            if resp.status_code == 200:
+                print("[Military Cache] ✅ Saved to Redis")
+            else:
+                print(f"[Military Cache] Redis save HTTP {resp.status_code}")
+        except Exception as e:
+            print(f"[Military Cache] Redis save error: {e}")
+
+    # Always save /tmp fallback too
     try:
-        data['cached_at'] = datetime.now(timezone.utc).isoformat()
         with open(MILITARY_CACHE_FILE, 'w') as f:
-            json.dump(data, f, indent=2)
-        print(f"[Military Cache] Saved cache")
+            json.dump(data, f, indent=2, default=str)
+        print("[Military Cache] Saved /tmp fallback")
     except Exception as e:
-        print(f"[Military Cache] Error saving: {e}")
+        print(f"[Military Cache] /tmp save error: {e}")
 
 
 def is_military_cache_fresh():
@@ -1243,7 +1298,11 @@ def is_military_cache_fresh():
             return False
         cached_at = datetime.fromisoformat(cache['cached_at'])
         age = datetime.now(timezone.utc) - cached_at
-        return age.total_seconds() < (MILITARY_CACHE_TTL_HOURS * 3600)
+        is_fresh = age.total_seconds() < (MILITARY_CACHE_TTL_HOURS * 3600)
+        if is_fresh:
+            age_min = age.total_seconds() / 60
+            print(f"[Military Cache] Fresh ({age_min:.0f}min old)")
+        return is_fresh
     except:
         return False
 
@@ -1308,7 +1367,7 @@ def _build_empty_skeleton():
         'cached': False,
         'scan_in_progress': True,
         'message': 'Initial scan in progress. Data will appear shortly.',
-        'version': '2.3.0'
+        'version': '2.4.0'
     }
 
 
@@ -1535,7 +1594,6 @@ def fetch_all_gdelt_military(days=7):
     ]
 
     russian_queries = [
-        # Original queries
         'военная операция украина',
         'черноморский флот',
         'вооруженные силы учения',
@@ -1544,7 +1602,6 @@ def fetch_all_gdelt_military(days=7):
         'северный флот арктика',
         'военно-морской флот',
         'ПВО развертывание',
-        # v2.3.0 — expanded war-specific terms
         'наступление фронт донецк',
         'наступление фронт запорожье',
         'артиллерия обстрел украина',
@@ -1593,13 +1650,11 @@ def fetch_all_gdelt_military(days=7):
     ]
 
     ukrainian_queries = [
-        # Original queries
         'збройні сили україни',
         'фронт наступ',
         'мобілізація військова',
         'протиповітряна оборона',
         'зброя постачання',
-        # v2.3.0 — expanded war-specific terms
         'ракетний удар росія',
         'дрон атака',
         'артилерія обстріл',
@@ -1628,7 +1683,6 @@ def fetch_all_gdelt_military(days=7):
         '中国 军舰',
     ]
 
-    # v2.3.0 — New language blocks
     polish_queries = [
         'wojsko polskie ćwiczenia',
         'siły zbrojne modernizacja',
@@ -1735,7 +1789,6 @@ def fetch_all_newsapi_military(days=7):
         'military families departure Bahrain',
         'Ukraine military',
         'Russia offensive Ukraine',
-        # v2.3.0 additions
         'Poland military NATO',
         'drone Poland airspace',
         'Greenland sovereignty Arctic',
@@ -2200,7 +2253,7 @@ def _run_full_scan(days=7):
         },
         'last_updated': datetime.now(timezone.utc).isoformat(),
         'cached': False,
-        'version': '2.3.0'
+        'version': '2.4.0'
     }
 
     save_military_cache(result)
