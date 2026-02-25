@@ -657,8 +657,31 @@ def fetch_hrana_rss():
                 continue
 
             root = ET.fromstring(response.content)
-            # ... parsing logic ...
+            items = root.findall('.//item')
+            for item in items[:15]:
+                title_elem = item.find('title')
+                link_elem = item.find('link')
+                pubDate_elem = item.find('pubDate')
+                description_elem = item.find('description')
+                content_elem = item.find('{http://purl.org/rss/1.0/modules/content/}encoded')
 
+                if title_elem is not None and link_elem is not None:
+                    pub_date = pubDate_elem.text if pubDate_elem is not None else datetime.now(timezone.utc).isoformat()
+                    description = ''
+                    if description_elem is not None and description_elem.text:
+                        description = description_elem.text[:500]
+                    elif content_elem is not None and content_elem.text:
+                        description = content_elem.text[:500]
+
+                    articles.append({
+                        'title': title_elem.text or '',
+                        'description': description,
+                        'url': link_elem.text or '',
+                        'publishedAt': pub_date,
+                        'source': {'name': 'HRANA'},
+                        'content': description,
+                        'language': 'en'
+                    })
             print(f"[Iran] HRANA: ✓ {len(articles)} articles")
             if articles:
                 return articles  # Got results, stop trying other URLs
