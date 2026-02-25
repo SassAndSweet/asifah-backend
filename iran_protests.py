@@ -628,7 +628,14 @@ def fetch_hrana_rss():
     for feed_url in feed_urls:
         try:
             print(f"[Iran] HRANA: Trying {feed_url}...")
-            headers = { ... }
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                'Accept-Language': 'en-US,en;q=0.9',
+                'Accept-Encoding': 'gzip, deflate, br',
+                'Connection': 'keep-alive',
+                'Cache-Control': 'no-cache',
+            }
             response = requests.get(feed_url, headers=headers, timeout=20)
 
             if response.status_code != 200:
