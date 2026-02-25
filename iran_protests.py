@@ -452,10 +452,23 @@ def fetch_gdelt_articles(query, days=7, language='eng'):
             'sourcelang': language
         }
 
-        response = requests.get(GDELT_BASE_URL, params=params, timeout=30)
-        if response.status_code == 200:
-            data = response.json()
-            articles = data.get('articles', [])
+        response = None
+        for attempt in range(2):
+            try:
+                response = requests.get(GDELT_BASE_URL, params=params, timeout=30)
+                if response.status_code == 200:
+                    break
+            except requests.Timeout:
+                if attempt == 0:
+                    print(f"[Iran] GDELT {language}: Retry after timeout...")
+                    time.sleep(2)
+                    continue
+                raise
+        if not response or response.status_code != 200:
+            print(f"[Iran] GDELT {language}: Failed after retries")
+            return []
+        data = response.json()
+        articles = data.get('articles', [])
 
             lang_code = {'eng': 'en', 'ara': 'ar', 'heb': 'he', 'fas': 'fa'}.get(language, 'en')
             standardized = []
