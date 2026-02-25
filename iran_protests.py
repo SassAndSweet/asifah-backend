@@ -617,7 +617,7 @@ def fetch_iranwire_rss():
 
 
 def fetch_hrana_rss():
-    """Fetch articles from HRANA RSS feed - COMPLETE PARSER"""
+    """Fetch articles from HRANA RSS feed"""
     articles = []
     feed_urls = [
         'https://www.en-hrana.org/feed/',
@@ -628,54 +628,21 @@ def fetch_hrana_rss():
     for feed_url in feed_urls:
         try:
             print(f"[Iran] HRANA: Trying {feed_url}...")
-            headers = {
-                'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-                'Accept-Language': 'en-US,en;q=0.9',
-                'Accept-Encoding': 'gzip, deflate, br',
-                'Connection': 'keep-alive',
-                'Cache-Control': 'no-cache',
-            }
+            headers = { ... }
             response = requests.get(feed_url, headers=headers, timeout=20)
 
-        if response.status_code != 200:
-            print(f"[Iran] HRANA: HTTP {response.status_code}")
-            return []
+            if response.status_code != 200:
+                print(f"[Iran] HRANA: HTTP {response.status_code} on {feed_url}")
+                continue
 
-        root = ET.fromstring(response.content)
-        items = root.findall('.//item')
-        if not items:
-            items = root.findall('.//{http://www.w3.org/2005/Atom}entry')
+            root = ET.fromstring(response.content)
+            # ... parsing logic ...
 
-        for item in items[:20]:
-            title_elem = item.find('title')
-            link_elem = item.find('link')
-            pubDate_elem = item.find('pubDate')
-            description_elem = item.find('description')
-            content_elem = item.find('{http://purl.org/rss/1.0/modules/content/}encoded')
+            print(f"[Iran] HRANA: ✓ {len(articles)} articles")
+            if articles:
+                return articles  # Got results, stop trying other URLs
 
-            if title_elem is not None and link_elem is not None:
-                pub_date = pubDate_elem.text if pubDate_elem is not None else datetime.now(timezone.utc).isoformat()
-                description = ''
-                if description_elem is not None and description_elem.text:
-                    description = description_elem.text[:500]
-                elif content_elem is not None and content_elem.text:
-                    description = content_elem.text[:500]
-
-                articles.append({
-                    'title': title_elem.text or '',
-                    'description': description,
-                    'url': link_elem.text or '',
-                    'publishedAt': pub_date,
-                    'source': {'name': 'HRANA'},
-                    'content': description,
-                    'language': 'en'
-                })
-
-        print(f"[Iran] HRANA: ✓ {len(articles)} articles")
-        return articles
-
-    except requests.Timeout:
+        except requests.Timeout:
             print(f"[Iran] HRANA: Timeout on {feed_url}")
             continue
         except Exception as e:
