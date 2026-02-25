@@ -384,7 +384,7 @@ CORS(app, resources={r"/*": {"origins": ["https://asifahanalytics.com", "https:/
 register_military_endpoints(app)
 
 # Iran Stability Module (consolidated from iran_protests.py)
-from iran_stability import register_iran_routes
+from iran_protests import register_iran_routes
 register_iran_routes(app)
 
 # ========================================
