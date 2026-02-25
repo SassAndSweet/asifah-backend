@@ -108,7 +108,7 @@ import threading
 # CONFIGURATION
 # ========================================
 
-GDELT_BASE_URL = "http://api.gdeltproject.org/api/v2/doc/doc"
+GDELT_BASE_URL = "https://api.gdeltproject.org/api/v2/doc/doc"
 NEWSAPI_KEY = os.environ.get('NEWSAPI_KEY')
 
 # Cache TTL (4 hours — deployments don't change by the minute)
@@ -1402,8 +1402,18 @@ def fetch_gdelt_military(query, days=7, language='eng'):
             'format': 'json',
             'sourcelang': language
         }
-        response = requests.get(GDELT_BASE_URL, params=params, timeout=15)
-        if response.status_code != 200:
+        response = None
+        for attempt in range(2):
+            try:
+                response = requests.get(GDELT_BASE_URL, params=params, timeout=30)
+                if response.status_code == 200:
+                    break
+            except requests.Timeout:
+                if attempt == 0:
+                    time.sleep(2)
+                    continue
+                raise
+        if not response or response.status_code != 200:
             return []
 
         data = response.json()
