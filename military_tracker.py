@@ -195,7 +195,7 @@ MILITARY_ACTORS = {
             'us military assets middle east', 'military assets flock'
         ],
         'rss_feeds': [
-            'CENTCOM': 'https://news.google.com/rss/search?q=site:centcom.mil&hl=en&gl=US&ceid=US:en',
+            'https://news.google.com/rss/search?q=site:centcom.mil&hl=en&gl=US&ceid=US:en',
             'https://www.defense.gov/DesktopModules/ArticleCS/RSS.ashx?ContentType=1&Site=945',
         ]
     },
@@ -657,7 +657,7 @@ MILITARY_ACTORS = {
             'nato ukraine', 'nato aid ukraine', 'ramstein format'
         ],
         'rss_feeds': [
-            'NATO News': 'https://news.google.com/rss/search?q=site:nato.int+news&hl=en&gl=US&ceid=US:en',
+            'https://news.google.com/rss/search?q=site:nato.int+news&hl=en&gl=US&ceid=US:en',
         ]
     }
 }
@@ -1179,13 +1179,13 @@ DEFENSE_RSS_FEEDS = {
     'Breaking Defense': 'https://breakingdefense.com/feed/',
     'Defense One': 'https://www.defenseone.com/rss/all/',
     'Naval News': 'https://www.navalnews.com/feed/',
-    'Stars and Stripes': 'https://news.google.com/rss/search?q=site:stripes.com+military&hl=en&gl=US&ceid=US:en'
+    'Stars and Stripes': 'https://news.google.com/rss/search?q=site:stripes.com+military&hl=en&gl=US&ceid=US:en',
     'Military Times': 'https://www.militarytimes.com/arc/outboundfeeds/rss/?outputType=xml',
-    'CENTCOM': 'https://news.google.com/rss/search?q=site:centcom.mil&hl=en&gl=US&ceid=US:en'
-    'NATO News': 'https://news.google.com/rss/search?q=site:nato.int+news&hl=en&gl=US&ceid=US:en'
+    'CENTCOM': 'https://news.google.com/rss/search?q=site:centcom.mil&hl=en&gl=US&ceid=US:en',
+    'NATO News': 'https://news.google.com/rss/search?q=site:nato.int+news&hl=en&gl=US&ceid=US:en',
     'DVIDS': 'https://www.dvidshub.net/rss/news',
     'Jerusalem Post': 'https://www.jpost.com/rss/rssfeedsmilitary.aspx',
-    'Times of Israel': 'https://news.google.com/rss/search?q=site:timesofisrael.com+military&hl=en&gl=US&ceid=US:en'
+    'Times of Israel': 'https://news.google.com/rss/search?q=site:timesofisrael.com+military&hl=en&gl=US&ceid=US:en',
     'Ynet News': 'https://www.ynetnews.com/Integration/StoryRss3254.xml',
     'Israel Hayom': 'https://www.israelhayom.com/feed/',
     'Al Jazeera English': 'https://www.aljazeera.com/xml/rss/all.xml',
@@ -1198,12 +1198,12 @@ DEFENSE_RSS_FEEDS = {
     'Kyiv Independent': 'https://kyivindependent.com/feed/',
     'Ukrinform': 'https://www.ukrinform.net/rss/block-lastnews',
     'Iran International': 'https://www.iranintl.com/en/feed',
-    'Tasnim English': 'https://news.google.com/rss/search?q=site:tasnimnews.com+military&hl=en&gl=US&ceid=US:en'
+    'Tasnim English': 'https://news.google.com/rss/search?q=site:tasnimnews.com+military&hl=en&gl=US&ceid=US:en',
     # v2.3.0 additions — Poland & Arctic
     'Defence24 Poland': 'https://defence24.com/rss',
     'Polish Press Agency': 'https://www.pap.pl/en/rss.xml',
-    'Arctic Today': 'https://news.google.com/rss/search?q=site:arctictoday.com&hl=en&gl=US&ceid=US:en'
-    'High North News': 'https://news.google.com/rss/search?q=site:highnorthnews.com+arctic&hl=en&gl=US&ceid=US:en'
+    'Arctic Today': 'https://news.google.com/rss/search?q=site:arctictoday.com&hl=en&gl=US&ceid=US:en',
+    'High North News': 'https://news.google.com/rss/search?q=site:highnorthnews.com+arctic&hl=en&gl=US&ceid=US:en',
 }
 
 REDDIT_MILITARY_SUBREDDITS = [
