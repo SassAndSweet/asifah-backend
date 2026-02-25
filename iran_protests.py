@@ -452,7 +452,7 @@ def fetch_gdelt_articles(query, days=7, language='eng'):
             'sourcelang': language
         }
 
-        response = requests.get(GDELT_BASE_URL, params=params, timeout=25)
+        response = requests.get(GDELT_BASE_URL, params=params, timeout=30)
         if response.status_code == 200:
             data = response.json()
             articles = data.get('articles', [])
