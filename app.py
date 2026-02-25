@@ -380,7 +380,7 @@ def start_background_refresh():
 # ========================================
 
 app = Flask(__name__)
-CORS(app, resources={r"/*": {"origins": ["https://asifahanalytics.com", "https://www.asifahanalytics.com", "http://localhost:*"], "methods": ["GET", "POST", "OPTIONS"], "allow_headers": ["Content-Type"]}})
+CORS(app, resources={r"/*": {"origins": "*"}})
 register_military_endpoints(app)
 
 # Iran Stability Module (consolidated from iran_protests.py)
