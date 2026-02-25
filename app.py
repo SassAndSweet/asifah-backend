@@ -417,7 +417,7 @@ TRAVEL_ADVISORY_CODES = {
     'hezbollah': ['LE'],   # Lebanon
     'iran': ['IR'],
     'houthis': ['YM'],     # Yemen
-    'israel': ['IS'],
+    'israel': ['IL'],
     'syria': ['SY'],
     'jordan': ['JO'],
 }
