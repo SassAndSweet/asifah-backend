@@ -18,7 +18,6 @@ import requests
 import json
 import os
 import re
-import math
 import time
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone, timedelta
@@ -133,15 +132,6 @@ def get_exchange_rate():
     Iran is under sanctions so official rates differ wildly from black market.
     Black market rate is the real economic indicator.
     """
-    # Try bonbast.com API-like scrape via known endpoints
-    sources = [
-        {
-            "name": "bonbast",
-            "url": "https://bonbast.com/json",
-            "parser": "bonbast"
-        }
-    ]
-
     # Fallback: use hardcoded recent data with note
     # Black market rate as of Feb 24, 2026: ~1,641,000 IRR/USD
     # Up ~60% in 6 months (from ~1,020,000 in Aug 2025)
@@ -491,7 +481,6 @@ def fetch_gdelt_articles(query, days=7, language='eng'):
             })
 
         # Filter out misclassified articles (GDELT sourcelang is unreliable)
-        lang_code = {'eng': 'en', 'ara': 'ar', 'heb': 'he', 'fas': 'fa'}.get(language, 'en')
         before_count = len(standardized)
         standardized = [a for a in standardized if validate_article_language(a, lang_code)]
         filtered = before_count - len(standardized)
@@ -925,7 +914,7 @@ def extract_casualty_data(articles):
                             except (ValueError, IndexError):
                                 pass
 
-                    # Apply sanity cap — skip if over threshold
+                    # Apply per-match sanity cap — skip if over threshold
                     cap = CASUALTY_CAPS.get(category, 5000)
                     if best_num > cap:
                         print(f"[Iran] Casualty cap hit: {category}={best_num} from '{source}' "
@@ -943,6 +932,17 @@ def extract_casualty_data(articles):
                             'url': url,
                             'sentence': sentence[:200]
                         })
+
+    # --- Post-loop sanity caps: reset to 0 rather than report false data ---
+    if casualties['deaths'] > 500:
+        print(f"[Iran] Casualty sanity cap: deaths {casualties['deaths']} -> reset, likely false positive")
+        casualties['deaths'] = 0
+    if casualties['injuries'] > 2000:
+        print(f"[Iran] Casualty sanity cap: injuries {casualties['injuries']} -> reset, likely false positive")
+        casualties['injuries'] = 0
+    if casualties['arrests'] > 5000:
+        print(f"[Iran] Casualty sanity cap: arrests {casualties['arrests']} -> reset, likely false positive")
+        casualties['arrests'] = 0
 
     casualties['sources'] = list(casualties['sources'])
     print(f"[Iran] Casualties: deaths={casualties['deaths']}, "
