@@ -25,7 +25,7 @@ import re
 # RSS FEEDS - LEADERSHIP & NEWS
 # ========================================
 LEADERSHIP_RSS_FEEDS = {
-    'memri': 'https://www.memri.org/rss/memri_tv.xml',
+    'memri': 'https://news.google.com/rss/search?q=site:memri.org&hl=en&gl=US&ceid=US:en',
     'al_manar_en': 'https://english.almanar.com.lb/rss',
     'al_manar_ar': 'https://almanar.com.lb/rss',
     'iran_wire_en': 'https://iranwire.com/en/feed/',
@@ -33,16 +33,16 @@ LEADERSHIP_RSS_FEEDS = {
 }
 
 ISRAELI_RSS_FEEDS = {
-    'ynet': 'https://www.ynetnews.com/rss/rss.xml',
-    'times_of_israel': 'https://www.timesofisrael.com/feed/',
+    'ynet': 'https://www.ynetnews.com/Integration/StoryRss3254.xml',
+    'times_of_israel': 'https://news.google.com/rss/search?q=site:timesofisrael.com&hl=en&gl=US&ceid=US:en',
     'jpost': 'https://www.jpost.com/rss/rssfeedsheadlines.aspx',
-    'i24news': 'https://www.i24news.tv/en/rss',
-    'haaretz': 'https://www.haaretz.com/cmlink/1.628810',
+    'i24news': 'https://news.google.com/rss/search?q=site:i24news.tv&hl=en&gl=US&ceid=US:en',
+    'haaretz': 'https://www.haaretz.com/srv/haaretz-latest-news',
 }
 
 # NEW: Regional Arab News Sources
 REGIONAL_ARAB_RSS_FEEDS = {
-    'arab_news': 'https://www.arabnews.com/middleeast/rss.xml',  # Middle East section for max relevance
+    'arab_news': 'https://news.google.com/rss/search?q=site:arabnews.com+middle+east&hl=en&gl=US&ceid=US:en',
 }
 
 # Combine all feeds
