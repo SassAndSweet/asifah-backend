@@ -1,5 +1,5 @@
 """
-Asifah Analytics — Military Asset & Deployment Tracker v2.4.0
+Asifah Analytics — Military Asset & Deployment Tracker v2.5.0
 February 25, 2026
 
 Tracks military asset movements across multiple actors and regions.
@@ -9,8 +9,9 @@ ACTORS TRACKED:
   Tier 1 (Direct strike correlation):
     - US / CENTCOM
     - Israel / IDF
-  Tier 2 (Adversary / Competitor):
+  Tier 2 (Adversary / Active Theatre):
     - Iran / IRGC
+    - Iraq (Active theatre — IRI militia attacks, ISIS, US withdrawal)
     - Russia
     - China / PLAN
   Tier 3 (Regional — Middle East):
@@ -46,6 +47,21 @@ OUTPUTS:
   - Standalone page data for military.html
 
 CHANGELOG:
+  v2.5.0 - Iraq actor integration:
+           * Added Iraq as Tier 2 active theatre actor (weight 0.7)
+           * Comprehensive keyword coverage: IRI militias (Kata'ib Hezbollah,
+             Harakat al-Nujaba, Asa'ib Ahl al-Haq, Islamic Resistance in Iraq),
+             PMF/Hashd al-Shaabi, ISIS/ISIL Iraq, US withdrawal, Iraqi airspace
+           * Added Arabic keywords for Iraqi militia and military coverage
+           * Added Iraq-specific location multipliers: Al Asad (2.5x),
+             Ain al-Assad, Erbil (2.0x), Taji, Balad, Baghdad Green Zone,
+             Camp Victory, Iraqi airspace corridor
+           * Updated ASSET_TARGET_MAPPING: existing Iraq bases now feed
+             'iraq' target; added Taji, Balad, Baghdad Green Zone
+           * Added Iraq RSS feeds: Iraqi News Agency, Rudaw, Kurdistan24
+           * Added Iraq GDELT queries in English and Arabic
+           * Added Iraq NewsAPI query
+           * Added 'iraq' to REGIONAL_THEATRES middle_east actors
   v2.4.0 - Upstash Redis persistent cache:
            * Replaced /tmp file cache with Upstash Redis
            * Cache now survives Render deploys and cold starts
@@ -151,8 +167,8 @@ REGIONAL_THEATRES = {
         'label': 'Middle East & North Africa',
         'icon': '🕌',
         'order': 3,
-        'actors': ['us', 'israel', 'iran', 'egypt', 'jordan', 'kuwait', 'qatar', 'saudi_arabia', 'uae'],
-        'description': 'CENTCOM area — Persian Gulf, Red Sea, Eastern Med, Levant'
+        'actors': ['us', 'israel', 'iran', 'iraq', 'egypt', 'jordan', 'kuwait', 'qatar', 'saudi_arabia', 'uae'],
+        'description': 'CENTCOM area — Persian Gulf, Red Sea, Eastern Med, Levant, Iraq theatre'
     }
 }
 
@@ -231,7 +247,7 @@ MILITARY_ACTORS = {
     },
 
     # ------------------------------------------------
-    # TIER 2 — Adversary / Competitor
+    # TIER 2 — Adversary / Active Theatre
     # ------------------------------------------------
     'iran': {
         'name': 'Iran',
@@ -268,6 +284,94 @@ MILITARY_ACTORS = {
             'القوات البحرية الإيرانية', 'مضيق هرمز'
         ],
         'rss_feeds': []
+    },
+
+    # ------------------------------------------------
+    # TIER 2 — Iraq (Active theatre: IRI militias, ISIS, US withdrawal)
+    # v2.5.0
+    # ------------------------------------------------
+    'iraq': {
+        'name': 'Iraq',
+        'flag': '🇮🇶',
+        'tier': 2,
+        'theatre': 'middle_east',
+        'weight': 0.7,
+        'feeds_into': ['strike_probability', 'regional_tension'],
+        'keywords': [
+            # --- IRI / Iran-aligned militias (primary threat) ---
+            'islamic resistance in iraq', 'islamic resistance iraq',
+            'iri attack', 'iri drone', 'iri rocket',
+            'kata\'ib hezbollah', 'kataib hezbollah', 'kata\'ib hizballah',
+            'harakat al-nujaba', 'harakat al nujaba', 'nujaba movement',
+            'asa\'ib ahl al-haq', 'asaib ahl al haq', 'aah militia',
+            'kata\'ib sayyid al-shuhada', 'kataib sayyid',
+            'badr organization', 'badr corps', 'badr militia',
+            'iran-backed militia iraq', 'iran backed militia iraq',
+            'iran-aligned militia iraq', 'iran aligned militia',
+            'iran proxy iraq', 'iranian proxy attack iraq',
+            'militia attack us base iraq', 'militia drone attack iraq',
+            'militia rocket attack iraq', 'one-way attack drone iraq',
+            'attack on coalition forces iraq',
+            # --- PMF / Hashd al-Shaabi ---
+            'popular mobilization forces', 'pmf iraq',
+            'hashd al-shaabi', 'hashd al shaabi', 'al-hashd',
+            'pmf militia', 'pmf checkpoint', 'pmf deployment',
+            'popular mobilization', 'hashd forces',
+            # --- ISIS / ISIL in Iraq ---
+            'isis iraq', 'isil iraq', 'daesh iraq',
+            'isis attack iraq', 'isis ambush iraq', 'isis resurgence iraq',
+            'isis prison iraq', 'isis prisoners iraq', 'isis fighters iraq',
+            'isis sleeper cell iraq', 'islamic state iraq',
+            'isis ied iraq', 'isis suicide iraq',
+            'counter-isis iraq', 'counter isis operation',
+            'operation inherent resolve',
+            # --- US forces in Iraq ---
+            'us forces iraq', 'us troops iraq', 'coalition forces iraq',
+            'us withdrawal iraq', 'us pullout iraq', 'us drawdown iraq',
+            'us base iraq', 'american forces iraq',
+            'operation inherent resolve', 'cjtf-oir',
+            'us military iraq withdrawal', 'coalition withdrawal iraq',
+            'us advisors iraq', 'us advisory mission iraq',
+            # --- Iraqi military / government ---
+            'iraqi military', 'iraqi armed forces', 'iraqi army',
+            'iraqi air force', 'iraqi navy',
+            'iraqi security forces', 'iraqi federal police',
+            'iraqi counter-terrorism', 'icts iraq', 'isof iraq',
+            'iraqi special operations',
+            'iraq defense minister', 'iraq security',
+            'maliki iraq', 'nouri al-maliki',
+            # --- Key locations ---
+            'al asad airbase', 'ain al-asad', 'ain al asad',
+            'erbil base', 'erbil attack', 'erbil rocket',
+            'camp victory iraq', 'taji base', 'balad air base',
+            'baghdad green zone', 'green zone attack',
+            'baghdad international airport', 'biap',
+            'al-tanf iraq', 'qaim border crossing',
+            # --- Iraqi airspace (critical for Iran strike corridor) ---
+            'iraqi airspace', 'iraq airspace corridor',
+            'iraq air corridor', 'overfly iraq',
+            'iraq flight restriction', 'iraq no-fly',
+            # --- Sectarian / political instability ---
+            'iraq sectarian', 'iraq sectarian violence',
+            'iraq political crisis', 'iraq government formation',
+            'iraq parliament', 'kurdistan iraq',
+            'kurdish peshmerga', 'peshmerga',
+            'krg iraq', 'erbil sulaymaniyah',
+            # Arabic keywords (match GDELT/Arabic coverage)
+            'المقاومة الإسلامية في العراق',
+            'كتائب حزب الله', 'حركة النجباء',
+            'عصائب أهل الحق', 'الحشد الشعبي',
+            'القوات المسلحة العراقية', 'الجيش العراقي',
+            'داعش العراق', 'قوات التحالف العراق',
+            'الانسحاب الأمريكي العراق',
+            'قاعدة عين الأسد', 'أربيل هجوم',
+            'المنطقة الخضراء', 'الأجواء العراقية',
+        ],
+        'rss_feeds': [
+            'https://news.google.com/rss/search?q=iraq+military+OR+militia+OR+ISIS&hl=en&gl=US&ceid=US:en',
+            'https://news.google.com/rss/search?q=site:rudaw.net+military&hl=en&gl=US&ceid=US:en',
+            'https://news.google.com/rss/search?q=site:kurdistan24.net+military&hl=en&gl=US&ceid=US:en',
+        ]
     },
 
     'china': {
@@ -949,6 +1053,26 @@ LOCATION_MULTIPLIERS = {
     'suwalki gap': 2.5,
     'kaliningrad': 2.0,
     'lask air base': 1.5,
+    # Iraq-specific hotspots (v2.5.0)
+    'al asad': 2.5,
+    'ain al-asad': 2.5,
+    'ain al asad': 2.5,
+    'erbil': 2.0,
+    'taji': 2.0,
+    'balad air base': 2.0,
+    'baghdad green zone': 2.5,
+    'green zone': 2.0,
+    'camp victory': 2.0,
+    'iraqi airspace': 2.5,
+    'iraq airspace': 2.5,
+    'anbar province': 2.0,
+    'qaim': 2.0,
+    'sinjar': 1.5,
+    'kirkuk': 1.5,
+    'mosul': 1.5,
+    'basra': 1.5,
+    'sulaymaniyah': 1.5,
+    'diyala': 2.0,
 }
 
 
@@ -1010,18 +1134,44 @@ ASSET_TARGET_MAPPING = {
         },
         'Al Tanf': {
             'location': 'Syria',
-            'targets': ['syria', 'iran'],
+            'targets': ['syria', 'iran', 'iraq'],
             'description': 'US garrison. Syria-Iraq border control.'
         },
         'Al Asad Air Base': {
-            'location': 'Iraq',
-            'targets': ['syria', 'iran'],
-            'description': 'Major US base in western Iraq.'
+            'location': 'Iraq (Anbar)',
+            'targets': ['iraq', 'syria', 'iran'],
+            'description': 'Major US base in western Iraq. Frequent IRI militia target.'
         },
         'Erbil': {
             'location': 'Iraq (Kurdistan)',
-            'targets': ['syria', 'iran'],
-            'description': 'US forces in northern Iraq.'
+            'targets': ['iraq', 'syria', 'iran'],
+            'description': 'US forces in northern Iraq / KRG. IRI militia target.'
+        },
+        # v2.5.0 — new Iraq base entries
+        'Taji': {
+            'location': 'Iraq (Baghdad)',
+            'targets': ['iraq'],
+            'description': 'Iraqi military base north of Baghdad. Former Coalition hub.'
+        },
+        'Balad Air Base': {
+            'location': 'Iraq (Saladin)',
+            'targets': ['iraq'],
+            'description': 'Major Iraqi Air Force base. Former US Joint Base Balad.'
+        },
+        'Baghdad Green Zone': {
+            'location': 'Iraq (Baghdad)',
+            'targets': ['iraq'],
+            'description': 'International Zone. US Embassy compound. IRI militia rocket target.'
+        },
+        'Camp Victory': {
+            'location': 'Iraq (Baghdad)',
+            'targets': ['iraq'],
+            'description': 'Former US HQ complex near Baghdad airport.'
+        },
+        'Qaim Border Crossing': {
+            'location': 'Iraq (Anbar)',
+            'targets': ['iraq', 'syria'],
+            'description': 'Iraq-Syria border. Key smuggling / militia transit corridor.'
         },
         'Muwaffaq Salti (Tower 22)': {
             'location': 'Jordan',
@@ -1204,6 +1354,10 @@ DEFENSE_RSS_FEEDS = {
     'Polish Press Agency': 'https://www.pap.pl/en/rss.xml',
     'Arctic Today': 'https://news.google.com/rss/search?q=site:arctictoday.com&hl=en&gl=US&ceid=US:en',
     'High North News': 'https://news.google.com/rss/search?q=site:highnorthnews.com+arctic&hl=en&gl=US&ceid=US:en',
+    # v2.5.0 additions — Iraq
+    'Iraq News (Google)': 'https://news.google.com/rss/search?q=iraq+military+OR+militia+OR+ISIS&hl=en&gl=US&ceid=US:en',
+    'Rudaw English': 'https://news.google.com/rss/search?q=site:rudaw.net+military&hl=en&gl=US&ceid=US:en',
+    'Kurdistan24': 'https://news.google.com/rss/search?q=site:kurdistan24.net+military&hl=en&gl=US&ceid=US:en',
 }
 
 REDDIT_MILITARY_SUBREDDITS = [
@@ -1226,7 +1380,6 @@ MILITARY_REDIS_KEY = 'military_tracker_cache'
 
 def load_military_cache():
     """Load cached military tracker data from Upstash Redis, fallback to /tmp"""
-    # Try Upstash Redis first
     if UPSTASH_REDIS_URL and UPSTASH_REDIS_TOKEN:
         try:
             resp = requests.get(
@@ -1243,7 +1396,6 @@ def load_military_cache():
         except Exception as e:
             print(f"[Military Cache] Redis load error: {e}")
 
-    # Fallback to /tmp file
     try:
         from pathlib import Path
         if Path(MILITARY_CACHE_FILE).exists():
@@ -1261,7 +1413,6 @@ def save_military_cache(data):
     """Save military tracker data to Upstash Redis + /tmp fallback"""
     data['cached_at'] = datetime.now(timezone.utc).isoformat()
 
-    # Save to Upstash Redis
     if UPSTASH_REDIS_URL and UPSTASH_REDIS_TOKEN:
         try:
             payload = json.dumps(data, default=str)
@@ -1281,7 +1432,6 @@ def save_military_cache(data):
         except Exception as e:
             print(f"[Military Cache] Redis save error: {e}")
 
-    # Always save /tmp fallback too
     try:
         with open(MILITARY_CACHE_FILE, 'w') as f:
             json.dump(data, f, indent=2, default=str)
@@ -1308,11 +1458,7 @@ def is_military_cache_fresh():
 
 
 def _build_empty_skeleton():
-    """
-    Return a valid but empty military posture response.
-    Used when no cache exists yet and the background scan is still running.
-    The frontend gets a proper JSON structure with zero scores.
-    """
+    """Return a valid but empty military posture response."""
     actor_summaries = {}
     for actor_id, actor_data in MILITARY_ACTORS.items():
         actor_summaries[actor_id] = {
@@ -1367,7 +1513,7 @@ def _build_empty_skeleton():
         'cached': False,
         'scan_in_progress': True,
         'message': 'Initial scan in progress. Data will appear shortly.',
-        'version': '2.4.0'
+        'version': '2.5.0'
     }
 
 
@@ -1583,6 +1729,24 @@ def fetch_all_gdelt_military(days=7):
         'poland military modernization',
         'poland F-35 purchase',
         'hybrid warfare poland border',
+        # --- Iraq (v2.5.0) ---
+        'Iraq militia attack US base',
+        'Islamic Resistance Iraq drone',
+        'Kataib Hezbollah attack',
+        'Iraq ISIS resurgence',
+        'US withdrawal Iraq',
+        'US forces Iraq drawdown',
+        'coalition forces Iraq attack',
+        'PMF Popular Mobilization Iraq',
+        'Al Asad airbase attack',
+        'Erbil rocket attack',
+        'Iraq airspace corridor Iran',
+        'Iran proxy militia Iraq',
+        'ISIS prisoners Iraq',
+        'Operation Inherent Resolve Iraq',
+        'Iraq sectarian violence',
+        'Maliki Iraq government',
+        'Peshmerga Kurdistan military',
     ]
 
     hebrew_queries = [
@@ -1633,6 +1797,14 @@ def fetch_all_gdelt_military(days=7):
         'صواريخ باليستية إيران',
         'القوات البحرية مضيق هرمز',
         'إخلاء قاعدة عسكرية',
+        # v2.5.0 — Iraq Arabic queries
+        'المقاومة الإسلامية العراق هجوم',
+        'كتائب حزب الله هجوم قاعدة',
+        'الحشد الشعبي عمليات',
+        'داعش العراق هجوم',
+        'الانسحاب الأمريكي العراق',
+        'قاعدة عين الأسد هجوم',
+        'القوات المسلحة العراقية',
     ]
 
     farsi_queries = [
@@ -1795,6 +1967,9 @@ def fetch_all_newsapi_military(days=7):
         'Poland military NATO',
         'drone Poland airspace',
         'Greenland sovereignty Arctic',
+        # v2.5.0 — Iraq
+        'Iraq militia attack coalition base',
+        'Iraq ISIS military operation',
     ]
 
     all_articles = []
@@ -2034,19 +2209,14 @@ def determine_alert_level(score):
 # ========================================
 
 def scan_military_posture(days=7, force_refresh=False):
-    """
-    Main entry point. Scans all sources, analyzes articles,
-    and returns comprehensive military posture assessment.
-    """
+    """Main entry point."""
 
-    # 1. Fresh cache? Return immediately.
     if not force_refresh and is_military_cache_fresh():
         cache = load_military_cache()
         cache['cached'] = True
         print("[Military Tracker] Returning fresh cached data")
         return cache
 
-    # 2. Stale cache exists? Return it while refreshing in background.
     if not force_refresh:
         stale_cache = load_military_cache()
         if stale_cache and 'cached_at' in stale_cache:
@@ -2056,11 +2226,9 @@ def scan_military_posture(days=7, force_refresh=False):
             print("[Military Tracker] Returning stale cache, background refresh triggered")
             return stale_cache
 
-        # 3. No cache at all? Return skeleton (periodic scan will fill it).
         print("[Military Tracker] No cache found, returning skeleton. Periodic scan will populate.")
         return _build_empty_skeleton()
 
-    # 4. force_refresh=True — do a blocking scan (user clicked refresh)
     return _run_full_scan(days)
 
 
@@ -2095,7 +2263,6 @@ def _run_full_scan(days=7):
     print(f"[Military Tracker] Starting fresh scan ({days} days)...")
     scan_start = time.time()
 
-    # FETCH FROM ALL SOURCES
     print("[Military Tracker] Phase 1: Fetching data...")
 
     rss_articles = fetch_all_defense_rss()
@@ -2107,7 +2274,6 @@ def _run_full_scan(days=7):
 
     print(f"[Military Tracker] Total articles to analyze: {len(all_articles)}")
 
-    # ANALYZE ALL ARTICLES
     print("[Military Tracker] Phase 2: Analyzing articles...")
 
     all_signals = []
@@ -2137,7 +2303,6 @@ def _run_full_scan(days=7):
                 if asset == 'base_evacuation':
                     evacuation_signals.append(signal)
 
-    # CALCULATE REGIONAL TENSION MULTIPLIER
     tension_multiplier = calculate_regional_tension_multiplier(active_actors)
 
     print(f"[Military Tracker] Active actors: {len(active_actors)} → Tension multiplier: {tension_multiplier}x")
@@ -2145,7 +2310,6 @@ def _run_full_scan(days=7):
     for target in per_target_scores:
         per_target_scores[target] = round(per_target_scores[target] * tension_multiplier, 2)
 
-    # BUILD PER-TARGET POSTURE ASSESSMENTS
     target_postures = {}
 
     for target, score in per_target_scores.items():
@@ -2164,7 +2328,6 @@ def _run_full_scan(days=7):
             'tension_multiplier': tension_multiplier
         }
 
-    # BUILD PER-ACTOR SUMMARIES
     actor_summaries = {}
 
     for actor_id, score in per_actor_scores.items():
@@ -2183,7 +2346,6 @@ def _run_full_scan(days=7):
             'alert_level': determine_alert_level(score)
         }
 
-    # Include actors with 0 signals
     for actor_id, actor_data in MILITARY_ACTORS.items():
         if actor_id not in actor_summaries:
             actor_summaries[actor_id] = {
@@ -2197,7 +2359,6 @@ def _run_full_scan(days=7):
                 'alert_level': 'normal'
             }
 
-    # BUILD THEATRE GROUPINGS
     theatre_data = {}
 
     for theatre_id, theatre_info in REGIONAL_THEATRES.items():
@@ -2219,7 +2380,6 @@ def _run_full_scan(days=7):
             'alert_level': determine_alert_level(theatre_total_score)
         }
 
-    # BUILD RESPONSE
     scan_time = round(time.time() - scan_start, 1)
 
     result = {
@@ -2255,7 +2415,7 @@ def _run_full_scan(days=7):
         },
         'last_updated': datetime.now(timezone.utc).isoformat(),
         'cached': False,
-        'version': '2.4.0'
+        'version': '2.5.0'
     }
 
     save_military_cache(result)
@@ -2272,13 +2432,9 @@ def _run_full_scan(days=7):
 # ========================================
 
 def get_military_posture(target):
-    """
-    Quick lookup for a specific target's military posture.
-    Called by existing threat endpoints:
-      probability += posture['military_bonus']
-    """
+    """Quick lookup for a specific target's military posture."""
     try:
-        data = scan_military_posture()  # Uses cache if fresh
+        data = scan_military_posture()
 
         posture = data.get('target_postures', {}).get(target, {})
 
@@ -2354,10 +2510,7 @@ def get_military_posture(target):
 # ========================================
 
 def register_military_endpoints(app):
-    """
-    Register military tracker endpoints with the Flask app.
-    Called from main app.py: register_military_endpoints(app)
-    """
+    """Register military tracker endpoints with the Flask app."""
 
     @app.route('/api/military-posture', methods=['GET', 'OPTIONS'])
     def api_military_posture():
@@ -2395,7 +2548,7 @@ def register_military_endpoints(app):
 
     @app.route('/api/military-posture/<target>', methods=['GET', 'OPTIONS'])
     def api_military_posture_target(target):
-        """Quick posture check for a specific target (used by dashboard cards)."""
+        """Quick posture check for a specific target."""
         from flask import request as flask_request
 
         if flask_request.method == 'OPTIONS':
@@ -2423,20 +2576,19 @@ def register_military_endpoints(app):
 
     # PERIODIC BACKGROUND SCAN (every 12 hours)
     def _periodic_scan():
-        time.sleep(10)  # Let gunicorn settle
+        time.sleep(10)
         while True:
             try:
                 print("[Military Tracker] Periodic scan starting...")
                 _trigger_background_scan(days=7)
-                # Wait for scan to finish before sleeping
-                time.sleep(60)  # Give scan time to start
+                time.sleep(60)
                 while _background_scan_running:
                     time.sleep(30)
                 print("[Military Tracker] Periodic scan complete. Sleeping 12 hours.")
-                time.sleep(43200)  # 12 hours
+                time.sleep(43200)
             except Exception as e:
                 print(f"[Military Tracker] Periodic scan error: {e}")
-                time.sleep(3600)  # Retry in 1 hour on error
+                time.sleep(3600)
 
     periodic_thread = threading.Thread(target=_periodic_scan, daemon=True)
     periodic_thread.start()
