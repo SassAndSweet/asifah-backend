@@ -1475,7 +1475,10 @@ def fetch_gdelt_military(query, days=7, language='eng'):
         if not response or response.status_code != 200:
             return []
 
-        data = response.json()
+        try:
+            data = response.json()
+        except (json.JSONDecodeError, ValueError):
+            return []
         articles = data.get('articles', [])
 
         standardized = []
@@ -1735,7 +1738,7 @@ def fetch_all_gdelt_military(days=7):
             articles = fetch_gdelt_military(query, days, language=lang_code)
             all_articles.extend(articles)
             block_count += len(articles)
-            time.sleep(0.3)
+            time.sleep(0.5)
         if block_count > 0:
             print(f"[Military GDELT] {lang_name} ({lang_code}): {block_count} articles from {len(queries)} queries")
 
