@@ -6072,272 +6072,195 @@ def start_background_refresh():
 # ============================================================
 # SECTION 2: ENDPOINT CACHE-CHECK REPLACEMENTS
 # ============================================================
-# For EACH endpoint below, find the cache-check block at the
-# top of the function and replace it. The rest of the endpoint
-# (the actual scan logic) stays the same.
+# For EACH endpoint below, replace the cache-check block at the
+# top of the function. The rest of the endpoint (actual scan
+# logic) stays the same.
 # ============================================================
 
 
-# ---------- IRAN ----------
-# In /api/iran-strike-probability, FIND:
-#
-#         refresh = request.args.get('refresh', 'false').lower() == 'true'
-#         days = int(request.args.get('days', 7))
-#
-#         # If not refreshing, try to return cached data
-#         if not refresh:
-#             cached = get_cached_result('iran')
-#             if cached and is_cache_fresh(cached, max_age_hours=6):
-#                 print("[Iran] Returning cached data")
-#                 return jsonify(cached)
-#
-#         # User requested refresh OR cache is stale
-#         print("[Iran] Performing fresh scan...")
-#
-# REPLACE WITH:
-
-        refresh = request.args.get('refresh', 'false').lower() == 'true'
-        days = int(request.args.get('days', 7))
-
-        if not refresh:
-            cached = get_cached_result('iran')
-            if cached:
-                if is_cache_fresh(cached, max_age_hours=6):
-                    print("[Iran] Returning fresh cached data")
-                    return jsonify(cached)
-                else:
-                    print("[Iran] Returning stale cached data (background refresh will update)")
-                    cached['stale_cache'] = True
-                    return jsonify(cached)
-
-            print("[Iran] No cache available, returning empty placeholder")
-            return jsonify({
-                'success': True, 'probability': 0, 'timeline': 'Awaiting scan',
-                'confidence': 'None', 'momentum': 'stable', 'total_articles': 0,
-                'unique_sources': 0, 'recent_headlines': [],
-                'military_posture': {'alert_level': 'normal', 'alert_label': 'Normal', 'alert_color': 'green', 'military_bonus': 0, 'show_banner': False, 'banner_text': '', 'top_signals': [], 'detail_url': '/military.html'},
-                'awaiting_scan': True, 'last_updated': None, 'cached': False,
-                'message': 'No cached data — click Scan OSINT to populate'
-            })
-
-        print("[Iran] Performing fresh scan...")
-
-
-# ---------- HEZBOLLAH ----------
-# In /api/hezbollah-activity, FIND the same pattern and REPLACE WITH:
-
-        refresh = request.args.get('refresh', 'false').lower() == 'true'
-        days = int(request.args.get('days', 7))
-
-        if not refresh:
-            cached = get_cached_result('hezbollah')
-            if cached:
-                if is_cache_fresh(cached, max_age_hours=6):
-                    print("[Hezbollah] Returning fresh cached data")
-                    return jsonify(cached)
-                else:
-                    print("[Hezbollah] Returning stale cached data")
-                    cached['stale_cache'] = True
-                    return jsonify(cached)
-
-            print("[Hezbollah] No cache available, returning empty placeholder")
-            return jsonify({
-                'success': True, 'probability': 0, 'timeline': 'Awaiting scan',
-                'confidence': 'None', 'momentum': 'stable', 'total_articles': 0,
-                'unique_sources': 0, 'recent_headlines': [],
-                'military_posture': {'alert_level': 'normal', 'alert_label': 'Normal', 'alert_color': 'green', 'military_bonus': 0, 'show_banner': False, 'banner_text': '', 'top_signals': [], 'detail_url': '/military.html'},
-                'awaiting_scan': True, 'last_updated': None, 'cached': False,
-                'message': 'No cached data — click Scan OSINT to populate'
-            })
-
-        print("[Hezbollah] Performing fresh scan...")
+# --- Helper: standard empty placeholder ---
+def _empty_placeholder(target=None, extended=False):
+    """Build the 'no cached data' placeholder response."""
+    base = {
+        'success': True,
+        'probability': 0,
+        'timeline': 'Awaiting scan',
+        'confidence': 'None',
+        'momentum': 'stable',
+        'total_articles': 0,
+        'unique_sources': 0,
+        'recent_headlines': [],
+        'military_posture': {
+            'alert_level': 'normal',
+            'alert_label': 'Normal',
+            'alert_color': 'green',
+            'military_bonus': 0,
+            'show_banner': False,
+            'banner_text': '',
+            'top_signals': [],
+            'detail_url': '/military.html'
+        },
+        'awaiting_scan': True,
+        'last_updated': None,
+        'cached': False,
+        'message': 'No cached data \u2014 click Scan OSINT to populate'
+    }
+    if target:
+        base['target'] = target
+    if extended:
+        base.update({
+            'intensity': 0,
+            'stability': 100,
+            'casualties': {
+                'deaths': 0, 'injuries': 0, 'arrests': 0,
+                'verified_sources': [], 'details': [],
+                'articles_without_numbers': []
+            },
+            'threat_matrix': {
+                'incoming_threats': [],
+                'outgoing_threats': []
+            },
+            'articles_en': [],
+            'articles_ar': [],
+            'articles_he': [],
+            'articles_fa': [],
+            'articles_reddit': []
+        })
+    return base
 
 
-# ---------- HOUTHIS ----------
-# In /api/houthis-threat, FIND the same pattern and REPLACE WITH:
+# --- Helper: standard cache check (used by all endpoints) ---
+def _check_cache_or_placeholder(label, cache_key, target=None, extended=False):
+    """
+    Standard cache-check logic. Call at the top of each endpoint.
+    Returns a Response if cache hit or placeholder, or None if a fresh scan should proceed.
+    """
+    refresh = request.args.get('refresh', 'false').lower() == 'true'
 
-        refresh = request.args.get('refresh', 'false').lower() == 'true'
-        days = int(request.args.get('days', 7))
-
-        if not refresh:
-            cached = get_cached_result('houthis')
-            if cached:
-                if is_cache_fresh(cached, max_age_hours=6):
-                    print("[Houthis] Returning fresh cached data")
-                    return jsonify(cached)
-                else:
-                    print("[Houthis] Returning stale cached data")
-                    cached['stale_cache'] = True
-                    return jsonify(cached)
-
-            print("[Houthis] No cache available, returning empty placeholder")
-            return jsonify({
-                'success': True, 'probability': 0, 'timeline': 'Awaiting scan',
-                'confidence': 'None', 'momentum': 'stable', 'total_articles': 0,
-                'unique_sources': 0, 'recent_headlines': [],
-                'military_posture': {'alert_level': 'normal', 'alert_label': 'Normal', 'alert_color': 'green', 'military_bonus': 0, 'show_banner': False, 'banner_text': '', 'top_signals': [], 'detail_url': '/military.html'},
-                'awaiting_scan': True, 'last_updated': None, 'cached': False,
-                'message': 'No cached data — click Scan OSINT to populate'
-            })
-
-        print("[Houthis] Performing fresh scan...")
-
-
-# ---------- SYRIA ----------
-# In /api/syria-conflict, FIND the same pattern and REPLACE WITH:
-
-        refresh = request.args.get('refresh', 'false').lower() == 'true'
-        days = int(request.args.get('days', 7))
-
-        if not refresh:
-            cached = get_cached_result('syria')
-            if cached:
-                if is_cache_fresh(cached, max_age_hours=6):
-                    print("[Syria] Returning fresh cached data")
-                    return jsonify(cached)
-                else:
-                    print("[Syria] Returning stale cached data")
-                    cached['stale_cache'] = True
-                    return jsonify(cached)
-
-            print("[Syria] No cache available, returning empty placeholder")
-            return jsonify({
-                'success': True, 'probability': 0, 'timeline': 'Awaiting scan',
-                'confidence': 'None', 'momentum': 'stable', 'total_articles': 0,
-                'unique_sources': 0, 'recent_headlines': [],
-                'military_posture': {'alert_level': 'normal', 'alert_label': 'Normal', 'alert_color': 'green', 'military_bonus': 0, 'show_banner': False, 'banner_text': '', 'top_signals': [], 'detail_url': '/military.html'},
-                'awaiting_scan': True, 'last_updated': None, 'cached': False,
-                'message': 'No cached data — click Scan OSINT to populate'
-            })
-
-        print("[Syria] Performing fresh scan...")
-
-
-# ---------- JORDAN ----------
-# In /api/jordan-threat, FIND the same pattern and REPLACE WITH:
-
-        refresh = request.args.get('refresh', 'false').lower() == 'true'
-        days = int(request.args.get('days', 7))
-
-        if not refresh:
-            cached = get_cached_result('jordan')
-            if cached:
-                if is_cache_fresh(cached, max_age_hours=6):
-                    print("[Jordan] Returning fresh cached data")
-                    return jsonify(cached)
-                else:
-                    print("[Jordan] Returning stale cached data")
-                    cached['stale_cache'] = True
-                    return jsonify(cached)
-
-            print("[Jordan] No cache available, returning empty placeholder")
-            return jsonify({
-                'success': True, 'probability': 0, 'timeline': 'Awaiting scan',
-                'confidence': 'None', 'momentum': 'stable', 'total_articles': 0,
-                'unique_sources': 0, 'recent_headlines': [],
-                'military_posture': {'alert_level': 'normal', 'alert_label': 'Normal', 'alert_color': 'green', 'military_bonus': 0, 'show_banner': False, 'banner_text': '', 'top_signals': [], 'detail_url': '/military.html'},
-                'awaiting_scan': True, 'last_updated': None, 'cached': False,
-                'message': 'No cached data — click Scan OSINT to populate'
-            })
-
-        print("[Jordan] Performing fresh scan...")
-
-
-# ---------- ISRAEL ----------
-# In /api/israel-threat, FIND the same pattern and REPLACE WITH:
-
-        refresh = request.args.get('refresh', 'false').lower() == 'true'
-        days = int(request.args.get('days', 7))
-
-        if not refresh:
-            cached = get_cached_result('israel')
-            if cached:
-                if is_cache_fresh(cached, max_age_hours=6):
-                    print("[Israel] Returning fresh cached data")
-                    return jsonify(cached)
-                else:
-                    print("[Israel] Returning stale cached data")
-                    cached['stale_cache'] = True
-                    return jsonify(cached)
-
-            print("[Israel] No cache available, returning empty placeholder")
-            return jsonify({
-                'success': True, 'probability': 0, 'timeline': 'Awaiting scan',
-                'confidence': 'None', 'momentum': 'stable', 'total_articles': 0,
-                'unique_sources': 0, 'recent_headlines': [],
-                'military_posture': {'alert_level': 'normal', 'alert_label': 'Normal', 'alert_color': 'green', 'military_bonus': 0, 'show_banner': False, 'banner_text': '', 'top_signals': [], 'detail_url': '/military.html'},
-                'awaiting_scan': True, 'last_updated': None, 'cached': False,
-                'message': 'No cached data — click Scan OSINT to populate'
-            })
-
-        print("[Israel] Performing fresh scan...")
-
-
-# ---------- IRAQ ----------
-# In /scan-iraq, FIND the top of scan_iraq() and REPLACE the
-# rate limit check + days line with this full cache-check block.
-# NOTE: The existing "if not check_rate_limit():" block should be
-# MOVED to AFTER this cache check (it only applies to fresh scans).
-#
-# FIND:
-#         if not check_rate_limit():
-#             return jsonify({
-#                 'error': 'Rate limit exceeded',
-#                 'rate_limit': get_rate_limit_info()
-#             }), 429
-#
-#         days = int(request.args.get('days', 7))
-#
-# REPLACE WITH:
-
-        refresh = request.args.get('refresh', 'false').lower() == 'true'
-        days = int(request.args.get('days', 7))
-
-        if not refresh:
-            cached = get_cached_result('iraq')
-            if cached:
-                if is_cache_fresh(cached, max_age_hours=6):
-                    print("[Iraq] Returning fresh cached data")
-                    return jsonify(cached)
-                else:
-                    print("[Iraq] Returning stale cached data")
-                    cached['stale_cache'] = True
-                    return jsonify(cached)
-
-            print("[Iraq] No cache available, returning empty placeholder")
-            return jsonify({
-                'success': True, 'target': 'iraq', 'probability': 0,
-                'timeline': 'Awaiting scan', 'confidence': 'None',
-                'momentum': 'stable', 'total_articles': 0, 'unique_sources': 0,
-                'intensity': 0, 'stability': 100,
-                'recent_headlines': [],
-                'casualties': {'deaths': 0, 'injuries': 0, 'arrests': 0, 'verified_sources': [], 'details': [], 'articles_without_numbers': []},
-                'threat_matrix': {'incoming_threats': [], 'outgoing_threats': []},
-                'military_posture': {'alert_level': 'normal', 'alert_label': 'Normal', 'alert_color': 'green', 'military_bonus': 0, 'show_banner': False, 'banner_text': '', 'top_signals': [], 'detail_url': '/military.html'},
-                'articles_en': [], 'articles_ar': [], 'articles_he': [], 'articles_fa': [], 'articles_reddit': [],
-                'awaiting_scan': True, 'last_updated': None, 'cached': False,
-                'message': 'No cached data — click Scan OSINT to populate'
-            })
-
-        # Fresh scan requested — check rate limit first
-        print("[Iraq] Performing fresh scan...")
-        if not check_rate_limit():
-            cached = get_cached_result('iraq')
-            if cached:
+    if not refresh:
+        cached = get_cached_result(cache_key)
+        if cached:
+            if is_cache_fresh(cached, max_age_hours=6):
+                print(f"[{label}] Returning fresh cached data")
+                return jsonify(cached)
+            else:
+                print(f"[{label}] Returning stale cached data (background refresh will update)")
                 cached['stale_cache'] = True
                 return jsonify(cached)
-            return jsonify({
-                'success': False,
-                'error': 'Rate limit exceeded',
-                'probability': 0,
-                'rate_limited': True
-            }), 429
+
+        print(f"[{label}] No cache available, returning empty placeholder")
+        return jsonify(_empty_placeholder(target=target, extended=extended))
+
+    print(f"[{label}] Performing fresh scan...")
+    return None
 
 
 # ============================================================
-# END OF SECTION 2
+# USAGE IN EACH ENDPOINT
 # ============================================================
 
+# ---------- IRAN: /api/iran-strike-probability ----------
+#
+#     @app.route('/api/iran-strike-probability')
+#     def iran_strike_probability():
+#         days = int(request.args.get('days', 7))
+#
+#         result = _check_cache_or_placeholder('Iran', 'iran')
+#         if result:
+#             return result
+#
+#         # ... rest of fresh scan logic unchanged ...
+
+
+# ---------- HEZBOLLAH: /api/hezbollah-activity ----------
+#
+#     @app.route('/api/hezbollah-activity')
+#     def hezbollah_activity():
+#         days = int(request.args.get('days', 7))
+#
+#         result = _check_cache_or_placeholder('Hezbollah', 'hezbollah')
+#         if result:
+#             return result
+#
+#         # ... rest of fresh scan logic unchanged ...
+
+
+# ---------- HOUTHIS: /api/houthis-threat ----------
+#
+#     @app.route('/api/houthis-threat')
+#     def houthis_threat():
+#         days = int(request.args.get('days', 7))
+#
+#         result = _check_cache_or_placeholder('Houthis', 'houthis')
+#         if result:
+#             return result
+#
+#         # ... rest of fresh scan logic unchanged ...
+
+
+# ---------- SYRIA: /api/syria-conflict ----------
+#
+#     @app.route('/api/syria-conflict')
+#     def syria_conflict():
+#         days = int(request.args.get('days', 7))
+#
+#         result = _check_cache_or_placeholder('Syria', 'syria')
+#         if result:
+#             return result
+#
+#         # ... rest of fresh scan logic unchanged ...
+
+
+# ---------- JORDAN: /api/jordan-threat ----------
+#
+#     @app.route('/api/jordan-threat')
+#     def jordan_threat():
+#         days = int(request.args.get('days', 7))
+#
+#         result = _check_cache_or_placeholder('Jordan', 'jordan')
+#         if result:
+#             return result
+#
+#         # ... rest of fresh scan logic unchanged ...
+
+
+# ---------- ISRAEL: /api/israel-threat ----------
+#
+#     @app.route('/api/israel-threat')
+#     def israel_threat():
+#         days = int(request.args.get('days', 7))
+#
+#         result = _check_cache_or_placeholder('Israel', 'israel')
+#         if result:
+#             return result
+#
+#         # ... rest of fresh scan logic unchanged ...
+
+
+# ---------- IRAQ: /scan-iraq (special case: has rate limiting) ----------
+#
+#     @app.route('/scan-iraq')
+#     def scan_iraq():
+#         days = int(request.args.get('days', 7))
+#
+#         result = _check_cache_or_placeholder('Iraq', 'iraq', target='iraq', extended=True)
+#         if result:
+#             return result
+#
+#         # Fresh scan requested — check rate limit first
+#         if not check_rate_limit():
+#             cached = get_cached_result('iraq')
+#             if cached:
+#                 cached['stale_cache'] = True
+#                 return jsonify(cached)
+#             return jsonify({
+#                 'success': False,
+#                 'error': 'Rate limit exceeded',
+#                 'probability': 0,
+#                 'rate_limited': True
+#             }), 429
+#
+#         # ... rest of fresh scan logic unchanged ...
 
 # ============================================================
 # SECTION 3: DEBUG ENDPOINT (add as a new route)
