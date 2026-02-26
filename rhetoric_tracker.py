@@ -1,5 +1,5 @@
 """
-Asifah Analytics — Rhetoric & Pattern Recognition Tracker v1.0.0
+Asifah Analytics — Rhetoric & Pattern Recognition Tracker v1.1.0
 February 26, 2026
 
 Tracks rhetorical patterns, spokesperson changes, escalation ladders,
@@ -40,6 +40,24 @@ OUTPUTS:
   - /api/rhetoric/lebanon/summary — compact summary for country card
   - /api/rhetoric/lebanon/trends — historical trend data for sparklines
   - Feeds rhetoric_alert into Lebanon Stability Index
+
+CHANGELOG:
+  v1.1.0 (2026-02-26):
+    - BROADENED actor keywords across all 6 actors to fix false silence alerts
+    - Added standalone 'hezbollah' as keyword (was requiring 2-word phrases)
+    - Added 'حزب الله' standalone (was requiring following Arabic word)
+    - Added 'المقاومة' standalone for hezbollah_military (Al-Manar's term)
+    - Added 'al-manar', 'almanar' as hezbollah_military keywords
+    - Added 'the resistance', 'resistance forces' for military wing
+    - Broadened israel_lebanon: 'northern front', 'idf north', standalone Hebrew
+    - Broadened lebanese_government: 'beirut', 'lebanese', 'lebanon' as catch-all
+    - Added 'axis of resistance', 'iranian-backed', 'iran-backed' for iran_lebanon
+    - Added 'un peacekeeping lebanon', 'un forces lebanon', '1701' for unifil
+    - Raised baseline_statements_per_week to match real article volumes
+    - Added GDELT retry with 60s timeout (was 30s, matching military_tracker fix)
+    - Added classification debug logging per actor
+    - Added 'tensions', 'escalation', 'concern' to level 2 escalation phrases
+    - Added 'said', 'announced', 'noted', 'reported' to level 1 phrases
 
 COPYRIGHT © 2025-2026 Asifah Analytics. All rights reserved.
 """
@@ -180,6 +198,7 @@ def is_cache_fresh(cached_data, max_age_hours=12):
 
 # ========================================
 # ACTOR DEFINITIONS — LEBANON THEATRE
+# v1.1.0: Broadened keywords to reduce false silence alerts
 # ========================================
 
 LEBANON_ACTORS = {
@@ -199,17 +218,24 @@ LEBANON_ACTORS = {
             'كتلة الوفاء للمقاومة',
         ],
         'keywords': [
+            # v1.1.0: Core identifiers — standalone catch-all
+            'hezbollah', 'hezballah', 'hizballah', 'hizbollah', 'hizb allah',
+            # Political-specific (kept for precision scoring later)
             'hezbollah statement', 'hezbollah says', 'hezbollah declares',
             'hezbollah political', 'hezbollah parliament', 'hezbollah demands',
             'hezbollah condemns', 'hezbollah calls for', 'hezbollah rejects',
             'hezbollah press conference', 'hezbollah media relations',
             'naim qassem', 'qassem says', 'qassem warns',
             'loyalty to resistance', 'resistance bloc',
-            # Arabic
+            'hezbollah leader', 'hezbollah chief', 'hezbollah secretary',
+            # Arabic — standalone حزب الله catches all Hezbollah articles
+            'حزب الله', 'حزب اللـه', 'حزبالله',
+            'نعيم قاسم', 'كتلة الوفاء للمقاومة',
             'حزب الله بيان', 'حزب الله يدين', 'حزب الله يرفض',
-            'حزب الله يطالب', 'نعيم قاسم',
+            'حزب الله يطالب',
         ],
-        'baseline_statements_per_week': 5,
+        # v1.1.0: Raised from 5 — with broadened keywords we'll catch more
+        'baseline_statements_per_week': 12,
     },
     'hezbollah_military': {
         'name': 'Hezbollah (Military)',
@@ -224,17 +250,27 @@ LEBANON_ACTORS = {
             'المقاومة الإسلامية في لبنان', 'الإعلام الحربي',
         ],
         'keywords': [
+            # Operational language
             'hezbollah fires', 'hezbollah launches', 'hezbollah strikes',
             'hezbollah rockets', 'hezbollah missile', 'hezbollah drone',
             'hezbollah attack', 'hezbollah targets', 'hezbollah claims',
-            'hezbollah operation', 'islamic resistance', 'resistance operation',
-            'hezbollah retaliation', 'hezbollah military', 'hezbollah forces',
+            'hezbollah operation', 'hezbollah retaliation',
+            'hezbollah military', 'hezbollah forces', 'hezbollah arms',
+            'hezbollah weapons', 'hezbollah arsenal', 'hezbollah tunnel',
             'radwan force', 'hezbollah fighters', 'hezbollah martyrs',
-            # Arabic
-            'المقاومة الإسلامية', 'عملية نوعية', 'صواريخ حزب الله',
+            'hezbollah combat', 'hezbollah war',
+            # v1.1.0: "The resistance" — how Al-Manar refers to Hezbollah
+            'islamic resistance', 'resistance operation',
+            'the resistance', 'resistance forces', 'resistance fighters',
+            'al-manar', 'almanar',
+            # v1.1.0: Arabic — standalone المقاومة catches Al-Manar content
+            'المقاومة الإسلامية', 'المقاومة', 'مقاومة',
+            'عملية نوعية', 'صواريخ حزب الله',
             'استهداف مواقع', 'قوة الرضوان',
+            'المنار', 'الإعلام الحربي',
         ],
-        'baseline_statements_per_week': 3,
+        # v1.1.0: Raised from 3
+        'baseline_statements_per_week': 8,
     },
     'iran_lebanon': {
         'name': 'Iran (re: Lebanon)',
@@ -249,18 +285,26 @@ LEBANON_ACTORS = {
             'خامنه‌ای', 'رهبر معظم', 'سپاه قدس',
         ],
         'keywords': [
+            # Direct references
             'iran hezbollah', 'iran lebanon', 'iran supports hezbollah',
             'iran arms hezbollah', 'iran weapons lebanon',
-            'iran resistance axis', 'tehran hezbollah', 'tehran lebanon',
+            'tehran hezbollah', 'tehran lebanon',
             'iran warns israel lebanon', 'iran threatens',
             'quds force lebanon', 'irgc hezbollah',
-            'khamenei hezbollah', 'khamenei resistance',
+            'khamenei hezbollah', 'khamenei resistance', 'khamenei lebanon',
+            # v1.1.0: Axis of resistance framing
+            'iran resistance axis', 'axis of resistance',
+            'resistance axis', 'iranian proxy', 'iran proxy',
+            'iranian-backed', 'iran-backed',
+            'iranian support', 'tehran support',
             # Farsi
             'ایران حزب‌الله', 'محور مقاومت', 'لبنان ایران',
             # Arabic
             'إيران حزب الله', 'محور المقاومة', 'إيران لبنان',
+            'الدعم الإيراني', 'طهران حزب الله',
         ],
-        'baseline_statements_per_week': 2,
+        # v1.1.0: Raised from 2
+        'baseline_statements_per_week': 5,
     },
     'israel_lebanon': {
         'name': 'Israel (re: Lebanon)',
@@ -271,22 +315,35 @@ LEBANON_ACTORS = {
             'netanyahu', 'gallant', 'katz', 'gantz', 'eisenkot',
             'idf spokesperson', 'idf northern command',
             'israeli defense minister', 'israeli prime minister',
-            'daniel hagari', 'herzi halevi',
+            'daniel hagari', 'herzi halevi', 'sa\'ar',
             # Hebrew
-            'נתניהו', 'גלנט', 'כץ', 'הלוי', 'דובר צה"ל',
+            'נתניהו', 'גלנט', 'כץ', 'הלוי', 'דובר צה"ל', 'סער',
         ],
         'keywords': [
+            # Direct references
             'israel hezbollah', 'israel lebanon', 'israel warns hezbollah',
             'israel threatens lebanon', 'idf lebanon', 'idf hezbollah',
             'israel northern border', 'israel strike lebanon',
+            # v1.1.0: Broader northern front terms
+            'israel northern front', 'northern front',
+            'idf northern', 'idf north', 'northern command',
+            # Leaders + Lebanon context
             'netanyahu hezbollah', 'netanyahu lebanon',
-            'gallant hezbollah', 'gallant warns',
+            'gallant hezbollah', 'gallant warns', 'gallant lebanon',
+            'katz hezbollah', 'katz lebanon',
             'israel red line', 'israel will not tolerate',
-            # Hebrew
+            # v1.1.0: Israeli operations near Lebanon
+            'israeli airstrike lebanon', 'israeli strike lebanon',
+            'israeli operation lebanon', 'idf operation lebanon',
+            'south lebanon israel', 'litani river',
+            'israeli incursion lebanon', 'ground operation lebanon',
+            # v1.1.0: Hebrew — broadened with standalone terms
             'ישראל חיזבאללה', 'ישראל לבנון', 'צה"ל לבנון',
-            'גבול צפון', 'פיקוד צפון',
+            'גבול צפון', 'פיקוד צפון', 'חזית צפון',
+            'לבנון', 'חיזבאללה',
         ],
-        'baseline_statements_per_week': 4,
+        # v1.1.0: Raised from 4
+        'baseline_statements_per_week': 10,
     },
     'lebanese_government': {
         'name': 'Lebanese Government',
@@ -303,15 +360,29 @@ LEBANON_ACTORS = {
             'الجيش اللبناني', 'مجلس النواب',
         ],
         'keywords': [
-            'lebanon government', 'lebanon parliament', 'lebanese president',
-            'lebanese prime minister', 'lebanon cabinet',
-            'lebanon army', 'laf deployment', 'lebanese armed forces',
-            'aoun statement', 'salam statement', 'berri statement',
+            # Governance
+            'lebanon government', 'lebanese government',
+            'lebanon parliament', 'lebanese parliament',
+            'lebanese president', 'lebanese prime minister',
+            'lebanon cabinet', 'lebanese cabinet',
+            'lebanon army', 'lebanese army', 'lebanese armed forces',
+            'laf deployment', 'lebanese forces',
+            # Leaders
+            'joseph aoun', 'aoun statement', 'aoun says',
+            'nawaf salam', 'salam statement', 'salam says',
+            'nabih berri', 'berri statement', 'berri says',
+            # v1.1.0: Broad catch — any article mentioning Lebanon governance
             'lebanon sovereignty', 'lebanon 1701',
-            # Arabic
+            'beirut', 'lebanese', 'lebanon crisis',
+            'lebanon economy', 'lebanon reconstruction',
+            'lebanon ceasefire', 'lebanon peace',
+            # Arabic — broadened
             'الحكومة اللبنانية', 'مجلس الوزراء', 'القرار 1701',
+            'لبنان', 'بيروت', 'الجيش اللبناني',
+            'مجلس النواب اللبناني',
         ],
-        'baseline_statements_per_week': 3,
+        # v1.1.0: Raised from 3
+        'baseline_statements_per_week': 10,
     },
     'unifil': {
         'name': 'UNIFIL',
@@ -329,8 +400,11 @@ LEBANON_ACTORS = {
             'unifil withdrawal', 'unifil mandate', 'resolution 1701',
             'blue line', 'blue line violation', 'blue line incident',
             'south lebanon peacekeeping',
+            # v1.1.0: Broader UN terms
+            'un peacekeeping lebanon', 'un forces lebanon',
+            '1701',
         ],
-        'baseline_statements_per_week': 2,
+        'baseline_statements_per_week': 3,
     },
 }
 
@@ -392,6 +466,8 @@ ESCALATION_PHRASES = {
         'urges de-escalation', 'deeply concerned',
         'unacceptable', 'provocative', 'destabilizing',
         'escalation risks', 'dangerous path', 'miscalculation',
+        # v1.1.0: Broader cautionary language
+        'tensions', 'escalation', 'concern',
         # Arabic
         'يحذر', 'قلق بالغ', 'تصعيد خطير', 'استفزازي',
     ],
@@ -399,6 +475,8 @@ ESCALATION_PHRASES = {
         'statement', 'press conference', 'remarks', 'speech',
         'meeting', 'discussed', 'agreed', 'cooperation',
         'commitment', 'reiterated', 'affirmed', 'emphasized',
+        # v1.1.0: Broader routine language
+        'said', 'announced', 'noted', 'reported',
         # Arabic
         'بيان', 'مؤتمر صحفي', 'تصريح', 'اجتماع',
     ],
@@ -482,7 +560,7 @@ def fetch_lebanon_articles(days=3):
 
     print(f"[Rhetoric] RSS: {len(all_articles)} articles from {len(rss_feeds)} feeds")
 
-    # --- GDELT ---
+    # --- GDELT (v1.1.0: increased timeout to 60s, added retry) ---
     gdelt_queries = {
         'eng': [
             'hezbollah OR lebanon OR "southern lebanon"',
@@ -515,9 +593,28 @@ def fetch_lebanon_articles(days=3):
                     'format': 'json',
                     'sourcelang': lang,
                 }
-                resp = requests.get(GDELT_BASE_URL, params=params, timeout=30)
-                if resp.status_code == 200:
-                    data = resp.json()
+                # v1.1.0: retry with 60s timeout (was 30s single attempt)
+                resp = None
+                for attempt in range(2):
+                    try:
+                        resp = requests.get(GDELT_BASE_URL, params=params, timeout=60)
+                        if resp.status_code == 200:
+                            break
+                    except requests.Timeout:
+                        if attempt == 0:
+                            print(f"[Rhetoric GDELT] {lang}: Retry after timeout...")
+                            time.sleep(2)
+                            continue
+                        raise
+
+                if resp and resp.status_code == 200:
+                    # v1.1.0: Handle non-JSON responses gracefully
+                    try:
+                        data = resp.json()
+                    except (json.JSONDecodeError, ValueError):
+                        print(f"[Rhetoric GDELT] {lang}: Non-JSON response, skipping")
+                        continue
+
                     for art in data.get('articles', []):
                         all_articles.append({
                             'title': art.get('title', ''),
@@ -696,12 +793,12 @@ def run_rhetoric_scan(days=3):
             'silence_alert': False,
             'topics': defaultdict(int),
             'top_articles': [],
-            'escalation_history': [],  # (timestamp, level) pairs
+            'escalation_history': [],
         }
 
     # Analyze each article
     total_classified = 0
-    coordination_timeline = []  # (timestamp, actor_id, escalation_level)
+    coordination_timeline = []
 
     for article in articles:
         actors = classify_actor(article)
@@ -759,6 +856,14 @@ def run_rhetoric_scan(days=3):
                 'actor': actor_id,
                 'level': escalation_level,
             })
+
+    # v1.1.0: Debug logging — classification results per actor
+    print(f"[Rhetoric] Classification results ({total_classified}/{len(articles)} articles matched):")
+    for actor_id, ar in actor_results.items():
+        status = "✅" if ar['statement_count'] > 0 else "⚠️ ZERO"
+        print(f"[Rhetoric]   {ar['name']}: {ar['statement_count']} articles, "
+              f"max escalation: {ar['max_escalation_level']} "
+              f"({ESCALATION_LEVELS[ar['max_escalation_level']]['label']}) {status}")
 
     # Post-processing per actor
     for actor_id, ar in actor_results.items():
@@ -843,7 +948,7 @@ def run_rhetoric_scan(days=3):
         # Alerts summary (for card/banner display)
         'alerts': _build_alerts(actor_results, coordination_alerts),
 
-        'version': '1.0.0',
+        'version': '1.1.0',
     }
 
     # Cache the result
@@ -1029,7 +1134,7 @@ def _build_empty_result():
         'alerts': [],
         'awaiting_scan': True,
         'message': 'No data yet — scan in progress',
-        'version': '1.0.0',
+        'version': '1.1.0',
     }
 
 
