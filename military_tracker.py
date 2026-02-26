@@ -1610,7 +1610,7 @@ def fetch_gdelt_military(query, days=7, language='eng'):
         response = None
         for attempt in range(2):
             try:
-                response = requests.get(GDELT_BASE_URL, params=params, timeout=30)
+                response = requests.get(GDELT_BASE_URL, params=params, timeout=60)
                 if response.status_code == 200:
                     break
             except requests.Timeout:
