@@ -646,14 +646,11 @@ TARGET_BASELINES = {
 
 REDDIT_SUBREDDITS = {
     "hezbollah": ["ForbiddenBromance", "Israel", "Lebanon"],
-    "iran": ["Iran", "Israel", "geopolitics"],
-    "houthis": ["Yemen", "Israel", "geopolitics"],
-    "iraq": ["Iraq", "Kurdistan", "geopolitics", "anime_titties"]
-}
     "iran": [
         "Iran", "Israel", "geopolitics",
         "iranpolitics", "CredibleDefense", "anime_titties"
     ],
+    "iraq": ["Iraq", "Kurdistan", "geopolitics", "anime_titties"],
     "houthis": [
         "Yemen", "Israel", "geopolitics",
         "CredibleDefense", "YemeniCrisis", "anime_titties"
