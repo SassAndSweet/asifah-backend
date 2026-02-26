@@ -29,6 +29,7 @@ import json
 from pathlib import Path
 import threading
 from military_tracker import register_military_endpoints, get_military_posture
+from rhetoric_tracker import register_rhetoric_endpoints
 
 # Local imports last
 from rss_monitor import (
@@ -736,6 +737,7 @@ def _check_cache_or_placeholder(label, cache_key, target=None, extended=False):
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}})
 register_military_endpoints(app)
+register_rhetoric_endpoints(app)
 
 # Iran Stability Module (consolidated from iran_protests.py)
 from iran_protests import register_iran_routes
