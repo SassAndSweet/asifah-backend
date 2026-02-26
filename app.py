@@ -652,6 +652,84 @@ def start_background_refresh():
     print("[Background Refresh] Thread started — will refresh all caches every 4 hours")
 
 # ========================================
+# CACHE HELPERS FOR ENDPOINTS
+# ========================================
+
+def _empty_placeholder(target=None, extended=False):
+    """Build the 'no cached data' placeholder response."""
+    base = {
+        'success': True,
+        'probability': 0,
+        'timeline': 'Awaiting scan',
+        'confidence': 'None',
+        'momentum': 'stable',
+        'total_articles': 0,
+        'unique_sources': 0,
+        'recent_headlines': [],
+        'military_posture': {
+            'alert_level': 'normal',
+            'alert_label': 'Normal',
+            'alert_color': 'green',
+            'military_bonus': 0,
+            'show_banner': False,
+            'banner_text': '',
+            'top_signals': [],
+            'detail_url': '/military.html'
+        },
+        'awaiting_scan': True,
+        'last_updated': None,
+        'cached': False,
+        'message': 'No cached data — click Scan OSINT to populate'
+    }
+    if target:
+        base['target'] = target
+    if extended:
+        base.update({
+            'intensity': 0,
+            'stability': 100,
+            'casualties': {
+                'deaths': 0, 'injuries': 0, 'arrests': 0,
+                'verified_sources': [], 'details': [],
+                'articles_without_numbers': []
+            },
+            'threat_matrix': {
+                'incoming_threats': [],
+                'outgoing_threats': []
+            },
+            'articles_en': [],
+            'articles_ar': [],
+            'articles_he': [],
+            'articles_fa': [],
+            'articles_reddit': []
+        })
+    return base
+
+
+def _check_cache_or_placeholder(label, cache_key, target=None, extended=False):
+    """
+    Standard cache-check logic. Call at the top of each endpoint.
+    Returns a Response if cache hit or placeholder, or None if a fresh scan should proceed.
+    """
+    refresh = request.args.get('refresh', 'false').lower() == 'true'
+
+    if not refresh:
+        cached = get_cached_result(cache_key)
+        if cached:
+            if is_cache_fresh(cached, max_age_hours=6):
+                print(f"[{label}] Returning fresh cached data")
+                return jsonify(cached)
+            else:
+                print(f"[{label}] Returning stale cached data (background refresh will update)")
+                cached['stale_cache'] = True
+                return jsonify(cached)
+
+        print(f"[{label}] No cache available, returning empty placeholder")
+        return jsonify(_empty_placeholder(target=target, extended=extended))
+
+    print(f"[{label}] Performing fresh scan...")
+    return None
+    
+# ========================================
 # FLASK APP INITIALIZATION
 # ========================================
 
@@ -5456,220 +5534,38 @@ def api_threat_matrix(target):
             'error': str(e)
         }), 500
 
-# ========================================
-# CACHING SYSTEM (Redis-backed with file fallback)
-# ========================================
-
-import redis
-
-# Connect to Redis — falls back to file cache if Redis unavailable
-REDIS_URL = os.environ.get('REDIS_URL', os.environ.get('REDIS_TOKEN', None))
-redis_client = None
-
-if REDIS_URL:
+@app.route('/api/iran-strike-probability', methods=['GET'])
+def api_iran_strike_probability():
+    """Iran Strike Probability Endpoint — with Redis caching"""
     try:
-        redis_client = redis.from_url(REDIS_URL, decode_responses=True, socket_timeout=5)
-        redis_client.ping()
-        print(f"[Cache] ✅ Redis connected successfully")
-    except Exception as e:
-        print(f"[Cache] ⚠️ Redis connection failed: {e}")
-        print(f"[Cache] Falling back to file-based cache")
-        redis_client = None
-else:
-    print("[Cache] ⚠️ No REDIS_URL found in environment — using file fallback")
+        days = int(request.args.get('days', 7))
 
-# File-based fallback (for local dev or if Redis is down)
-CACHE_FILE = '/tmp/threat_cache.json'
+        result = _check_cache_or_placeholder('Iran', 'iran')
+        if result:
+            return result
 
-def _file_load_cache():
-    """Fallback: load cache from /tmp file"""
-    try:
-        if Path(CACHE_FILE).exists():
-            with open(CACHE_FILE, 'r') as f:
-                return json.load(f)
-    except Exception as e:
-        print(f"[FileCache] Load error: {e}")
-    return {}
+        print("[Iran] Performing fresh scan...")
 
-def _file_save_cache(cache_data):
-    """Fallback: save cache to /tmp file"""
-    try:
-        with open(CACHE_FILE, 'w') as f:
-            json.dump(cache_data, f, indent=2)
-    except Exception as e:
-        print(f"[FileCache] Save error: {e}")
+        if not check_rate_limit():
+            cached = get_cached_result('iran')
+            if cached:
+                cached['stale_cache'] = True
+                return jsonify(cached)
+            return jsonify({
+                'success': False, 'error': 'Rate limit exceeded',
+                'probability': 0, 'rate_limited': True
+            }), 429
 
-
-def get_cached_result(target):
-    """Get cached result for a target — tries Redis first, then file fallback"""
-    # Try Redis
-    if redis_client:
-        try:
-            data = redis_client.get(f'threat:{target}')
-            if data:
-                result = json.loads(data)
-                print(f"[Redis] ✅ Cache hit for {target}")
-                return result
-            else:
-                print(f"[Redis] Cache miss for {target}")
-        except Exception as e:
-            print(f"[Redis] Get error for {target}: {e}")
-
-    # Fallback to file
-    cache = _file_load_cache()
-    result = cache.get(target)
-    if result:
-        print(f"[FileCache] Cache hit for {target}")
-    return result
-
-
-def update_cache(target, data, ttl_hours=24):
-    """Update cache for a specific target — writes to Redis AND file fallback"""
-    cache_entry = {
-        **data,
-        'cached_at': datetime.now(timezone.utc).isoformat(),
-        'cached': True
-    }
-
-    # Write to Redis
-    if redis_client:
-        try:
-            redis_client.setex(
-                f'threat:{target}',
-                int(ttl_hours * 3600),  # TTL in seconds
-                json.dumps(cache_entry)
-            )
-            print(f"[Redis] ✅ Cached {target} (TTL: {ttl_hours}h)")
-        except Exception as e:
-            print(f"[Redis] Set error for {target}: {e}")
-
-    # Also write to file as backup
-    try:
-        cache = _file_load_cache()
-        cache[target] = cache_entry
-        _file_save_cache(cache)
-    except Exception as e:
-        print(f"[FileCache] Backup write error: {e}")
-
-
-def is_cache_fresh(cached_data, max_age_hours=6):
-    """Check if cached data is still fresh (default: 6 hours)"""
-    if not cached_data:
-        return False
-
-    try:
-        cached_at = datetime.fromisoformat(cached_data.get('cached_at', ''))
-        age = datetime.now(timezone.utc) - cached_at
-        is_fresh = age.total_seconds() < (max_age_hours * 3600)
-
-        hours_old = age.total_seconds() / 3600
-        if is_fresh:
-            print(f"[Cache] Data is {hours_old:.1f}h old (fresh, limit: {max_age_hours}h)")
-        else:
-            print(f"[Cache] Data is {hours_old:.1f}h old (STALE, limit: {max_age_hours}h)")
-
-        return is_fresh
-    except Exception as e:
-        print(f"[Cache] Freshness check error: {e}")
-        return False
-
-
-def get_all_cache_status():
-    """Get status of all cached targets — useful for debugging"""
-    targets = ['iran', 'hezbollah', 'houthis', 'syria', 'jordan', 'israel', 'iraq']
-    status = {}
-    for target in targets:
-        cached = get_cached_result(target)
-        if cached:
-            try:
-                cached_at = datetime.fromisoformat(cached.get('cached_at', ''))
-                age_h = (datetime.now(timezone.utc) - cached_at).total_seconds() / 3600
-                status[target] = {
-                    'cached': True,
-                    'probability': cached.get('probability', 0),
-                    'age_hours': round(age_h, 1),
-                    'fresh': age_h < 6
-                }
-            except:
-                status[target] = {'cached': True, 'age_hours': 'unknown'}
-        else:
-            status[target] = {'cached': False}
-    return status
-
-
-# ========================================
-# BACKGROUND REFRESH THREAD
-# ========================================
-
-def _background_refresh_all_caches():
-    """
-    Background thread that refreshes all country card caches every 4 hours.
-    Cache TTL is 24 hours in Redis, refresh every 4 hours,
-    meaning cache is always warm with a 20-hour buffer.
-    """
-    import time as _time
-
-    REFRESH_INTERVAL = 4 * 60 * 60  # 4 hours
-
-    TARGETS = ['iran', 'hezbollah', 'houthis', 'syria', 'jordan', 'israel', 'iraq']
-
-    # On startup, wait 30 seconds before first refresh to let the app boot
-    print("[Background Refresh] Waiting 30s for app to stabilize before first refresh...")
-    _time.sleep(30)
-
-    while True:
-        print(f"\n[Background Refresh] Starting full cache refresh at {datetime.now(timezone.utc).isoformat()}")
-        start = _time.time()
-
-        for target in TARGETS:
-            try:
-                print(f"[Background Refresh] Checking {target}...")
-                cached = get_cached_result(target)
-
-                # Only refresh if cache is stale or missing
-                if cached and is_cache_fresh(cached, max_age_hours=4):
-                    age_h = (datetime.now(timezone.utc) - datetime.fromisoformat(cached['cached_at'])).total_seconds() / 3600
-                    print(f"[Background Refresh] {target} still fresh ({age_h:.1f}h old), skipping")
-                    continue
-
-                print(f"[Background Refresh] Refreshing {target}...")
-                _refresh_target(target)
-
-            except Exception as e:
-                print(f"[Background Refresh] ✗ {target} failed: {e}")
-                import traceback
-                traceback.print_exc()
-
-            # Small delay between targets to avoid hammering APIs
-            _time.sleep(10)
-
-        elapsed = _time.time() - start
-        print(f"[Background Refresh] Complete in {elapsed:.1f}s. Sleeping {REFRESH_INTERVAL}s until next refresh.\n")
-        _time.sleep(REFRESH_INTERVAL)
-
-
-def _refresh_target(target):
-    """
-    Run a fresh scan for a single target and update the Redis cache.
-    """
-    days = 7
-
-    if target in ('iran', 'hezbollah', 'houthis', 'syria'):
-        query = ' OR '.join(TARGET_KEYWORDS[target]['keywords'])
+        query = ' OR '.join(TARGET_KEYWORDS['iran']['keywords'])
 
         articles_en = fetch_newsapi_articles(query, days)
         articles_gdelt_en = fetch_gdelt_articles(query, days, 'eng')
         articles_gdelt_ar = fetch_gdelt_articles(query, days, 'ara')
         articles_gdelt_he = fetch_gdelt_articles(query, days, 'heb')
-
-        articles_gdelt_fa = []
-        if target == 'iran':
-            articles_gdelt_fa = fetch_gdelt_articles(query, days, 'fas')
+        articles_gdelt_fa = fetch_gdelt_articles(query, days, 'fas')
 
         articles_reddit = fetch_reddit_posts(
-            target,
-            TARGET_KEYWORDS[target]['reddit_keywords'],
-            days
+            'iran', TARGET_KEYWORDS['iran']['reddit_keywords'], days
         )
 
         all_articles = (articles_en + articles_gdelt_en + articles_gdelt_ar +
@@ -5682,613 +5578,11 @@ def _refresh_target(target):
                 article['leadership'] = enhance_article_with_leadership(article)
             all_articles.extend(rss_articles)
         except Exception as e:
-            print(f"[Background Refresh] RSS error for {target}: {e}")
+            print(f"[Iran] RSS error: {e}")
 
-        scoring_result = calculate_threat_probability(all_articles, days, target)
+        scoring_result = calculate_threat_probability(all_articles, days, 'iran')
         probability = scoring_result['probability']
         momentum = scoring_result['momentum']
-        breakdown = scoring_result['breakdown']
-
-        # Build recent_headlines
-        recent_headlines = []
-        seen_urls = set()
-        for contributor in scoring_result.get('top_contributors', [])[:10]:
-            for article in all_articles:
-                if (article.get('source', {}).get('name', '') == contributor.get('source', '')
-                        and article.get('url') not in seen_urls):
-                    seen_urls.add(article['url'])
-                    recent_headlines.append({
-                        'title': article.get('title', '')[:120],
-                        'url': article.get('url', ''),
-                        'source': contributor.get('source', 'Unknown'),
-                        'published': article.get('publishedAt', ''),
-                        'threat_type': 'General Intelligence',
-                        'weight': abs(contributor.get('contribution', 0)),
-                        'phrase': '',
-                        'why_included': f"Top scoring (severity: {contributor.get('severity', 1.0)}x)",
-                        'color': 'blue'
-                    })
-                    break
-        recent_headlines.sort(key=lambda x: x['weight'], reverse=True)
-        recent_headlines = recent_headlines[:15]
-
-        # Military posture
-        try:
-            military_posture = get_military_posture(target)
-            military_bonus = military_posture.get('military_bonus', 0)
-            if military_bonus > 0:
-                probability = min(99, probability + military_bonus)
-        except Exception:
-            military_posture = {'alert_level': 'normal', 'military_bonus': 0, 'show_banner': False, 'banner_text': '', 'top_signals': []}
-
-        # Timeline
-        if probability < 30:
-            timeline = "180+ Days"
-        elif probability < 50:
-            timeline = "91-180 Days"
-        elif probability < 70:
-            timeline = "31-90 Days"
-        else:
-            timeline = "0-30 Days"
-
-        # Confidence
-        unique_sources = len(set(a.get('source', {}).get('name', 'Unknown') for a in all_articles))
-        if len(all_articles) >= 20 and unique_sources >= 8:
-            confidence = "High"
-        elif len(all_articles) >= 10 and unique_sources >= 5:
-            confidence = "Medium"
-        else:
-            confidence = "Low"
-
-        result = {
-            'success': True,
-            'probability': probability,
-            'timeline': timeline,
-            'confidence': confidence,
-            'momentum': momentum,
-            'total_articles': len(all_articles),
-            'unique_sources': unique_sources,
-            'recent_articles_48h': breakdown.get('recent_articles_48h', 0),
-            'recent_headlines': recent_headlines,
-            'military_posture': {
-                'alert_level': military_posture.get('alert_level', 'normal'),
-                'alert_label': military_posture.get('alert_label', 'Normal'),
-                'alert_color': military_posture.get('alert_color', 'green'),
-                'military_bonus': military_posture.get('military_bonus', 0),
-                'show_banner': military_posture.get('show_banner', False),
-                'banner_text': military_posture.get('banner_text', ''),
-                'top_signals': military_posture.get('top_signals', []),
-                'detail_url': '/military.html'
-            },
-            'last_updated': datetime.now(timezone.utc).isoformat(),
-            'cached': False,
-            'version': '3.1.0'
-        }
-
-        update_cache(target, result)
-        print(f"[Background Refresh] ✓ {target} cached (probability: {probability}%)")
-
-    elif target == 'jordan':
-        query = ' OR '.join(TARGET_KEYWORDS['jordan']['keywords'])
-
-        articles_en = fetch_newsapi_articles(query, days)
-        articles_gdelt_en = fetch_gdelt_articles(query, days, 'eng')
-        articles_gdelt_ar = fetch_gdelt_articles(query, days, 'ara')
-        articles_gdelt_he = fetch_gdelt_articles(query, days, 'heb')
-        articles_gdelt_fa = fetch_gdelt_articles(query, days, 'fas')
-        articles_reddit = fetch_reddit_posts('jordan', TARGET_KEYWORDS['jordan']['reddit_keywords'], days)
-
-        try:
-            jordan_rss = fetch_jordan_news_rss()
-        except Exception:
-            jordan_rss = []
-
-        all_articles = (articles_en + articles_gdelt_en + articles_gdelt_ar +
-                       articles_gdelt_he + articles_gdelt_fa + articles_reddit + jordan_rss)
-
-        scoring_result = calculate_threat_probability(all_articles, days, 'jordan')
-        probability = scoring_result['probability']
-
-        # Build recent_headlines
-        recent_headlines = []
-        seen_urls = set()
-        for contributor in scoring_result.get('top_contributors', [])[:10]:
-            for article in all_articles:
-                if (article.get('source', {}).get('name', '') == contributor.get('source', '')
-                        and article.get('url') not in seen_urls):
-                    seen_urls.add(article['url'])
-                    recent_headlines.append({
-                        'title': article.get('title', '')[:120],
-                        'url': article.get('url', ''),
-                        'source': contributor.get('source', 'Unknown'),
-                        'published': article.get('publishedAt', ''),
-                        'threat_type': 'General Intelligence',
-                        'weight': abs(contributor.get('contribution', 0)),
-                        'phrase': '',
-                        'why_included': f"Top scoring (severity: {contributor.get('severity', 1.0)}x)",
-                        'color': 'blue'
-                    })
-                    break
-        recent_headlines.sort(key=lambda x: x['weight'], reverse=True)
-        recent_headlines = recent_headlines[:15]
-
-        try:
-            military_posture = get_military_posture('jordan')
-            military_bonus = military_posture.get('military_bonus', 0)
-            if military_bonus > 0:
-                probability = min(99, probability + military_bonus)
-        except Exception:
-            military_posture = {'alert_level': 'normal', 'military_bonus': 0, 'show_banner': False, 'banner_text': '', 'top_signals': []}
-
-        if probability < 30:
-            timeline = "180+ Days"
-        elif probability < 50:
-            timeline = "91-180 Days"
-        elif probability < 70:
-            timeline = "31-90 Days"
-        else:
-            timeline = "0-30 Days"
-
-        unique_sources = len(set(a.get('source', {}).get('name', 'Unknown') for a in all_articles))
-        confidence = "High" if len(all_articles) >= 20 and unique_sources >= 8 else "Medium" if len(all_articles) >= 10 else "Low"
-
-        result = {
-            'success': True,
-            'probability': probability,
-            'timeline': timeline,
-            'confidence': confidence,
-            'momentum': scoring_result['momentum'],
-            'total_articles': len(all_articles),
-            'unique_sources': unique_sources,
-            'recent_headlines': recent_headlines,
-            'military_posture': {
-                'alert_level': military_posture.get('alert_level', 'normal'),
-                'alert_label': military_posture.get('alert_label', 'Normal'),
-                'alert_color': military_posture.get('alert_color', 'green'),
-                'military_bonus': military_posture.get('military_bonus', 0),
-                'show_banner': military_posture.get('show_banner', False),
-                'banner_text': military_posture.get('banner_text', ''),
-                'top_signals': military_posture.get('top_signals', []),
-                'detail_url': '/military.html'
-            },
-            'last_updated': datetime.now(timezone.utc).isoformat(),
-            'cached': False,
-            'version': '3.1.0-jordan'
-        }
-
-        update_cache('jordan', result)
-        print(f"[Background Refresh] ✓ jordan cached (probability: {probability}%)")
-
-    elif target == 'israel':
-        query = ' OR '.join(TARGET_KEYWORDS['israel']['keywords'][:10])
-
-        articles_en = fetch_newsapi_articles(query, days)
-        articles_gdelt_en = fetch_gdelt_articles(query, days, 'eng')
-        articles_gdelt_ar = fetch_gdelt_articles(query, days, 'ara')
-        articles_gdelt_he = fetch_gdelt_articles(query, days, 'heb')
-        articles_gdelt_fa = fetch_gdelt_articles(query, days, 'fas')
-        articles_reddit = fetch_reddit_posts('israel', TARGET_KEYWORDS['israel']['reddit_keywords'], days)
-
-        try:
-            israel_rss = fetch_israel_news_rss()
-        except Exception:
-            israel_rss = []
-
-        all_articles = (articles_en + articles_gdelt_en + articles_gdelt_ar +
-                       articles_gdelt_he + articles_gdelt_fa + articles_reddit + israel_rss)
-
-        scoring_result = calculate_threat_probability(all_articles, days, 'israel')
-        probability = scoring_result['probability']
-
-        # Build recent_headlines
-        recent_headlines = []
-        seen_urls = set()
-        for contributor in scoring_result.get('top_contributors', [])[:10]:
-            for article in all_articles:
-                if (article.get('source', {}).get('name', '') == contributor.get('source', '')
-                        and article.get('url') not in seen_urls):
-                    seen_urls.add(article['url'])
-                    recent_headlines.append({
-                        'title': article.get('title', '')[:120],
-                        'url': article.get('url', ''),
-                        'source': contributor.get('source', 'Unknown'),
-                        'published': article.get('publishedAt', ''),
-                        'threat_type': 'General Intelligence',
-                        'weight': abs(contributor.get('contribution', 0)),
-                        'phrase': '',
-                        'why_included': f"Top scoring (severity: {contributor.get('severity', 1.0)}x)",
-                        'color': 'blue'
-                    })
-                    break
-        recent_headlines.sort(key=lambda x: x['weight'], reverse=True)
-        recent_headlines = recent_headlines[:15]
-
-        try:
-            military_posture = get_military_posture('israel')
-            military_bonus = military_posture.get('military_bonus', 0)
-            if military_bonus > 0:
-                probability = min(99, probability + military_bonus)
-        except Exception:
-            military_posture = {'alert_level': 'normal', 'military_bonus': 0, 'show_banner': False, 'banner_text': '', 'top_signals': []}
-
-        if probability < 30:
-            timeline = "180+ Days"
-        elif probability < 50:
-            timeline = "91-180 Days"
-        elif probability < 70:
-            timeline = "31-90 Days"
-        else:
-            timeline = "0-30 Days"
-
-        unique_sources = len(set(a.get('source', {}).get('name', 'Unknown') for a in all_articles))
-        confidence = "High" if len(all_articles) >= 20 and unique_sources >= 8 else "Medium" if len(all_articles) >= 10 else "Low"
-
-        result = {
-            'success': True,
-            'probability': probability,
-            'timeline': timeline,
-            'confidence': confidence,
-            'momentum': scoring_result['momentum'],
-            'total_articles': len(all_articles),
-            'unique_sources': unique_sources,
-            'recent_headlines': recent_headlines,
-            'military_posture': {
-                'alert_level': military_posture.get('alert_level', 'normal'),
-                'alert_label': military_posture.get('alert_label', 'Normal'),
-                'alert_color': military_posture.get('alert_color', 'green'),
-                'military_bonus': military_posture.get('military_bonus', 0),
-                'show_banner': military_posture.get('show_banner', False),
-                'banner_text': military_posture.get('banner_text', ''),
-                'top_signals': military_posture.get('top_signals', []),
-                'detail_url': '/military.html'
-            },
-            'last_updated': datetime.now(timezone.utc).isoformat(),
-            'cached': False,
-            'version': '3.1.0-israel'
-        }
-
-        update_cache('israel', result)
-        print(f"[Background Refresh] ✓ israel cached (probability: {probability}%)")
-
-    elif target == 'iraq':
-        try:
-            newsapi_articles = fetch_newsapi_articles(
-                'Iraq AND (militia OR ISIS OR attack OR strike OR protest OR Erbil OR Baghdad OR PMF OR PKK)', days
-            )
-        except Exception:
-            newsapi_articles = []
-
-        gdelt_query = 'iraq OR baghdad OR erbil OR militia OR ISIS OR PMF'
-        try:
-            gdelt_en = fetch_gdelt_articles(gdelt_query, days, 'eng')
-        except Exception:
-            gdelt_en = []
-        try:
-            gdelt_ar = fetch_gdelt_articles(gdelt_query, days, 'ara')
-        except Exception:
-            gdelt_ar = []
-        try:
-            gdelt_he = fetch_gdelt_articles(gdelt_query, days, 'heb')
-        except Exception:
-            gdelt_he = []
-        try:
-            gdelt_fa = fetch_gdelt_articles(gdelt_query, days, 'fas')
-        except Exception:
-            gdelt_fa = []
-        try:
-            reddit_posts = fetch_reddit_posts('iraq', ['Iraq', 'Baghdad', 'Erbil', 'ISIS', 'militia', 'PMF', 'Kurdistan'], days)
-        except Exception:
-            reddit_posts = []
-
-        all_articles = newsapi_articles + gdelt_en + gdelt_ar + gdelt_he + gdelt_fa + reddit_posts
-
-        scoring_result = calculate_threat_probability(all_articles, days, 'iraq')
-        probability = scoring_result['probability']
-
-        # Build recent_headlines
-        recent_headlines = []
-        seen_urls = set()
-        for contributor in scoring_result.get('top_contributors', [])[:10]:
-            for article in all_articles:
-                if (article.get('source', {}).get('name', '') == contributor.get('source', '')
-                        and article.get('url') not in seen_urls):
-                    seen_urls.add(article['url'])
-                    recent_headlines.append({
-                        'title': article.get('title', '')[:120],
-                        'url': article.get('url', ''),
-                        'source': contributor.get('source', 'Unknown'),
-                        'published': article.get('publishedAt', ''),
-                        'threat_type': 'General Intelligence',
-                        'weight': abs(contributor.get('contribution', 0)),
-                        'phrase': '',
-                        'why_included': f"Top scoring (severity: {contributor.get('severity', 1.0)}x)",
-                        'color': 'blue'
-                    })
-                    break
-        recent_headlines.sort(key=lambda x: x['weight'], reverse=True)
-        recent_headlines = recent_headlines[:15]
-
-        try:
-            military_posture = get_military_posture('iraq')
-            military_bonus = military_posture.get('military_bonus', 0)
-            if military_bonus > 0:
-                probability = min(99, probability + military_bonus)
-        except Exception:
-            military_posture = {'alert_level': 'normal', 'military_bonus': 0, 'show_banner': False, 'banner_text': '', 'top_signals': []}
-
-        if probability < 30:
-            timeline = "180+ Days"
-        elif probability < 50:
-            timeline = "91-180 Days"
-        elif probability < 70:
-            timeline = "31-90 Days"
-        else:
-            timeline = "0-30 Days"
-
-        unique_sources = len(set(a.get('source', {}).get('name', 'Unknown') for a in all_articles))
-        confidence = "High" if len(all_articles) >= 20 and unique_sources >= 8 else "Medium" if len(all_articles) >= 10 else "Low"
-
-        result = {
-            'success': True,
-            'target': 'iraq',
-            'probability': probability,
-            'timeline': timeline,
-            'confidence': confidence,
-            'momentum': scoring_result['momentum'],
-            'total_articles': len(all_articles),
-            'unique_sources': unique_sources,
-            'recent_headlines': recent_headlines,
-            'military_posture': {
-                'alert_level': military_posture.get('alert_level', 'normal'),
-                'alert_label': military_posture.get('alert_label', 'Normal'),
-                'alert_color': military_posture.get('alert_color', 'green'),
-                'military_bonus': military_posture.get('military_bonus', 0),
-                'show_banner': military_posture.get('show_banner', False),
-                'banner_text': military_posture.get('banner_text', ''),
-                'top_signals': military_posture.get('top_signals', []),
-                'detail_url': '/military.html'
-            },
-            'last_updated': datetime.now(timezone.utc).isoformat(),
-            'cached': False,
-            'version': '3.1.0-iraq'
-        }
-
-        update_cache('iraq', result)
-        print(f"[Background Refresh] ✓ iraq cached (probability: {probability}%)")
-
-
-def start_background_refresh():
-    """Start the background refresh thread (daemon so it dies with the app)."""
-    thread = threading.Thread(target=_background_refresh_all_caches, daemon=True)
-    thread.start()
-    print("[Background Refresh] Thread started — will refresh all caches every 4 hours")
-
-
-# ============================================================
-# END OF SECTION 1
-# ============================================================
-
-
-# ============================================================
-# SECTION 2: ENDPOINT CACHE-CHECK REPLACEMENTS
-# ============================================================
-# For EACH endpoint below, replace the cache-check block at the
-# top of the function. The rest of the endpoint (actual scan
-# logic) stays the same.
-# ============================================================
-
-
-# --- Helper: standard empty placeholder ---
-def _empty_placeholder(target=None, extended=False):
-    """Build the 'no cached data' placeholder response."""
-    base = {
-        'success': True,
-        'probability': 0,
-        'timeline': 'Awaiting scan',
-        'confidence': 'None',
-        'momentum': 'stable',
-        'total_articles': 0,
-        'unique_sources': 0,
-        'recent_headlines': [],
-        'military_posture': {
-            'alert_level': 'normal',
-            'alert_label': 'Normal',
-            'alert_color': 'green',
-            'military_bonus': 0,
-            'show_banner': False,
-            'banner_text': '',
-            'top_signals': [],
-            'detail_url': '/military.html'
-        },
-        'awaiting_scan': True,
-        'last_updated': None,
-        'cached': False,
-        'message': 'No cached data \u2014 click Scan OSINT to populate'
-    }
-    if target:
-        base['target'] = target
-    if extended:
-        base.update({
-            'intensity': 0,
-            'stability': 100,
-            'casualties': {
-                'deaths': 0, 'injuries': 0, 'arrests': 0,
-                'verified_sources': [], 'details': [],
-                'articles_without_numbers': []
-            },
-            'threat_matrix': {
-                'incoming_threats': [],
-                'outgoing_threats': []
-            },
-            'articles_en': [],
-            'articles_ar': [],
-            'articles_he': [],
-            'articles_fa': [],
-            'articles_reddit': []
-        })
-    return base
-
-
-# --- Helper: standard cache check (used by all endpoints) ---
-def _check_cache_or_placeholder(label, cache_key, target=None, extended=False):
-    """
-    Standard cache-check logic. Call at the top of each endpoint.
-    Returns a Response if cache hit or placeholder, or None if a fresh scan should proceed.
-    """
-    refresh = request.args.get('refresh', 'false').lower() == 'true'
-
-    if not refresh:
-        cached = get_cached_result(cache_key)
-        if cached:
-            if is_cache_fresh(cached, max_age_hours=6):
-                print(f"[{label}] Returning fresh cached data")
-                return jsonify(cached)
-            else:
-                print(f"[{label}] Returning stale cached data (background refresh will update)")
-                cached['stale_cache'] = True
-                return jsonify(cached)
-
-        print(f"[{label}] No cache available, returning empty placeholder")
-        return jsonify(_empty_placeholder(target=target, extended=extended))
-
-    print(f"[{label}] Performing fresh scan...")
-    return None
-
-
-# ============================================================
-# USAGE IN EACH ENDPOINT
-# ============================================================
-
-# ---------- IRAN: /api/iran-strike-probability ----------
-#
-#     @app.route('/api/iran-strike-probability')
-#     def iran_strike_probability():
-#         days = int(request.args.get('days', 7))
-#
-#         result = _check_cache_or_placeholder('Iran', 'iran')
-#         if result:
-#             return result
-#
-#         # ... rest of fresh scan logic unchanged ...
-
-
-# ---------- HEZBOLLAH: /api/hezbollah-activity ----------
-#
-#     @app.route('/api/hezbollah-activity')
-#     def hezbollah_activity():
-#         days = int(request.args.get('days', 7))
-#
-#         result = _check_cache_or_placeholder('Hezbollah', 'hezbollah')
-#         if result:
-#             return result
-#
-#         # ... rest of fresh scan logic unchanged ...
-
-
-# ---------- HOUTHIS: /api/houthis-threat ----------
-#
-#     @app.route('/api/houthis-threat')
-#     def houthis_threat():
-#         days = int(request.args.get('days', 7))
-#
-#         result = _check_cache_or_placeholder('Houthis', 'houthis')
-#         if result:
-#             return result
-#
-#         # ... rest of fresh scan logic unchanged ...
-
-
-# ---------- SYRIA: /api/syria-conflict ----------
-#
-#     @app.route('/api/syria-conflict')
-#     def syria_conflict():
-#         days = int(request.args.get('days', 7))
-#
-#         result = _check_cache_or_placeholder('Syria', 'syria')
-#         if result:
-#             return result
-#
-#         # ... rest of fresh scan logic unchanged ...
-
-
-# ---------- JORDAN: /api/jordan-threat ----------
-#
-#     @app.route('/api/jordan-threat')
-#     def jordan_threat():
-#         days = int(request.args.get('days', 7))
-#
-#         result = _check_cache_or_placeholder('Jordan', 'jordan')
-#         if result:
-#             return result
-#
-#         # ... rest of fresh scan logic unchanged ...
-
-
-# ---------- ISRAEL: /api/israel-threat ----------
-#
-#     @app.route('/api/israel-threat')
-#     def israel_threat():
-#         days = int(request.args.get('days', 7))
-#
-#         result = _check_cache_or_placeholder('Israel', 'israel')
-#         if result:
-#             return result
-#
-#         # ... rest of fresh scan logic unchanged ...
-
-
-# ---------- IRAQ: /scan-iraq (special case: has rate limiting) ----------
-#
-#     @app.route('/scan-iraq')
-#     def scan_iraq():
-#         days = int(request.args.get('days', 7))
-#
-#         result = _check_cache_or_placeholder('Iraq', 'iraq', target='iraq', extended=True)
-#         if result:
-#             return result
-#
-#         # Fresh scan requested — check rate limit first
-#         if not check_rate_limit():
-#             cached = get_cached_result('iraq')
-#             if cached:
-#                 cached['stale_cache'] = True
-#                 return jsonify(cached)
-#             return jsonify({
-#                 'success': False,
-#                 'error': 'Rate limit exceeded',
-#                 'probability': 0,
-#                 'rate_limited': True
-#             }), 429
-#
-#         # ... rest of fresh scan logic unchanged ...
-
-# ============================================================
-# SECTION 3: DEBUG ENDPOINT (add as a new route)
-# ============================================================
-# Add this anywhere near your other routes in app.py:
-
-@app.route('/api/cache-status', methods=['GET'])
-def cache_status():
-    """Debug endpoint — shows what's in cache and how old it is"""
-    status = get_all_cache_status()
-    redis_connected = redis_client is not None
-    try:
-        if redis_client:
-            redis_client.ping()
-            redis_ok = True
-        else:
-            redis_ok = False
-    except:
-        redis_ok = False
-
-    return jsonify({
-        'redis_connected': redis_connected,
-        'redis_responsive': redis_ok,
-        'redis_url_set': bool(REDIS_URL),
-        'targets': status,
-        'timestamp': datetime.now(timezone.utc).isoformat()
-    })
-
         
         # ========================================
         # MILITARY POSTURE INTEGRATION
@@ -6395,22 +5689,14 @@ def cache_status():
 
 @app.route('/api/hezbollah-activity', methods=['GET'])
 def api_hezbollah_activity():
-    """
-    Hezbollah Strike Probability Endpoint
-    Returns cached data by default, only scans when refresh=true
-    Now includes military posture data from Military Asset Tracker
-    """
+    """Hezbollah Strike Probability Endpoint — with Redis caching"""
     try:
-        refresh = request.args.get('refresh', 'false').lower() == 'true'
         days = int(request.args.get('days', 7))
-        
-        # Try cached data first
-        if not refresh:
-            cached = get_cached_result('hezbollah')
-            if cached and is_cache_fresh(cached, max_age_hours=6):
-                print("[Hezbollah] Returning cached data")
-                return jsonify(cached)
-        
+
+        result = _check_cache_or_placeholder('Hezbollah', 'hezbollah')
+        if result:
+            return result
+
         print("[Hezbollah] Performing fresh scan...")
         
         if not check_rate_limit():
@@ -6542,22 +5828,14 @@ def api_hezbollah_activity():
 
 @app.route('/api/houthis-threat', methods=['GET'])
 def api_houthis_threat():
-    """
-    Houthis Strike Probability Endpoint
-    Returns cached data by default, only scans when refresh=true
-    Now includes military posture data from Military Asset Tracker
-    """
+    """Houthis Strike Probability Endpoint — with Redis caching"""
     try:
-        refresh = request.args.get('refresh', 'false').lower() == 'true'
         days = int(request.args.get('days', 7))
-        
-        # Try cached data first
-        if not refresh:
-            cached = get_cached_result('houthis')
-            if cached and is_cache_fresh(cached, max_age_hours=6):
-                print("[Houthis] Returning cached data")
-                return jsonify(cached)
-        
+
+        result = _check_cache_or_placeholder('Houthis', 'houthis')
+        if result:
+            return result
+
         print("[Houthis] Performing fresh scan...")
         
         if not check_rate_limit():
@@ -6692,22 +5970,14 @@ def api_houthis_threat():
 
 @app.route('/api/syria-conflict', methods=['GET'])
 def api_syria_conflict():
-    """
-    Syria Strike Probability Endpoint
-    Returns cached data by default, only scans when refresh=true
-    Now includes military posture data from Military Asset Tracker
-    """
+    """Syria Strike Probability Endpoint — with Redis caching"""
     try:
-        refresh = request.args.get('refresh', 'false').lower() == 'true'
         days = int(request.args.get('days', 7))
-        
-        # Try cached data first
-        if not refresh:
-            cached = get_cached_result('syria')
-            if cached and is_cache_fresh(cached, max_age_hours=6):
-                print("[Syria] Returning cached data")
-                return jsonify(cached)
-        
+
+        result = _check_cache_or_placeholder('Syria', 'syria')
+        if result:
+            return result
+
         print("[Syria] Performing fresh scan...")
         
         if not check_rate_limit():
@@ -6861,26 +6131,14 @@ def api_syria_conflict():
 
 @app.route('/api/israel-threat', methods=['GET'])
 def api_israel_threat():
-    """
-    Israel Threat Exposure Index Endpoint
-    
-    Unique threat model:
-    - Incoming: Iran direct, Hezbollah, Hamas, West Bank/Gaza, Houthis, Syria-based
-    - Outgoing: Israel → Lebanon, Gaza, Iran, Syria, West Bank, Yemen
-    - Cross-references Iran and Hezbollah cards
-    Includes military posture data from Military Asset Tracker
-    """
+    """Israel Threat Exposure Index Endpoint — with Redis caching"""
     try:
-        refresh = request.args.get('refresh', 'false').lower() == 'true'
         days = int(request.args.get('days', 7))
-        
-        # Try cached data first
-        if not refresh:
-            cached = get_cached_result('israel')
-            if cached and is_cache_fresh(cached, max_age_hours=6):
-                print("[Israel] Returning cached data")
-                return jsonify(cached)
-        
+
+        result = _check_cache_or_placeholder('Israel', 'israel')
+        if result:
+            return result
+
         print("[Israel] Performing fresh scan...")
         
         if not check_rate_limit():
@@ -7141,26 +6399,14 @@ def api_israel_threat():
 
 @app.route('/api/jordan-threat', methods=['GET'])
 def api_jordan_threat():
-    """
-    Jordan Kinetic Activity Probability Endpoint
-    
-    Unique threat model:
-    - Incoming: Iran/militia, Syria/ISIS, Palestinian unrest, US base targeting
-    - Defensive: Coalition air defense activation, border operations
-    - Cross-references Iran-Israel tension for air defense boost
-    Now includes military posture data from Military Asset Tracker
-    """
+    """Jordan Kinetic Activity Probability Endpoint — with Redis caching"""
     try:
-        refresh = request.args.get('refresh', 'false').lower() == 'true'
         days = int(request.args.get('days', 7))
-        
-        # Try cached data first
-        if not refresh:
-            cached = get_cached_result('jordan')
-            if cached and is_cache_fresh(cached, max_age_hours=6):
-                print("[Jordan] Returning cached data")
-                return jsonify(cached)
-        
+
+        result = _check_cache_or_placeholder('Jordan', 'jordan')
+        if result:
+            return result
+
         print("[Jordan] Performing fresh scan...")
         
         if not check_rate_limit():
@@ -7747,13 +6993,22 @@ def api_travel_advisories():
 def scan_iraq():
     """Iraq stability scan — militia activity, ISIS, Kurdish tensions, US interests"""
     try:
-        if not check_rate_limit():
-            return jsonify({
-                'error': 'Rate limit exceeded',
-                'rate_limit': get_rate_limit_info()
-            }), 429
-
         days = int(request.args.get('days', 7))
+
+        result = _check_cache_or_placeholder('Iraq', 'iraq', target='iraq', extended=True)
+        if result:
+            return result
+
+        # Fresh scan — check rate limit
+        if not check_rate_limit():
+            cached = get_cached_result('iraq')
+            if cached:
+                cached['stale_cache'] = True
+                return jsonify(cached)
+            return jsonify({
+                'success': False, 'error': 'Rate limit exceeded',
+                'probability': 0, 'rate_limited': True
+            }), 429
 
         # ---- Fetch from all sources ----
         # NewsAPI — broad Iraq query
@@ -8079,7 +7334,29 @@ def scan_iraq():
             'articles_fa': [],
             'articles_reddit': []
         }), 500
-        
+
+@app.route('/api/cache-status', methods=['GET'])
+def cache_status():
+    """Debug endpoint — shows what's in cache and how old it is"""
+    status = get_all_cache_status()
+    redis_connected = redis_client is not None
+    try:
+        if redis_client:
+            redis_client.ping()
+            redis_ok = True
+        else:
+            redis_ok = False
+    except:
+        redis_ok = False
+
+    return jsonify({
+        'redis_connected': redis_connected,
+        'redis_responsive': redis_ok,
+        'redis_url_set': bool(REDIS_URL),
+        'targets': status,
+        'timestamp': datetime.now(timezone.utc).isoformat()
+    })
+    
 @app.route('/', methods=['GET'])
 def home():
     """Root endpoint"""
