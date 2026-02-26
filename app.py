@@ -414,11 +414,11 @@ _travel_advisory_cache = {'data': None, 'fetched_at': None, 'ttl': 86400}  # 24h
 TRAVEL_ADVISORY_API = "https://cadataapi.state.gov/api/TravelAdvisories"
 
 TRAVEL_ADVISORY_CODES = {
-    'hezbollah': ['LE'],   # Lebanon
+    'hezbollah': ['LE'],   # Lebanon (FIPS)
     'iran': ['IR'],
-    'iraq': ['IQ'],
-    'houthis': ['YM'],     # Yemen
-    'israel': ['IL'],
+    'iraq': ['IZ'],        # Iraq (FIPS — not IQ!)
+    'houthis': ['YM'],     # Yemen (FIPS)
+    'israel': ['IS'],      # Israel (FIPS — not IL!)
     'syria': ['SY'],
     'jordan': ['JO'],
 }
