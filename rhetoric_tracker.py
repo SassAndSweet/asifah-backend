@@ -1230,7 +1230,15 @@ def get_rhetoric_trends(days=30):
 
 def register_rhetoric_endpoints(app):
     """Register rhetoric tracker endpoints with the Flask app."""
-    from flask import request as flask_request, jsonify
+    from flask import request as flask_request, jsonify, make_response
+
+    def _cors_response(data, status=200):
+        """Wrap jsonify with CORS headers."""
+        resp = make_response(jsonify(data), status)
+        resp.headers['Access-Control-Allow-Origin'] = '*'
+        resp.headers['Access-Control-Allow-Methods'] = 'GET, OPTIONS'
+        resp.headers['Access-Control-Allow-Headers'] = 'Content-Type'
+        return resp
 
     @app.route('/api/rhetoric/lebanon', methods=['GET'])
     def api_rhetoric_lebanon():
@@ -1243,30 +1251,30 @@ def register_rhetoric_endpoints(app):
                 if cached and is_cache_fresh(cached, max_age_hours=12):
                     cached['cached'] = True
                     print("[Rhetoric] Returning cached data")
-                    return jsonify(cached)
+                    return _cors_response(cached)
 
                 # Return stale cache if available, trigger background refresh
                 if cached:
                     cached['cached'] = True
                     cached['stale'] = True
                     _trigger_rhetoric_scan()
-                    return jsonify(cached)
+                    return _cors_response(cached)
 
                 # No cache at all — return empty + trigger scan
                 _trigger_rhetoric_scan()
-                return jsonify(_build_empty_result())
+                return _cors_response(_build_empty_result())
 
             # Forced refresh
             _trigger_rhetoric_scan()
             cached = cache_get(RHETORIC_CACHE_KEY)
             if cached:
                 cached['refresh_triggered'] = True
-                return jsonify(cached)
-            return jsonify(_build_empty_result())
+                return _cors_response(cached)
+            return _cors_response(_build_empty_result())
 
         except Exception as e:
             print(f"[Rhetoric API] Error: {e}")
-            return jsonify({'success': False, 'error': str(e)[:200]}), 500
+            return _cors_response({'success': False, 'error': str(e)[:200]}, 500)
 
     @app.route('/api/rhetoric/lebanon/summary', methods=['GET'])
     def api_rhetoric_lebanon_summary():
@@ -1274,7 +1282,7 @@ def register_rhetoric_endpoints(app):
         try:
             cached = cache_get(RHETORIC_CACHE_KEY)
             if not cached:
-                return jsonify({
+                return _cors_response({
                     'rhetoric_score': 0,
                     'theatre_level': 0,
                     'theatre_label': 'Awaiting scan',
@@ -1283,7 +1291,7 @@ def register_rhetoric_endpoints(app):
                     'awaiting_scan': True,
                 })
 
-            return jsonify({
+            return _cors_response({
                 'rhetoric_score': cached.get('rhetoric_score', 0),
                 'theatre_level': cached.get('theatre_escalation_level', 0),
                 'theatre_label': cached.get('theatre_escalation_label', 'Silent'),
@@ -1293,7 +1301,7 @@ def register_rhetoric_endpoints(app):
             })
 
         except Exception as e:
-            return jsonify({'error': str(e)[:200]}), 500
+            return _cors_response({'error': str(e)[:200]}, 500)
 
     @app.route('/api/rhetoric/lebanon/trends', methods=['GET'])
     def api_rhetoric_lebanon_trends():
@@ -1301,9 +1309,9 @@ def register_rhetoric_endpoints(app):
         try:
             days = int(flask_request.args.get('days', 30))
             days = min(days, 90)
-            return jsonify(get_rhetoric_trends(days))
+            return _cors_response(get_rhetoric_trends(days))
         except Exception as e:
-            return jsonify({'success': False, 'error': str(e)[:200]}), 500
+            return _cors_response({'success': False, 'error': str(e)[:200]}, 500)
 
     print("[Rhetoric Tracker] ✅ Endpoints registered: "
           "/api/rhetoric/lebanon, /api/rhetoric/lebanon/summary, /api/rhetoric/lebanon/trends")
