@@ -416,6 +416,7 @@ TRAVEL_ADVISORY_API = "https://cadataapi.state.gov/api/TravelAdvisories"
 TRAVEL_ADVISORY_CODES = {
     'hezbollah': ['LE'],   # Lebanon
     'iran': ['IR'],
+    'iraq': ['IQ'],
     'houthis': ['YM'],     # Yemen
     'israel': ['IL'],
     'syria': ['SY'],
@@ -6776,6 +6777,17 @@ def scan_iraq():
                 'sources': [], 'details': [], 'articles_without_numbers': []
             }
 
+        # ---- Military posture integration ----
+        try:
+            military_posture = get_military_posture('iraq')
+            military_bonus = military_posture.get('military_bonus', 0)
+            if military_bonus > 0:
+                probability = min(99, probability + military_bonus)
+                print(f"[Iraq] Military posture: {military_posture.get('alert_level', 'normal')} → +{military_bonus}% (new total: {probability}%)")
+        except Exception as mil_err:
+            print(f"[Iraq] Military posture lookup failed: {mil_err}")
+            military_posture = {'alert_level': 'normal', 'military_bonus': 0, 'show_banner': False, 'banner_text': '', 'top_signals': []}
+
         # ---- Calculate intensity & stability ----
         articles_per_day = len(all_articles) / days if days > 0 else 0
         intensity_score = min(
@@ -6845,7 +6857,6 @@ def scan_iraq():
         }
 
         # ---- Populate threat matrix from scoring ----
-        # Use the overall probability as a base, then adjust per actor
         for threat in threat_matrix['incoming_threats']:
             if threat['actor'] == 'US':
                 t_prob = min(probability * 0.7, 95)
@@ -6910,6 +6921,29 @@ def scan_iraq():
         if momentum == 'increasing' and probability > 50:
             timeline = "0-30 Days (Elevated threat)"
 
+        # ---- Build recent_headlines for frontend ----
+        recent_headlines = []
+        seen_urls = set()
+        for contributor in scoring_result.get('top_contributors', [])[:10]:
+            for article in all_articles:
+                if (article.get('source', {}).get('name', '') == contributor.get('source', '')
+                        and article.get('url') not in seen_urls):
+                    seen_urls.add(article['url'])
+                    recent_headlines.append({
+                        'title': article.get('title', '')[:120],
+                        'url': article.get('url', ''),
+                        'source': contributor.get('source', 'Unknown'),
+                        'published': article.get('publishedAt', ''),
+                        'threat_type': 'General Intelligence',
+                        'weight': abs(contributor.get('contribution', 0)),
+                        'phrase': '',
+                        'why_included': f"Top scoring (severity: {contributor.get('severity', 1.0)}x)",
+                        'color': 'blue'
+                    })
+                    break
+        recent_headlines.sort(key=lambda x: x['weight'], reverse=True)
+        recent_headlines = recent_headlines[:15]
+
         # ---- Build response ----
         return jsonify({
             'success': True,
@@ -6921,6 +6955,7 @@ def scan_iraq():
             'confidence': confidence,
             'momentum': momentum,
             'total_articles': len(all_articles),
+            'unique_sources': unique_sources,
             'intensity': int(intensity_score),
             'stability': int(stability_score),
 
@@ -6936,6 +6971,18 @@ def scan_iraq():
             },
 
             'threat_matrix': threat_matrix,
+            'recent_headlines': recent_headlines,
+
+            'military_posture': {
+                'alert_level': military_posture.get('alert_level', 'normal'),
+                'alert_label': military_posture.get('alert_label', 'Normal'),
+                'alert_color': military_posture.get('alert_color', 'green'),
+                'military_bonus': military_posture.get('military_bonus', 0),
+                'show_banner': military_posture.get('show_banner', False),
+                'banner_text': military_posture.get('banner_text', ''),
+                'top_signals': military_posture.get('top_signals', []),
+                'detail_url': '/military.html'
+            },
 
             'articles_en': [a for a in all_articles if a.get('language') == 'en'][:20],
             'articles_ar': [a for a in all_articles if a.get('language') == 'ar'][:20],
@@ -6944,6 +6991,7 @@ def scan_iraq():
             'articles_reddit': [a for a in all_articles
                                if a.get('source', {}).get('name', '').startswith('r/')][:20],
 
+            'last_updated': datetime.now(timezone.utc).isoformat(),
             'cached': False,
             'version': '2.3.0-IRAQ'
         })
@@ -6971,6 +7019,13 @@ def scan_iraq():
             'threat_matrix': {
                 'incoming_threats': [],
                 'outgoing_threats': []
+            },
+            'recent_headlines': [],
+            'military_posture': {
+                'alert_level': 'normal', 'alert_label': 'Normal',
+                'alert_color': 'green', 'military_bonus': 0,
+                'show_banner': False, 'banner_text': '',
+                'top_signals': [], 'detail_url': '/military.html'
             },
             'articles_en': [],
             'articles_ar': [],
