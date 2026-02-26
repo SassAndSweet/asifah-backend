@@ -43,6 +43,7 @@ OUTPUTS:
 
 COPYRIGHT © 2025-2026 Asifah Analytics. All rights reserved.
 """
+print("[Rhetoric Tracker] Module loading...")
 
 # ========================================
 # IMPORTS
