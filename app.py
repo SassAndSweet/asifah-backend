@@ -622,6 +622,14 @@ TARGET_BASELINES = {
         'base_adjustment': +5,
         'description': 'Elevated regional tensions'
     },
+    'iraq': {
+        'base_adjustment': +5,
+        'description': 'PMF militia activity, US base/consulate threats, ISIS remnants'
+    },
+    'israel': {
+        'base_adjustment': +12,
+        'description': 'Active multi-front conflict, elevated baseline due to ongoing operations'
+    },
     'houthis': {
         'base_adjustment': 0,
         'description': 'Red Sea shipping disruptions ongoing'
@@ -633,18 +641,15 @@ TARGET_BASELINES = {
     'jordan': {
         'base_adjustment': +3,
         'description': 'Stable US ally, elevated due to regional spillover risk'
-    },
-    'israel': {
-        'base_adjustment': +12,
-        'description': 'Active multi-front conflict, elevated baseline due to ongoing operations'
     }
 }
 
 REDDIT_SUBREDDITS = {
-    "hezbollah": [
-        "ForbiddenBromance", "Israel", "Lebanon",
-        "geopolitics", "anime_titties", "CredibleDefense"
-    ],
+    "hezbollah": ["ForbiddenBromance", "Israel", "Lebanon"],
+    "iran": ["Iran", "Israel", "geopolitics"],
+    "houthis": ["Yemen", "Israel", "geopolitics"],
+    "iraq": ["Iraq", "Kurdistan", "geopolitics", "anime_titties"]
+}
     "iran": [
         "Iran", "Israel", "geopolitics",
         "iranpolitics", "CredibleDefense", "anime_titties"
@@ -693,6 +698,47 @@ TARGET_KEYWORDS = {
         'keywords': ['iran', 'iranian', 'tehran', 'irgc', 'revolutionary guard', 'khamenei'],
         'reddit_keywords': ['Iran', 'Israel', 'IRGC', 'nuclear', 'Tehran', 'strike', 'sanctions']
     },
+    'iraq': {
+        'keywords': [
+            'iraq', 'iraqi', 'baghdad', 'basra', 'erbil', 'kirkuk', 'kurdistan',
+            'PMF', 'popular mobilization forces', 'hashd al-shaabi',
+            'PKK', 'kurdistan workers party',
+            'ISIS', 'ISIL', "da'esh", 'daesh',
+            'al-sudani', 'peshmerga', 'militia',
+            'erbil consulate', 'erbil rocket', 'green zone',
+            'kataib hezbollah', 'asaib ahl al-haq'
+        ],
+        'reddit_keywords': [
+            'Iraq', 'Baghdad', 'Erbil', 'Kurdistan', 'ISIS', 'militia',
+            'PMF', 'PKK', 'Peshmerga', 'US troops', 'consulate',
+            'Daesh', 'Kirkuk', 'Green Zone', 'Kataib Hezbollah'
+        ]
+    },
+    'israel': {
+        'keywords': [
+            'israel', 'israeli', 'idf', 'tel aviv', 'jerusalem', 'netanyahu',
+            'iron dome', 'iron beam', 'israel defense forces', 'knesset',
+            'shin bet', 'mossad', 'israel military', 'israel strike',
+            'israel airstrike', 'israel operation', 'israel gaza',
+            'israel lebanon', 'israel hezbollah', 'israel iran',
+            'west bank raid', 'jenin raid', 'nablus', 'tulkarm',
+            'israel houthis', 'eilat', 'haifa', 'golan heights',
+            'ben gurion', 'negev', 'dimona', 'israel reserves',
+            'israel mobilization', 'gaza operation', 'rafah',
+            'hamas tunnel', 'hostage', 'hostages gaza',
+            'צה״ל', 'כיפת ברזל', 'תקיפה', 'חיזבאללה', 'חמאס',
+            'טילים', 'רקטות', 'כוננות', 'מילואים', 'פיגוע',
+            'עזה', 'לבנון', 'איראן', 'תימן', 'חות׳ים',
+            'יהודה ושומרון', 'ג׳נין', 'שכם', 'גדר הביטחון'
+        ],
+        'reddit_keywords': [
+            'Israel', 'IDF', 'Netanyahu', 'Iron Dome', 'Gaza',
+            'Hezbollah', 'Hamas', 'West Bank', 'Jenin', 'Houthis',
+            'Tel Aviv', 'Jerusalem', 'Israeli military', 'strike',
+            'المقاومة', 'الكيان الصهيوني', 'صواريخ', 'حزب الله', 'حماس',
+            'القسام', 'طوفان الأقصى', 'جيش الاحتلال'
+        ]
+    },
     'houthis': {
         'keywords': ['houthi', 'houthis', 'yemen', 'yemeni', 'ansarallah', 'ansar allah', 'sanaa'],
         'reddit_keywords': ['Houthi', 'Yemen', 'Red Sea', 'shipping', 'missile', 'drone', 'Ansar Allah']
@@ -727,31 +773,6 @@ TARGET_KEYWORDS = {
             'Jordan', 'Amman', 'Jordanian', 'King Abdullah', 'Hashemite',
             'Tower 22', 'Captagon', 'Jordan border', 'Jordan airspace',
             'Jordan protest', 'Palestinian', 'ISIS Jordan'
-        ]
-    },
-    'israel': {
-        'keywords': [
-            'israel', 'israeli', 'idf', 'tel aviv', 'jerusalem', 'netanyahu',
-            'iron dome', 'iron beam', 'israel defense forces', 'knesset',
-            'shin bet', 'mossad', 'israel military', 'israel strike',
-            'israel airstrike', 'israel operation', 'israel gaza',
-            'israel lebanon', 'israel hezbollah', 'israel iran',
-            'west bank raid', 'jenin raid', 'nablus', 'tulkarm',
-            'israel houthis', 'eilat', 'haifa', 'golan heights',
-            'ben gurion', 'negev', 'dimona', 'israel reserves',
-            'israel mobilization', 'gaza operation', 'rafah',
-            'hamas tunnel', 'hostage', 'hostages gaza',
-            'צה״ל', 'כיפת ברזל', 'תקיפה', 'חיזבאללה', 'חמאס',
-            'טילים', 'רקטות', 'כוננות', 'מילואים', 'פיגוע',
-            'עזה', 'לבנון', 'איראן', 'תימן', 'חות׳ים',
-            'יהודה ושומרון', 'ג׳נין', 'שכם', 'גדר הביטחון'
-        ],
-        'reddit_keywords': [
-            'Israel', 'IDF', 'Netanyahu', 'Iron Dome', 'Gaza',
-            'Hezbollah', 'Hamas', 'West Bank', 'Jenin', 'Houthis',
-            'Tel Aviv', 'Jerusalem', 'Israeli military', 'strike',
-            'المقاومة', 'الكيان الصهيوني', 'صواريخ', 'حزب الله', 'حماس',
-            'القسام', 'طوفان الأقصى', 'جيش الاحتلال'
         ]
     }
 }
@@ -6674,6 +6695,292 @@ def api_travel_advisories():
             stale['stale'] = True
             return jsonify(stale)
         return jsonify({'success': False, 'error': str(e), 'advisories': {}}), 500
+
+# ========================================
+# IRAQ SCAN ENDPOINT
+# ========================================
+@app.route('/scan-iraq', methods=['GET'])
+def scan_iraq():
+    """Iraq stability scan — militia activity, ISIS, Kurdish tensions, US interests"""
+    try:
+        if not check_rate_limit():
+            return jsonify({
+                'error': 'Rate limit exceeded',
+                'rate_limit': get_rate_limit_info()
+            }), 429
+
+        days = int(request.args.get('days', 7))
+
+        # ---- Fetch from all sources ----
+        # NewsAPI — broad Iraq query
+        try:
+            newsapi_articles = fetch_newsapi_articles(
+                'Iraq AND (militia OR ISIS OR attack OR strike OR protest OR Erbil OR Baghdad OR PMF OR PKK)', days
+            )
+        except Exception as e:
+            print(f"[Iraq] NewsAPI error: {e}")
+            newsapi_articles = []
+
+        # GDELT — multilingual
+        gdelt_query = 'iraq OR baghdad OR erbil OR militia OR ISIS OR PMF'
+        try:
+            gdelt_en = fetch_gdelt_articles(gdelt_query, days, 'eng')
+        except Exception as e:
+            print(f"[Iraq] GDELT EN error: {e}")
+            gdelt_en = []
+
+        try:
+            gdelt_ar = fetch_gdelt_articles(gdelt_query, days, 'ara')
+        except Exception as e:
+            print(f"[Iraq] GDELT AR error: {e}")
+            gdelt_ar = []
+
+        try:
+            gdelt_he = fetch_gdelt_articles(gdelt_query, days, 'heb')
+        except Exception as e:
+            print(f"[Iraq] GDELT HE error: {e}")
+            gdelt_he = []
+
+        try:
+            gdelt_fa = fetch_gdelt_articles(gdelt_query, days, 'fas')
+        except Exception as e:
+            print(f"[Iraq] GDELT FA error: {e}")
+            gdelt_fa = []
+
+        # Reddit
+        try:
+            reddit_posts = fetch_reddit_posts(
+                'iraq',
+                ['Iraq', 'Baghdad', 'Erbil', 'ISIS', 'militia', 'PMF', 'Kurdistan'],
+                days
+            )
+        except Exception as e:
+            print(f"[Iraq] Reddit error: {e}")
+            reddit_posts = []
+
+        all_articles = (newsapi_articles + gdelt_en + gdelt_ar +
+                       gdelt_he + gdelt_fa + reddit_posts)
+
+        print(f"[Iraq] Total articles fetched: {len(all_articles)}")
+
+        # ---- Calculate threat probability ----
+        scoring_result = calculate_threat_probability(all_articles, days, 'iraq')
+        probability = scoring_result['probability']
+        momentum = scoring_result['momentum']
+        breakdown = scoring_result['breakdown']
+
+        # ---- Extract casualty data ----
+        try:
+            casualties = extract_casualty_data(all_articles)
+        except Exception as e:
+            print(f"[Iraq] Casualty extraction error: {e}")
+            casualties = {
+                'deaths': 0, 'injuries': 0, 'arrests': 0,
+                'sources': [], 'details': [], 'articles_without_numbers': []
+            }
+
+        # ---- Calculate intensity & stability ----
+        articles_per_day = len(all_articles) / days if days > 0 else 0
+        intensity_score = min(
+            articles_per_day * 2 +
+            casualties['deaths'] * 0.5 +
+            casualties['injuries'] * 0.2 +
+            casualties['arrests'] * 0.1 +
+            probability * 0.3,
+            100
+        )
+        stability_score = 100 - intensity_score
+
+        # ---- Multi-actor threat matrix ----
+        threat_matrix = {
+            'incoming_threats': [
+                {
+                    'actor': 'US',
+                    'actor_flag': 'US',
+                    'label': 'US Strike',
+                    'description': 'US military action against Iraqi militia targets',
+                    'probability': None,
+                    'level': None
+                },
+                {
+                    'actor': 'Israel',
+                    'actor_flag': 'IL',
+                    'label': 'Israel Strike',
+                    'description': 'Israeli strikes on Iran-linked targets in Iraq',
+                    'probability': None,
+                    'level': None
+                },
+                {
+                    'actor': 'ISIS',
+                    'actor_flag': '\u2620\ufe0f',
+                    'label': 'ISIS Attack',
+                    'description': 'ISIS/Daesh remnant attacks in Anbar, Kirkuk, Diyala',
+                    'probability': None,
+                    'level': None
+                }
+            ],
+            'outgoing_threats': [
+                {
+                    'actor_from': 'IR',
+                    'actor_to': 'US',
+                    'label': 'Iraq Militia \u2192 US Interests',
+                    'description': 'Incl. military installations, embassies, consulates, and forward-deployed assets',
+                    'probability': None,
+                    'level': None
+                },
+                {
+                    'actor_from': 'IQ',
+                    'actor_to': 'KRG',
+                    'label': 'Iraq \u2192 Kurdistan',
+                    'description': 'Federal-KRG tensions, PKK operations, Kirkuk disputes',
+                    'probability': None,
+                    'level': None
+                },
+                {
+                    'actor_from': 'IR',
+                    'actor_to': 'Gulf',
+                    'label': 'Iran Proxy \u2192 Gulf States',
+                    'description': 'PMF/militia threats to Gulf shipping and Saudi border',
+                    'probability': None,
+                    'level': None
+                }
+            ]
+        }
+
+        # ---- Populate threat matrix from scoring ----
+        # Use the overall probability as a base, then adjust per actor
+        for threat in threat_matrix['incoming_threats']:
+            if threat['actor'] == 'US':
+                t_prob = min(probability * 0.7, 95)
+            elif threat['actor'] == 'Israel':
+                t_prob = min(probability * 0.5, 95)
+            elif threat['actor'] == 'ISIS':
+                t_prob = min(probability * 0.6, 95)
+            else:
+                t_prob = probability * 0.5
+
+            threat['probability'] = round(t_prob, 1)
+            if t_prob >= 70:
+                threat['level'] = 'VERY HIGH'
+            elif t_prob >= 50:
+                threat['level'] = 'HIGH'
+            elif t_prob >= 30:
+                threat['level'] = 'MODERATE'
+            else:
+                threat['level'] = 'LOW'
+
+        for threat in threat_matrix['outgoing_threats']:
+            if 'US' in threat.get('actor_to', ''):
+                t_prob = min(probability * 0.75, 95)
+            elif 'KRG' in threat.get('actor_to', ''):
+                t_prob = min(probability * 0.4, 95)
+            elif 'Gulf' in threat.get('actor_to', ''):
+                t_prob = min(probability * 0.45, 95)
+            else:
+                t_prob = probability * 0.5
+
+            threat['probability'] = round(t_prob, 1)
+            if t_prob >= 70:
+                threat['level'] = 'VERY HIGH'
+            elif t_prob >= 50:
+                threat['level'] = 'HIGH'
+            elif t_prob >= 30:
+                threat['level'] = 'MODERATE'
+            else:
+                threat['level'] = 'LOW'
+
+        # ---- Confidence level ----
+        unique_sources = len(set(
+            a.get('source', {}).get('name', 'Unknown') for a in all_articles
+        ))
+        if len(all_articles) >= 20 and unique_sources >= 8:
+            confidence = "High"
+        elif len(all_articles) >= 10 and unique_sources >= 5:
+            confidence = "Medium"
+        else:
+            confidence = "Low"
+
+        # ---- Timeline mapping ----
+        if probability >= 70:
+            timeline = "0-30 Days (Elevated threat)"
+        elif probability >= 50:
+            timeline = "31-90 Days"
+        elif probability >= 30:
+            timeline = "91-180 Days"
+        else:
+            timeline = "180+ Days (Low priority)"
+
+        if momentum == 'increasing' and probability > 50:
+            timeline = "0-30 Days (Elevated threat)"
+
+        # ---- Build response ----
+        return jsonify({
+            'success': True,
+            'target': 'iraq',
+            'timestamp': datetime.now(timezone.utc).isoformat(),
+            'days_analyzed': days,
+            'probability': probability,
+            'timeline': timeline,
+            'confidence': confidence,
+            'momentum': momentum,
+            'total_articles': len(all_articles),
+            'intensity': int(intensity_score),
+            'stability': int(stability_score),
+
+            'scoring_breakdown': breakdown,
+
+            'casualties': {
+                'deaths': casualties['deaths'],
+                'injuries': casualties['injuries'],
+                'arrests': casualties['arrests'],
+                'verified_sources': casualties.get('sources', []),
+                'details': casualties.get('details', []),
+                'articles_without_numbers': casualties.get('articles_without_numbers', [])
+            },
+
+            'threat_matrix': threat_matrix,
+
+            'articles_en': [a for a in all_articles if a.get('language') == 'en'][:20],
+            'articles_ar': [a for a in all_articles if a.get('language') == 'ar'][:20],
+            'articles_he': [a for a in all_articles if a.get('language') == 'he'][:20],
+            'articles_fa': [a for a in all_articles if a.get('language') == 'fa'][:20],
+            'articles_reddit': [a for a in all_articles
+                               if a.get('source', {}).get('name', '').startswith('r/')][:20],
+
+            'cached': False,
+            'version': '2.3.0-IRAQ'
+        })
+
+    except Exception as e:
+        print(f"Error in /scan-iraq: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'target': 'iraq',
+            'probability': 0,
+            'timeline': 'Unknown',
+            'confidence': 'Low',
+            'momentum': 'stable',
+            'total_articles': 0,
+            'intensity': 0,
+            'stability': 100,
+            'casualties': {
+                'deaths': 0, 'injuries': 0, 'arrests': 0,
+                'verified_sources': [], 'details': [],
+                'articles_without_numbers': []
+            },
+            'threat_matrix': {
+                'incoming_threats': [],
+                'outgoing_threats': []
+            },
+            'articles_en': [],
+            'articles_ar': [],
+            'articles_he': [],
+            'articles_fa': [],
+            'articles_reddit': []
+        }), 500
         
 @app.route('/', methods=['GET'])
 def home():
@@ -6682,8 +6989,9 @@ def home():
         'status': 'Backend is running',
         'version': '3.0.0',
         'endpoints': {
-            '/api/threat/<target>': 'Threat assessment for hezbollah, iran, houthis, syria',
-            '/scan-iran-protests': 'Iran protests data + Regime Stability Index ✅',
+            '/api/threat/<target>': 'Get threat assessment for iran, hezbollah, houthis, or iraq',
+            '/scan-iraq': 'Get Iraq stability scan with threat matrix',
+            '/scan-iran-protests': 'Get Iran protests data with casualties',
             '/api/jordan-threat': 'Jordan kinetic activity probability (incoming threats + defensive posture) 🇯🇴 NEW!',
             '/scan-lebanon-stability': 'Lebanon Stability Index (Political, Economic, Security, Hezbollah) 🇱🇧 NEW!',
             '/api/syria-conflicts': 'Syria conflicts tracker ✅',
@@ -6704,7 +7012,7 @@ def health():
     """Health check"""
     return jsonify({
         'status': 'healthy',
-        'version': '3.0.0',
+        'version': '2.3.0-IRAQ',
         'timestamp': datetime.now(timezone.utc).isoformat()
     })
 
