@@ -782,7 +782,7 @@ TRAVEL_ADVISORY_CODES = {
     'iran': ['IR'],
     'iraq': ['IZ'],        # Iraq (FIPS — not IQ!)
     'houthis': ['YM'],     # Yemen (FIPS)
-    'israel': ['IS'],      # Israel (FIPS — not IL!)
+    'israel': ['IS', 'GZ', 'WE'],  # Israel/West Bank/Gaza (FIPS — covers combined advisory)
     'syria': ['SY'],
     'jordan': ['JO'],
 }
@@ -6894,11 +6894,10 @@ def _run_travel_advisory_scan():
         all_advisories = response.json()
         results = {}
 
-        for target, codes in TRAVEL_ADVISORY_CODES.items():
-            for advisory in all_advisories:
+        for advisory in all_advisories:
                 category_list = advisory.get('Category', [])
-                category = category_list[0] if category_list else ''
-                if category in codes:
+                if any(cat in codes for cat in category_list):
+                    category = category_list[0] if category_list else ''
                     title = advisory.get('Title', '')
                     level_match = re.search(r'Level\s+(\d)', title)
                     level = int(level_match.group(1)) if level_match else 0
