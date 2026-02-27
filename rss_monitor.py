@@ -2,11 +2,13 @@
 RSS Monitor for Asifah Analytics
 Comprehensive RSS feed monitoring for Middle East intelligence
 
+v3.2.0 — February 2026
+
 Monitors:
 1. Leadership Rhetoric (MEMRI, Al-Manar, Iran Wire)
 2. Israeli News Sources (Ynet, Times of Israel, JPost, i24NEWS, Haaretz)
 3. Regional Arab News Sources (Arab News)
-4. Airline Flight Disruptions (Lufthansa, Air France, KLM, Emirates, Turkish, British Airways)
+4. Airline Flight Disruptions — CACHED, background refresh every 12h
 
 Leaders monitored:
 - Naim Qassem (Hezbollah Secretary-General)
@@ -17,7 +19,11 @@ Leaders monitored:
 
 import requests
 import xml.etree.ElementTree as ET
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
+from pathlib import Path
+import threading
+import json
+import time
 import re
 
 
@@ -40,34 +46,13 @@ ISRAELI_RSS_FEEDS = {
     'haaretz': 'https://www.haaretz.com/srv/haaretz-latest-news',
 }
 
-# NEW: Regional Arab News Sources
+# Regional Arab News Sources
 REGIONAL_ARAB_RSS_FEEDS = {
     'arab_news': 'https://news.google.com/rss/search?q=site:arabnews.com+middle+east&hl=en&gl=US&ceid=US:en',
 }
 
 # Combine all feeds
 ALL_RSS_FEEDS = {**LEADERSHIP_RSS_FEEDS, **ISRAELI_RSS_FEEDS, **REGIONAL_ARAB_RSS_FEEDS}
-
-
-# ========================================
-# AIRLINE RSS FEEDS - FLIGHT DISRUPTIONS
-# ========================================
-AIRLINE_RSS_FEEDS = {
-    'lufthansa': 'https://www.lufthansa.com/xx/en/homepage',  # Note: Lufthansa doesn't have public RSS, will use scraped data
-    'air_france': 'https://wwws.airfrance.com/search/all/all/en',
-    'klm': 'https://www.klm.com',
-    'emirates': 'https://www.emirates.com/media-centre',
-    'turkish': 'https://www.turkishairlines.com/en-int/press-room/',
-    'british_airways': 'https://mediacentre.britishairways.com',
-}
-
-DISRUPTION_KEYWORDS = [
-    'suspend', 'cancel', 'disrupt', 'halt', 'stop', 'cease',
-    'beirut', 'tel aviv', 'damascus', 'tehran', 'sanaa',
-    'lebanon', 'israel', 'syria', 'iran', 'yemen',
-    'middle east', 'regional tensions', 'security',
-    'extend', 'prolong', 'continue suspension'
-]
 
 
 # ========================================
@@ -128,25 +113,20 @@ LEADERSHIP_NAMES = {
 # ========================================
 CONTEXT_INDICATORS = {
     'domestic': [
-        # Arabic
         'مقاومة', 'شعب', 'أمة', 'إخوان', 'شهداء',
-        # English
         'resistance', 'our people', 'our nation', 'brothers', 'martyrs',
         'internal', 'domestic', 'lebanese people', 'iranian people',
         'friday prayers', 'sermon', 'israeli public', 'security cabinet'
     ],
     'international': [
-        # Explicitly names adversaries
         'israel', 'israeli', 'إسرائيل', 'zionist', 'صهيوني',
         'america', 'american', 'أمريكا', 'united states', 'us forces',
         'washington', 'tel aviv', 'واشنطن', 'تل أبيب',
         'hezbollah', 'hamas', 'iran', 'tehran', 'lebanon', 'beirut',
-        # Threat language
         'will strike', 'سنضرب', 'will attack', 'سنهاجم',
         'retaliate', 'revenge', 'response', 'انتقام', 'رد'
     ],
     'operational': [
-        # Specific operational language
         'prepared to', 'ready to', 'מוכנים', 'مستعدون', 'جاهزون',
         'target', 'targets', 'أهداف', 'هدف', 'מטרות',
         'missile', 'missiles', 'صواريخ', 'صاروخ', 'טילים',
@@ -187,34 +167,34 @@ THREAT_KEYWORDS = {
 # ========================================
 LEADERSHIP_WEIGHTS = {
     'naim_qassem': {
-        'domestic': 1.3,        # Rallying domestic base
-        'international': 1.8,   # Speaking to adversaries
-        'operational': 2.2      # Announcing operations
+        'domestic': 1.3,
+        'international': 1.8,
+        'operational': 2.2
     },
     'khamenei': {
-        'domestic': 1.2,        # Friday prayers rhetoric
-        'international': 2.0,   # UN statements, direct threats
-        'operational': 2.5      # Religious decree / operational order
+        'domestic': 1.2,
+        'international': 2.0,
+        'operational': 2.5
     },
     'abdul_malik_houthi': {
-        'domestic': 1.1,        # Less global influence
-        'international': 1.5,   # Red Sea / international threats
-        'operational': 2.0      # Announcing strikes
+        'domestic': 1.1,
+        'international': 1.5,
+        'operational': 2.0
     },
     'netanyahu': {
-        'domestic': 1.2,        # Domestic political messaging
-        'international': 1.7,   # International statements
-        'operational': 2.3      # Operational orders / warnings
+        'domestic': 1.2,
+        'international': 1.7,
+        'operational': 2.3
     },
     'gallant': {
-        'domestic': 1.1,        # Military briefings
-        'international': 1.6,   # International warnings
-        'operational': 2.4      # Direct military orders
+        'domestic': 1.1,
+        'international': 1.6,
+        'operational': 2.4
     },
     'halevi': {
-        'domestic': 1.0,        # Internal briefings
-        'international': 1.5,   # Rare public statements
-        'operational': 2.5      # Operational announcements (IDF Chief)
+        'domestic': 1.0,
+        'international': 1.5,
+        'operational': 2.5
     }
 }
 
@@ -225,60 +205,58 @@ LEADERSHIP_WEIGHTS = {
 def fetch_all_rss(feed_dict=None):
     """
     Fetch all RSS feeds (leadership + Israeli + regional Arab + any additional)
-    
+
     Args:
         feed_dict: Optional custom feed dictionary, defaults to ALL_RSS_FEEDS
-    
+
     Returns: List of articles
     """
     if feed_dict is None:
         feed_dict = ALL_RSS_FEEDS
-    
+
     all_articles = []
-    
+
     for feed_name, feed_url in feed_dict.items():
         try:
             print(f"[RSS] Fetching {feed_name}...")
-            
+
             headers = {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
                 'Accept': 'application/rss+xml, application/xml, text/xml, */*'
             }
-            
+
             response = requests.get(feed_url, headers=headers, timeout=15)
-            
+
             if response.status_code != 200:
                 print(f"[RSS] {feed_name} HTTP {response.status_code}")
                 continue
-            
-            # Parse RSS
+
             try:
                 root = ET.fromstring(response.content)
             except ET.ParseError as e:
                 print(f"[RSS] {feed_name} XML parse error: {e}")
                 continue
-            
-            # Extract items
+
             items = root.findall('.//item')
-            
-            for item in items[:15]:  # Top 15 per feed
+
+            for item in items[:15]:
                 title_elem = item.find('title')
                 link_elem = item.find('link')
                 pubDate_elem = item.find('pubDate')
                 description_elem = item.find('description')
                 content_elem = item.find('{http://purl.org/rss/1.0/modules/content/}encoded')
-                
+
                 if title_elem is None or link_elem is None:
                     continue
-                
+
                 pub_date = pubDate_elem.text if pubDate_elem is not None else datetime.now(timezone.utc).isoformat()
-                
+
                 description = ''
                 if description_elem is not None and description_elem.text:
                     description = description_elem.text[:500]
                 elif content_elem is not None and content_elem.text:
                     description = content_elem.text[:500]
-                
+
                 # Determine language
                 lang = 'en'
                 if 'ar' in feed_name or 'arabic' in feed_url.lower():
@@ -287,32 +265,23 @@ def fetch_all_rss(feed_dict=None):
                     lang = 'fa'
                 elif 'haaretz' in feed_name:
                     lang = 'he'
-                
+
                 # Determine source display name
-                source_display = feed_name.upper().replace('_', ' ')
-                if feed_name == 'ynet':
-                    source_display = 'Ynet'
-                elif feed_name == 'times_of_israel':
-                    source_display = 'Times of Israel'
-                elif feed_name == 'jpost':
-                    source_display = 'Jerusalem Post'
-                elif feed_name == 'i24news':
-                    source_display = 'i24NEWS'
-                elif feed_name == 'haaretz':
-                    source_display = 'Haaretz'
-                elif feed_name == 'memri':
-                    source_display = 'MEMRI'
-                elif feed_name == 'al_manar_en':
-                    source_display = 'Al-Manar (EN)'
-                elif feed_name == 'al_manar_ar':
-                    source_display = 'Al-Manar (AR)'
-                elif feed_name == 'iran_wire_en':
-                    source_display = 'Iran Wire'
-                elif feed_name == 'iran_wire_fa':
-                    source_display = 'Iran Wire (FA)'
-                elif feed_name == 'arab_news':
-                    source_display = 'Arab News'
-                
+                source_names = {
+                    'ynet': 'Ynet',
+                    'times_of_israel': 'Times of Israel',
+                    'jpost': 'Jerusalem Post',
+                    'i24news': 'i24NEWS',
+                    'haaretz': 'Haaretz',
+                    'memri': 'MEMRI',
+                    'al_manar_en': 'Al-Manar (EN)',
+                    'al_manar_ar': 'Al-Manar (AR)',
+                    'iran_wire_en': 'Iran Wire',
+                    'iran_wire_fa': 'Iran Wire (FA)',
+                    'arab_news': 'Arab News',
+                }
+                source_display = source_names.get(feed_name, feed_name.upper().replace('_', ' '))
+
                 all_articles.append({
                     'title': title_elem.text or '',
                     'description': description,
@@ -322,13 +291,13 @@ def fetch_all_rss(feed_dict=None):
                     'content': description,
                     'language': lang
                 })
-            
+
             print(f"[RSS] ✅ {feed_name}: {len(items)} articles")
-            
+
         except Exception as e:
             print(f"[RSS] {feed_name} error: {str(e)[:100]}")
             continue
-    
+
     print(f"[RSS] Total fetched: {len(all_articles)} articles from {len(feed_dict)} feeds")
     return all_articles
 
@@ -345,117 +314,498 @@ def fetch_israeli_rss():
 
 # ========================================
 # AIRLINE FLIGHT DISRUPTION MONITORING
+# Cached system — background refresh every 12h
 # ========================================
+
+FLIGHT_CACHE_FILE = '/tmp/flight_disruptions_cache.json'
+_flight_scan_running = False
+_flight_scan_lock = threading.Lock()
+
+# Comprehensive airline list
+MONITORED_AIRLINES = [
+    # Star Alliance
+    'Lufthansa', 'United Airlines', 'Air Canada', 'Turkish Airlines',
+    'Swiss', 'Austrian Airlines', 'Singapore Airlines', 'LOT Polish',
+    'Scandinavian Airlines', 'TAP Air Portugal',
+    # SkyTeam
+    'Air France', 'KLM', 'Delta', 'Korean Air', 'ITA Airways',
+    'Aeroflot', 'Vietnam Airlines',
+    # Oneworld
+    'British Airways', 'American Airlines', 'Cathay Pacific',
+    'Qantas', 'Japan Airlines', 'Iberia', 'Finnair', 'Qatar Airways',
+    # Middle East carriers
+    'Emirates', 'Etihad', 'flydubai', 'Air Arabia',
+    'Saudia', 'Gulf Air', 'Kuwait Airways',
+    'Royal Jordanian', 'Oman Air', 'Middle East Airlines', 'MEA',
+    # Israeli carriers
+    'El Al', 'Arkia', 'Israir',
+    # Low-cost
+    'Wizz Air', 'Ryanair', 'EasyJet', 'Pegasus Airlines',
+    # Other
+    'Ethiopian Airlines', 'EgyptAir', 'Air New Zealand',
+]
+
+# All Middle East destinations to monitor
+MONITORED_DESTINATIONS = [
+    # High priority (conflict zones)
+    'Tel Aviv', 'Israel', 'Beirut', 'Lebanon', 'Damascus', 'Syria',
+    'Tehran', 'Iran', 'Baghdad', 'Iraq', 'Sanaa', 'Yemen',
+    # Regional capitals
+    'Amman', 'Jordan', 'Dubai', 'UAE', 'Riyadh', 'Saudi Arabia',
+    'Cairo', 'Egypt', 'Istanbul', 'Turkey', 'Doha', 'Qatar',
+    'Muscat', 'Oman', 'Kuwait', 'Bahrain', 'Jeddah', 'Erbil',
+]
+
+DISRUPTION_SEARCH_KEYWORDS = [
+    'airline suspended flights',
+    'airline cancelled flights',
+    'flight cancellation',
+    'suspend service',
+    'cancel flights',
+    'resume flights',
+    'flights suspended until',
+    'halt flights',
+]
+
+
+def _load_flight_cache():
+    """Load flight disruption cache from /tmp file"""
+    try:
+        if Path(FLIGHT_CACHE_FILE).exists():
+            with open(FLIGHT_CACHE_FILE, 'r') as f:
+                return json.load(f)
+    except Exception as e:
+        print(f"[Flight Cache] Load error: {e}")
+    return {}
+
+
+def _save_flight_cache(data):
+    """Save flight disruption cache to /tmp file"""
+    try:
+        with open(FLIGHT_CACHE_FILE, 'w') as f:
+            json.dump(data, f, indent=2)
+        print(f"[Flight Cache] ✅ Saved {len(data.get('cancellations', []))} disruptions to cache")
+    except Exception as e:
+        print(f"[Flight Cache] Save error: {e}")
+
+
+def _is_flight_cache_fresh(cache_data, max_age_hours=12):
+    """Check if flight cache is fresh enough"""
+    if not cache_data or 'cached_at' not in cache_data:
+        return False
+    try:
+        cached_at = datetime.fromisoformat(cache_data['cached_at'])
+        age = datetime.now(timezone.utc) - cached_at
+        return age.total_seconds() < (max_age_hours * 3600)
+    except Exception:
+        return False
+
+
+def _extract_airline_from_title(title):
+    """Extract airline name from news headline"""
+    title_lower = title.lower()
+
+    for airline in MONITORED_AIRLINES:
+        if airline.lower() in title_lower:
+            return airline
+
+    # Try sentence pattern: "[Airline] suspends/cancels"
+    pattern = re.search(
+        r'([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\s+(?:suspend|cancel|halt|resume|restart)',
+        title, re.IGNORECASE
+    )
+    if pattern:
+        potential = pattern.group(1)
+        if len(potential) > 3 and potential not in ['United States', 'Middle East', 'European Union']:
+            return potential
+
+    return "Unknown Airline"
+
+
+def _extract_status_from_title(title):
+    """Extract flight status from headline"""
+    title_lower = title.lower()
+
+    if 'resume' in title_lower or 'restart' in title_lower or 'return' in title_lower:
+        return 'Resumed'
+    elif 'cancel' in title_lower:
+        return 'Cancelled'
+    elif 'suspend' in title_lower or 'halt' in title_lower or 'stop' in title_lower:
+        return 'Suspended'
+    return 'Disrupted'
+
+
+def _extract_duration_from_title(title):
+    """Extract duration from headline"""
+    # "until [date]"
+    until_match = re.search(r'until\s+([A-Za-z]+\s+\d{1,2}(?:,?\s+\d{4})?)', title, re.IGNORECASE)
+    if until_match:
+        return f"Until {until_match.group(1)}"
+
+    # Specific months
+    months = ['January', 'February', 'March', 'April', 'May', 'June',
+              'July', 'August', 'September', 'October', 'November', 'December']
+    for month in months:
+        if month.lower() in title.lower():
+            year_match = re.search(r'\b(202[4-9])\b', title)
+            if year_match:
+                return f"Until {month} {year_match.group(1)}"
+            return f"Until {month}"
+
+    # "for X days/weeks/months"
+    for_match = re.search(r'for\s+(\d+)\s+(day|week|month)s?', title, re.IGNORECASE)
+    if for_match:
+        num = for_match.group(1)
+        unit = for_match.group(2)
+        return f"For {num} {unit}{'s' if int(num) > 1 else ''}"
+
+    if 'indefinite' in title.lower():
+        return 'Indefinite'
+
+    return 'Unknown'
+
+
+def _parse_rss_date(pub_date):
+    """Parse RSS pub date to ISO format"""
+    try:
+        if pub_date:
+            from email.utils import parsedate_to_datetime
+            date_obj = parsedate_to_datetime(pub_date)
+            return date_obj.isoformat()
+    except Exception:
+        pass
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _run_flight_disruption_scan():
+    """
+    Full scan for flight disruptions across all destinations.
+    This is the heavy operation — runs in background thread.
+
+    Searches Google News RSS for airline disruptions to Middle East.
+    Returns list of disruption dicts.
+    """
+    print(f"\n[Flight Scan] Starting full disruption scan at {datetime.now(timezone.utc).isoformat()}")
+    start_time = time.time()
+
+    all_disruptions = []
+    seen_urls = set()
+
+    # Strategy: search each destination with disruption keywords
+    for destination in MONITORED_DESTINATIONS:
+        for keyword in DISRUPTION_SEARCH_KEYWORDS[:3]:  # Top 3 keywords per destination
+            query = f'{keyword} {destination}'
+
+            try:
+                url = f"https://news.google.com/rss/search?q={query.replace(' ', '+')}&hl=en&gl=US&ceid=US:en"
+
+                response = requests.get(url, timeout=10, headers={
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                })
+
+                if response.status_code != 200:
+                    continue
+
+                try:
+                    root = ET.fromstring(response.content)
+                except ET.ParseError:
+                    continue
+
+                items = root.findall('.//item')
+
+                for item in items[:5]:  # Top 5 per query
+                    title_elem = item.find('title')
+                    link_elem = item.find('link')
+                    pubDate_elem = item.find('pubDate')
+
+                    if title_elem is None or link_elem is None:
+                        continue
+
+                    title = title_elem.text or ''
+                    link = link_elem.text or ''
+                    pub_date = pubDate_elem.text if pubDate_elem is not None else ''
+
+                    if link in seen_urls:
+                        continue
+                    seen_urls.add(link)
+
+                    # Verify the headline is actually about a disruption
+                    title_lower = title.lower()
+                    if not any(kw in title_lower for kw in
+                               ['suspend', 'cancel', 'halt', 'resume', 'restart',
+                                'stop', 'disrupt', 'ground', 'delay']):
+                        continue
+
+                    # Extract origin city if mentioned
+                    origin = 'Various'
+                    origin_cities = [
+                        'Frankfurt', 'Paris', 'London', 'New York', 'Dubai', 'Istanbul',
+                        'Munich', 'Vienna', 'Warsaw', 'Amsterdam', 'Madrid', 'Rome',
+                        'Zurich', 'Geneva', 'Delhi', 'Mumbai', 'Singapore', 'Hong Kong',
+                        'Athens', 'Toronto', 'Chicago', 'Los Angeles', 'Berlin',
+                    ]
+                    for city in origin_cities:
+                        if city.lower() in title_lower:
+                            origin = city
+                            break
+
+                    disruption = {
+                        'airline': _extract_airline_from_title(title),
+                        'route': f"{origin} → {destination}",
+                        'origin': origin,
+                        'destination': destination,
+                        'date': _parse_rss_date(pub_date),
+                        'duration': _extract_duration_from_title(title),
+                        'status': _extract_status_from_title(title),
+                        'source_url': link,
+                        'headline': title[:150]
+                    }
+
+                    all_disruptions.append(disruption)
+
+            except Exception as e:
+                print(f"[Flight Scan] Error for {destination}: {str(e)[:100]}")
+                continue
+
+        # Small delay between destinations to be polite to Google
+        time.sleep(0.5)
+
+    # Also search by specific airline name (catches airline-first headlines)
+    for airline in MONITORED_AIRLINES[:15]:  # Top 15 airlines
+        query = f'{airline} suspend cancel flights Middle East'
+        try:
+            url = f"https://news.google.com/rss/search?q={query.replace(' ', '+')}&hl=en&gl=US&ceid=US:en"
+            response = requests.get(url, timeout=10, headers={
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            })
+            if response.status_code != 200:
+                continue
+
+            root = ET.fromstring(response.content)
+            items = root.findall('.//item')
+
+            for item in items[:3]:
+                title_elem = item.find('title')
+                link_elem = item.find('link')
+                pubDate_elem = item.find('pubDate')
+
+                if title_elem is None or link_elem is None:
+                    continue
+
+                title = title_elem.text or ''
+                link = link_elem.text or ''
+                pub_date = pubDate_elem.text if pubDate_elem is not None else ''
+
+                if link in seen_urls:
+                    continue
+                seen_urls.add(link)
+
+                title_lower = title.lower()
+                if not any(kw in title_lower for kw in
+                           ['suspend', 'cancel', 'halt', 'resume', 'restart', 'stop']):
+                    continue
+
+                # Try to detect destination from title
+                dest_found = 'Middle East'
+                for dest in MONITORED_DESTINATIONS:
+                    if dest.lower() in title_lower:
+                        dest_found = dest
+                        break
+
+                disruption = {
+                    'airline': airline,
+                    'route': f"Various → {dest_found}",
+                    'origin': 'Various',
+                    'destination': dest_found,
+                    'date': _parse_rss_date(pub_date),
+                    'duration': _extract_duration_from_title(title),
+                    'status': _extract_status_from_title(title),
+                    'source_url': link,
+                    'headline': title[:150]
+                }
+                all_disruptions.append(disruption)
+
+        except Exception:
+            continue
+        time.sleep(0.3)
+
+    # ========================================
+    # POST-PROCESSING
+    # ========================================
+
+    # Filter to last 30 days
+    thirty_days_ago = datetime.now(timezone.utc) - timedelta(days=30)
+    recent = []
+    for d in all_disruptions:
+        try:
+            d_date = datetime.fromisoformat(d['date'].replace('Z', '+00:00'))
+            if d_date >= thirty_days_ago:
+                recent.append(d)
+        except Exception:
+            recent.append(d)  # Include if date parse fails
+
+    # Sort by date (newest first)
+    recent.sort(key=lambda x: x.get('date', ''), reverse=True)
+
+    # Deduplicate by airline + destination (keep newest)
+    unique = []
+    seen_combos = set()
+    for d in recent:
+        combo = f"{d['airline']}_{d['destination']}"
+        if combo not in seen_combos:
+            seen_combos.add(combo)
+            unique.append(d)
+
+    elapsed = time.time() - start_time
+    print(f"[Flight Scan] ✅ Complete in {elapsed:.1f}s — {len(unique)} unique disruptions (from {len(all_disruptions)} raw)")
+
+    return unique
+
+
+def _trigger_flight_background_scan():
+    """Trigger a background scan if one isn't already running"""
+    global _flight_scan_running
+    with _flight_scan_lock:
+        if _flight_scan_running:
+            print("[Flight Scan] Background scan already in progress, skipping")
+            return
+        _flight_scan_running = True
+
+    def _do_scan():
+        global _flight_scan_running
+        try:
+            disruptions = _run_flight_disruption_scan()
+
+            cache_data = {
+                'success': True,
+                'cancellations': disruptions,
+                'count': len(disruptions),
+                'last_updated': datetime.now(timezone.utc).isoformat(),
+                'cached_at': datetime.now(timezone.utc).isoformat(),
+                'version': '3.2.0'
+            }
+
+            _save_flight_cache(cache_data)
+
+        except Exception as e:
+            print(f"[Flight Scan] Background scan error: {e}")
+            import traceback
+            traceback.print_exc()
+        finally:
+            with _flight_scan_lock:
+                _flight_scan_running = False
+
+    threading.Thread(target=_do_scan, daemon=True).start()
+    print("[Flight Scan] Background scan thread started")
+
+
+def _flight_periodic_scan_thread():
+    """
+    Background thread — scans every 12 hours.
+    First scan after 20s delay (let app boot first).
+    """
+    SCAN_INTERVAL = 12 * 60 * 60  # 12 hours
+    INITIAL_DELAY = 20  # seconds
+
+    print(f"[Flight Scan] Periodic thread started — {SCAN_INTERVAL // 3600}h interval, {INITIAL_DELAY}s initial delay")
+    time.sleep(INITIAL_DELAY)
+
+    while True:
+        try:
+            print(f"\n[Flight Scan] Periodic scan starting at {datetime.now(timezone.utc).isoformat()}")
+            disruptions = _run_flight_disruption_scan()
+
+            cache_data = {
+                'success': True,
+                'cancellations': disruptions,
+                'count': len(disruptions),
+                'last_updated': datetime.now(timezone.utc).isoformat(),
+                'cached_at': datetime.now(timezone.utc).isoformat(),
+                'version': '3.2.0'
+            }
+
+            _save_flight_cache(cache_data)
+
+        except Exception as e:
+            print(f"[Flight Scan] Periodic scan error: {e}")
+            import traceback
+            traceback.print_exc()
+
+        print(f"[Flight Scan] Next scan in {SCAN_INTERVAL // 3600} hours")
+        time.sleep(SCAN_INTERVAL)
+
+
 def fetch_airline_disruptions():
     """
-    Fetch flight disruption notices from Google News
-    Returns data in format compatible with /flight-cancellations endpoint
-    
-    Returns: List of disruption dicts matching parse_flight_cancellation format
+    Public API — returns cached disruptions (non-blocking).
+    If no cache exists, triggers background scan and returns empty list.
+
+    This is the function imported by app.py.
     """
-    
-    disruptions = []
-    seen_urls = set()
-    
-    # Major airlines to monitor
-    airlines = [
-        'Lufthansa', 'British Airways', 'Air France', 'KLM',
-        'United Airlines', 'Delta', 'American Airlines',
-        'Emirates', 'Qatar Airways', 'Turkish Airlines',
-        'El Al', 'Swiss', 'Austrian Airlines'
-    ]
-    
-    # Middle East destinations
-    destinations = ['Beirut', 'Tel Aviv', 'Damascus', 'Tehran', 'Baghdad', 'Sanaa']
-    
-    # Keywords
-    keywords = ['suspend', 'cancel', 'halt', 'resume']
-    
-    for airline in airlines[:5]:  # Limit to 5 airlines to avoid rate limits
-        for dest in destinations[:3]:  # Limit to 3 destinations
-            for keyword in keywords[:2]:  # Limit to 2 keywords
-                
-                query = f'{airline} {keyword} {dest}'
-                url = f"https://news.google.com/rss/search?q={query.replace(' ', '+')}&hl=en&gl=US&ceid=US:en"
-                
-                try:
-                    response = requests.get(url, timeout=10, headers={
-                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-                    })
-                    
-                    if response.status_code != 200:
-                        continue
-                    
-                    root = ET.fromstring(response.content)
-                    items = root.findall('.//item')
-                    
-                    for item in items[:2]:  # Top 2 per query
-                        title_elem = item.find('title')
-                        link_elem = item.find('link')
-                        pubDate_elem = item.find('pubDate')
-                        
-                        if title_elem is None or link_elem is None:
-                            continue
-                        
-                        title = title_elem.text or ''
-                        link = link_elem.text or ''
-                        pub_date = pubDate_elem.text if pubDate_elem is not None else ''
-                        
-                        if link in seen_urls:
-                            continue
-                        
-                        seen_urls.add(link)
-                        
-                        # Check if title actually mentions disruption
-                        title_lower = title.lower()
-                        if not any(kw in title_lower for kw in ['suspend', 'cancel', 'halt', 'resume', 'stop']):
-                            continue
-                        
-                        # Parse into standard format (matching /flight-cancellations endpoint)
-                        status = 'Suspended'
-                        if 'resume' in title_lower or 'restart' in title_lower:
-                            status = 'Resumed'
-                        elif 'cancel' in title_lower:
-                            status = 'Cancelled'
-                        
-                        # Extract duration if mentioned
-                        duration = 'Unknown'
-                        if 'until' in title_lower:
-                            duration_match = re.search(r'until\s+([A-Za-z]+\s+\d{1,2})', title, re.IGNORECASE)
-                            if duration_match:
-                                duration = f"Until {duration_match.group(1)}"
-                        
-                        # Parse date
-                        try:
-                            if pub_date:
-                                from email.utils import parsedate_to_datetime
-                                date_obj = parsedate_to_datetime(pub_date)
-                                date_str = date_obj.isoformat()
-                            else:
-                                date_str = datetime.now(timezone.utc).isoformat()
-                        except:
-                            date_str = datetime.now(timezone.utc).isoformat()
-                        
-                        disruption = {
-                            'airline': airline,
-                            'destination': dest,
-                            'route': f'Various → {dest}',
-                            'origin': 'Various',
-                            'status': status,
-                            'date': date_str,
-                            'duration': duration,
-                            'source_url': link,
-                            'headline': title[:150]
-                        }
-                        
-                        disruptions.append(disruption)
-                        
-                except Exception as e:
-                    print(f"[Airline Disruptions] Error: {str(e)[:100]}")
-                    continue
-    
-    print(f"[Airline Disruptions] Found {len(disruptions)} disruptions")
-    return disruptions
+    cache = _load_flight_cache()
+
+    if cache and 'cancellations' in cache:
+        if _is_flight_cache_fresh(cache, max_age_hours=12):
+            print(f"[Flight Cache] Returning {len(cache['cancellations'])} cached disruptions (fresh)")
+            return cache['cancellations']
+        else:
+            # Stale but usable — return it and trigger background refresh
+            print(f"[Flight Cache] Returning {len(cache['cancellations'])} cached disruptions (stale, triggering refresh)")
+            _trigger_flight_background_scan()
+            return cache['cancellations']
+
+    # No cache at all — trigger scan, return empty
+    print("[Flight Cache] No cache found, triggering background scan")
+    _trigger_flight_background_scan()
+    return []
+
+
+def register_flight_scan_thread():
+    """
+    Start the periodic flight scan background thread.
+    Call this from app.py after app initialization.
+    """
+    thread = threading.Thread(target=_flight_periodic_scan_thread, daemon=True)
+    thread.start()
+    print("[Flight Scan] ✅ Periodic scan thread registered (12h cycle)")
+
+
+def get_flight_cache_for_endpoint():
+    """
+    Returns the full cache response for the /flight-cancellations endpoint.
+    Non-blocking — returns cache or empty skeleton.
+    """
+    cache = _load_flight_cache()
+
+    if cache and 'cancellations' in cache:
+        fresh = _is_flight_cache_fresh(cache, max_age_hours=12)
+
+        if not fresh:
+            _trigger_flight_background_scan()
+            cache['stale'] = True
+
+        return {
+            'success': True,
+            'cancellations': cache.get('cancellations', [])[:20],
+            'count': cache.get('count', 0),
+            'last_updated': cache.get('last_updated', ''),
+            'cached': True,
+            'stale': not fresh,
+            'version': '3.2.0'
+        }
+
+    # No cache — trigger scan, return skeleton
+    _trigger_flight_background_scan()
+    return {
+        'success': True,
+        'cancellations': [],
+        'count': 0,
+        'last_updated': None,
+        'cached': False,
+        'scan_in_progress': True,
+        'message': 'Initial scan in progress. Disruption data will appear shortly.',
+        'version': '3.2.0'
+    }
 
 
 # ========================================
@@ -464,26 +814,14 @@ def fetch_airline_disruptions():
 def detect_leadership_quote(article):
     """
     Detect if article contains leadership quote
-    
-    Returns:
-    {
-        'has_leadership': bool,
-        'leader': str (key from LEADERSHIP_NAMES),
-        'leader_name': str (display name),
-        'organization': str,
-        'context': str ('domestic', 'international', 'operational'),
-        'weight_multiplier': float,
-        'threat_level': str ('explicit', 'conditional', 'capability', 'none'),
-        'quote_snippet': str
-    }
+
+    Returns dict with has_leadership, leader, context, weight_multiplier, etc.
     """
-    
-    # FIX: Ensure we never pass None to .lower()
     title = article.get('title') or ''
     description = article.get('description') or ''
     content = article.get('content') or ''
     full_text = f"{title} {description} {content}".lower()
-    
+
     result = {
         'has_leadership': False,
         'leader': None,
@@ -494,19 +832,17 @@ def detect_leadership_quote(article):
         'threat_level': 'none',
         'quote_snippet': ''
     }
-    
+
     # Check for leadership names
     for leader_key, leader_data in LEADERSHIP_NAMES.items():
-        # Check names
         for name in leader_data['names']:
             if name.lower() in full_text:
                 result['has_leadership'] = True
                 result['leader'] = leader_key
-                result['leader_name'] = leader_data['names'][0]  # Use primary name
+                result['leader_name'] = leader_data['names'][0]
                 result['organization'] = leader_data['organization']
                 break
-        
-        # Also check titles
+
         if not result['has_leadership']:
             for title_word in leader_data['titles']:
                 if title_word.lower() in full_text:
@@ -515,28 +851,19 @@ def detect_leadership_quote(article):
                     result['leader_name'] = leader_data['names'][0]
                     result['organization'] = leader_data['organization']
                     break
-        
+
         if result['has_leadership']:
             break
-    
-    # If no leadership detected, return early
+
     if not result['has_leadership']:
         return result
-    
-    # Classify context (domestic vs international vs operational)
+
     result['context'] = classify_context(full_text)
-    
-    # Detect threat level
     result['threat_level'] = detect_threat_level(full_text)
-    
-    # Calculate weight multiplier
     result['weight_multiplier'] = calculate_leadership_weight(
-        result['leader'],
-        result['context'],
-        result['threat_level']
+        result['leader'], result['context'], result['threat_level']
     )
-    
-    # Extract quote snippet (first 100 chars with leader name)
+
     for name in LEADERSHIP_NAMES[result['leader']]['names']:
         if name.lower() in full_text:
             idx = full_text.lower().find(name.lower())
@@ -544,116 +871,71 @@ def detect_leadership_quote(article):
             snippet_end = min(len(full_text), idx + 100)
             result['quote_snippet'] = full_text[snippet_start:snippet_end].strip()
             break
-    
+
     return result
 
 
 def classify_context(text):
-    """
-    Classify statement as domestic, international, or operational
-    
-    Hierarchy:
-    1. Operational (highest priority - announces specific action)
-    2. International (medium - addresses adversaries)
-    3. Domestic (default - internal messaging)
-    """
-    
-    # FIX: Guard against None
+    """Classify statement as domestic, international, or operational"""
     if not text:
         return 'domestic'
-    
+
     text_lower = text.lower()
-    
-    # Check operational first (highest priority)
+
     operational_score = sum(1 for keyword in CONTEXT_INDICATORS['operational'] if keyword in text_lower)
-    
     if operational_score >= 2:
         return 'operational'
-    
-    # Check international
+
     international_score = sum(1 for keyword in CONTEXT_INDICATORS['international'] if keyword in text_lower)
-    
     if international_score >= 2:
         return 'international'
-    
-    # Check domestic
+
     domestic_score = sum(1 for keyword in CONTEXT_INDICATORS['domestic'] if keyword in text_lower)
-    
     if domestic_score >= 2:
         return 'domestic'
-    
-    # Default to international if any adversary is named
+
     if any(word in text_lower for word in ['israel', 'america', 'united states', 'hezbollah', 'iran']):
         return 'international'
-    
-    # Default to domestic
+
     return 'domestic'
 
 
 def detect_threat_level(text):
-    """
-    Detect threat level in statement
-    
-    Levels:
-    - explicit: Direct threat to strike
-    - conditional: Threat contingent on action
-    - capability: Mentions weapons/capabilities
-    - none: No threat detected
-    """
-    
-    # FIX: Guard against None
+    """Detect threat level: explicit, conditional, capability, or none"""
     if not text:
         return 'none'
-    
+
     text_lower = text.lower()
-    
-    # Check explicit threats
+
     for keyword in THREAT_KEYWORDS['explicit_threat']:
         if keyword in text_lower:
             return 'explicit'
-    
-    # Check conditional threats
+
     for keyword in THREAT_KEYWORDS['conditional_threat']:
         if keyword in text_lower:
             return 'conditional'
-    
-    # Check capability signals
+
     for keyword in THREAT_KEYWORDS['capability_signal']:
         if keyword in text_lower:
             return 'capability'
-    
+
     return 'none'
 
 
 def calculate_leadership_weight(leader_key, context, threat_level):
-    """
-    Calculate final weight multiplier for leadership statement
-    
-    Formula:
-    Base weight (by context) × Threat multiplier
-    
-    Threat multipliers:
-    - explicit: 1.3x
-    - conditional: 1.15x
-    - capability: 1.1x
-    - none: 1.0x
-    """
-    
-    # Get base weight from context
+    """Calculate final weight multiplier for leadership statement"""
     base_weight = LEADERSHIP_WEIGHTS.get(leader_key, {}).get(context, 1.0)
-    
-    # Apply threat multiplier
+
     threat_multipliers = {
         'explicit': 1.3,
         'conditional': 1.15,
         'capability': 1.1,
         'none': 1.0
     }
-    
+
     threat_multiplier = threat_multipliers.get(threat_level, 1.0)
-    
     final_weight = base_weight * threat_multiplier
-    
+
     return round(final_weight, 2)
 
 
@@ -661,110 +943,54 @@ def calculate_leadership_weight(leader_key, context, threat_level):
 # INTEGRATION WITH EXISTING SCORING
 # ========================================
 def enhance_article_with_leadership(article):
-    """
-    Wrapper function to add leadership data to article object
-    
-    Call this on each article before scoring:
-    
-    for article in all_articles:
-        article['leadership'] = enhance_article_with_leadership(article)
-    """
-    
+    """Add leadership detection data to article object"""
     leadership_data = detect_leadership_quote(article)
-    
+
     if leadership_data['has_leadership']:
         print(f"[Leadership] ✅ Detected: {leadership_data['leader_name']} "
               f"({leadership_data['context']}, {leadership_data['threat_level']}) "
               f"weight: {leadership_data['weight_multiplier']}x")
-    
+
     return leadership_data
 
 
 def apply_leadership_multiplier(base_score, article):
-    """
-    Apply leadership multiplier to article's base score
-    
-    Usage in your scoring function:
-    
-    if 'leadership' in article and article['leadership']['has_leadership']:
-        article_contribution = apply_leadership_multiplier(article_contribution, article)
-    """
-    
+    """Apply leadership multiplier to article's base score"""
     if 'leadership' not in article:
         return base_score
-    
+
     leadership = article['leadership']
-    
+
     if not leadership['has_leadership']:
         return base_score
-    
+
     multiplier = leadership['weight_multiplier']
-    
     return base_score * multiplier
 
 
 # ========================================
-# TESTING FUNCTION
+# TESTING
 # ========================================
-def test_rss_monitor():
-    """Test function to verify RSS feeds and detection"""
-    print("\n" + "="*60)
-    print("TESTING RSS MONITOR")
-    print("="*60 + "\n")
-    
-    # Test all RSS feeds
+if __name__ == "__main__":
+    print("\n" + "=" * 60)
+    print("TESTING RSS MONITOR v3.2.0")
+    print("=" * 60 + "\n")
+
     print("Fetching ALL RSS feeds...\n")
     articles = fetch_all_rss()
-    
     print(f"\nTotal articles fetched: {len(articles)}")
-    
-    # Count by source
+
     sources = {}
     for article in articles:
         source = article.get('source', {}).get('name', 'Unknown')
         sources[source] = sources.get(source, 0) + 1
-    
+
     print("\nArticles by source:")
     for source, count in sorted(sources.items(), key=lambda x: x[1], reverse=True):
         print(f"  {source}: {count}")
-    
-    print("\nTesting leadership detection...\n")
-    
-    # Test on each article
-    leadership_count = 0
-    israeli_ops_count = 0
-    
-    for article in articles[:30]:  # Test first 30
-        leadership = detect_leadership_quote(article)
-        
-        if leadership['has_leadership']:
-            leadership_count += 1
-            print(f"✅ DETECTED: {leadership['leader_name']}")
-            print(f"   Context: {leadership['context']}")
-            print(f"   Threat: {leadership['threat_level']}")
-            print(f"   Weight: {leadership['weight_multiplier']}x")
-            print(f"   Source: {article.get('source', {}).get('name', 'Unknown')}")
-            print(f"   Title: {article['title'][:80]}...")
-            print()
-        
-        # Count Israeli ops
-        title_lower = article.get('title', '').lower()
-        if any(word in title_lower for word in ['idf', 'strikes', 'operation', 'seized', 'attack']):
-            israeli_ops_count += 1
-    
-    print(f"\nResults:")
-    print(f"  Leadership quotes: {leadership_count}/{len(articles[:30])}")
-    print(f"  Israeli operations: {israeli_ops_count}/{len(articles[:30])}")
-    print("\n" + "="*60)
-    
-    # Test airline disruptions
-    print("\nTesting airline disruptions...\n")
-    disruptions = fetch_airline_disruptions()
-    print(f"\nFound {len(disruptions)} airline disruption articles")
-    for disruption in disruptions[:5]:
-        print(f"  • {disruption['title'][:80]}...")
 
-
-if __name__ == "__main__":
-    # Run test when executed directly
-    test_rss_monitor()
+    print("\nTesting flight disruption scan...\n")
+    disruptions = _run_flight_disruption_scan()
+    print(f"\nFound {len(disruptions)} disruptions")
+    for d in disruptions[:5]:
+        print(f"  • [{d['status']}] {d['airline']} → {d['destination']}: {d['headline'][:80]}...")
