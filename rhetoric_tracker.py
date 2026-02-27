@@ -1319,7 +1319,7 @@ def register_rhetoric_endpoints(app):
     # Start periodic scan thread (every 12 hours)
     def _periodic_rhetoric_scan():
         # Wait for app to boot
-        time.sleep(45)
+        time.sleep(180)
         print("[Rhetoric Tracker] Starting initial scan...")
         _run_rhetoric_scan_safe()
 
