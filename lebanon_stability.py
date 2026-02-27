@@ -27,6 +27,15 @@ import re
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
+# Rhetoric Tracker (lightweight — reads cached data only, no scan thread)
+try:
+    from rhetoric_tracker import register_rhetoric_endpoints
+    RHETORIC_AVAILABLE = True
+    print("[Lebanon] ✅ Rhetoric tracker module loaded")
+except ImportError:
+    RHETORIC_AVAILABLE = False
+    print("[Lebanon] ⚠️ Rhetoric tracker not available (rhetoric_tracker.py not found)")
+    
 # Optional: BeautifulSoup for bond scraping
 try:
     from bs4 import BeautifulSoup
@@ -71,6 +80,10 @@ CORS(app, resources={
     }
 })
 
+# Register rhetoric endpoints (cache-read only — no background scan thread)
+if RHETORIC_AVAILABLE:
+    register_rhetoric_endpoints(app)
+    
 # ========================================
 # CONFIGURATION
 # ========================================
