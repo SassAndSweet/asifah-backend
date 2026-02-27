@@ -753,7 +753,7 @@ try:
     register_flight_scan_thread()
     print("[App] ✅ Flight disruption scan thread started")
 except Exception as e:
-    print(f"[App] ⚠️ Flight scan thread failed: {e}"))
+    print(f"[App] ⚠️ Flight scan thread failed: {e}")
 
 # Iran Stability Module (consolidated from iran_protests.py)
 from iran_protests import register_iran_routes
