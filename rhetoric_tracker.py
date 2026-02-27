@@ -1316,6 +1316,11 @@ def register_rhetoric_endpoints(app):
     print("[Rhetoric Tracker] ✅ Endpoints registered: "
           "/api/rhetoric/lebanon, /api/rhetoric/lebanon/summary, /api/rhetoric/lebanon/trends")
 
+    # Skip scan thread if running in lightweight/cache-only mode
+    if os.environ.get('RHETORIC_SCAN_DISABLED'):
+        print("[Rhetoric Tracker] ✅ Cache-read only mode (scan disabled)")
+        return
+
     # Start periodic scan thread (every 12 hours)
     def _periodic_rhetoric_scan():
         # Wait for app to boot
