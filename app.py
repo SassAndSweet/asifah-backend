@@ -735,7 +735,15 @@ def _check_cache_or_placeholder(label, cache_key, target=None, extended=False):
 # ========================================
 
 app = Flask(__name__)
-CORS(app, resources={r"/*": {"origins": "*"}})
+CORS(app)
+
+# Rhetoric Tracker — runs scan thread + serves endpoints
+try:
+    from rhetoric_tracker import register_rhetoric_endpoints
+    register_rhetoric_endpoints(app)
+    print("[App] ✅ Rhetoric tracker loaded (with scan thread)")
+except ImportError:
+    print("[App] ⚠️ Rhetoric tracker not found")
 register_military_endpoints(app)
 register_rhetoric_endpoints(app)
 
