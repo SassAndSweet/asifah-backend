@@ -2876,6 +2876,88 @@ def build_jordan_headlines(incoming_threats, defensive_posture, all_articles):
     
     headlines.sort(key=lambda x: x['weight'], reverse=True)
     return headlines[:15]
+
+# ========================================
+# CASUALTY DATA EXTRACTION (Iraq + general)
+# ========================================
+def extract_casualty_data(articles):
+    """Extract casualty counts (deaths, injuries, arrests) from article text"""
+    casualties = {
+        'deaths': 0,
+        'injuries': 0,
+        'arrests': 0,
+        'sources': [],
+        'details': [],
+        'articles_without_numbers': []
+    }
+
+    for article in articles:
+        title = (article.get('title') or '').lower()
+        description = (article.get('description') or '').lower()
+        content = (article.get('content') or '').lower()
+        text = f"{title} {description} {content}"
+        source = article.get('source', {}).get('name', 'Unknown')
+        url = article.get('url', '')
+
+        found_number = False
+
+        # Deaths
+        for pattern in [r'(\d+)\s+(?:killed|dead|died|fatalities|deaths)',
+                        r'(?:killed|dead)\s+(\d+)',
+                        r'(?:at least|more than|over)\s+(\d+)\s+(?:killed|dead)']:
+            match = re.search(pattern, text)
+            if match:
+                num = int(match.group(1))
+                if 0 < num < 10000:
+                    casualties['deaths'] += num
+                    casualties['sources'].append(source)
+                    casualties['details'].append({
+                        'type': 'deaths', 'count': num,
+                        'source': source, 'url': url
+                    })
+                    found_number = True
+                break
+
+        # Injuries
+        for pattern in [r'(\d+)\s+(?:wounded|injured|hurt)',
+                        r'(?:wounded|injured)\s+(\d+)',
+                        r'(?:at least|more than|over)\s+(\d+)\s+(?:wounded|injured)']:
+            match = re.search(pattern, text)
+            if match:
+                num = int(match.group(1))
+                if 0 < num < 50000:
+                    casualties['injuries'] += num
+                    casualties['details'].append({
+                        'type': 'injuries', 'count': num,
+                        'source': source, 'url': url
+                    })
+                    found_number = True
+                break
+
+        # Arrests
+        for pattern in [r'(\d+)\s+(?:arrested|detained|captured)',
+                        r'(?:arrested|detained)\s+(\d+)']:
+            match = re.search(pattern, text)
+            if match:
+                num = int(match.group(1))
+                if 0 < num < 10000:
+                    casualties['arrests'] += num
+                    casualties['details'].append({
+                        'type': 'arrests', 'count': num,
+                        'source': source, 'url': url
+                    })
+                    found_number = True
+                break
+
+        if not found_number and any(kw in text for kw in ['killed', 'dead', 'wounded', 'arrested']):
+            casualties['articles_without_numbers'].append({
+                'title': article.get('title', '')[:120],
+                'source': source, 'url': url
+            })
+
+    # Deduplicate sources
+    casualties['sources'] = list(set(casualties['sources']))
+    return casualties
     
 # ========================================
 # RATE LIMITING
@@ -6893,7 +6975,8 @@ def _run_travel_advisory_scan():
         all_advisories = response.json()
         results = {}
 
-        for advisory in all_advisories:
+        for target, codes in TRAVEL_ADVISORY_CODES.items():
+          for advisory in all_advisories:
                 category_list = advisory.get('Category', [])
                 if any(cat in codes for cat in category_list):
                     category = category_list[0] if category_list else ''
@@ -6948,7 +7031,7 @@ def _run_travel_advisory_scan():
                         'recently_changed': recently_changed,
                         'change_description': change_description
                     }
-                    break
+                    break  # Found advisory for this target, move to next target
 
         return {'success': True, 'advisories': results}
 
