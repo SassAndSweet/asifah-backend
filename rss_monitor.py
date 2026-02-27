@@ -324,26 +324,40 @@ _flight_scan_lock = threading.Lock()
 # Comprehensive airline list
 MONITORED_AIRLINES = [
     # Star Alliance
-    'Lufthansa', 'United Airlines', 'Air Canada', 'Turkish Airlines',
-    'Swiss', 'Austrian Airlines', 'Singapore Airlines', 'LOT Polish',
-    'Scandinavian Airlines', 'TAP Air Portugal',
+    'Lufthansa', 'United Airlines', 'United', 'Air Canada', 'Turkish Airlines',
+    'Swiss', 'SWISS', 'Austrian Airlines', 'Austrian', 'Singapore Airlines',
+    'LOT Polish', 'ANA', 'Air India', 'Scandinavian Airlines', 'SAS',
+    'TAP Air Portugal',
     # SkyTeam
-    'Air France', 'KLM', 'Delta', 'Korean Air', 'ITA Airways',
-    'Aeroflot', 'Vietnam Airlines',
+    'Air France', 'KLM', 'Delta', 'Delta Airlines', 'Korean Air',
+    'ITA Airways', 'Alitalia', 'Aeroflot', 'Vietnam Airlines',
+    'China Airlines',
     # Oneworld
-    'British Airways', 'American Airlines', 'Cathay Pacific',
-    'Qantas', 'Japan Airlines', 'Iberia', 'Finnair', 'Qatar Airways',
+    'British Airways', 'American Airlines', 'American', 'Cathay Pacific',
+    'Qantas', 'Japan Airlines', 'JAL', 'Iberia', 'Finnair', 'Qatar Airways',
     # Middle East carriers
     'Emirates', 'Etihad', 'flydubai', 'Air Arabia',
-    'Saudia', 'Gulf Air', 'Kuwait Airways',
+    'Saudia', 'Saudi Arabian Airlines', 'Gulf Air', 'Kuwait Airways',
     'Royal Jordanian', 'Oman Air', 'Middle East Airlines', 'MEA',
     # Israeli carriers
     'El Al', 'Arkia', 'Israir',
-    # Low-cost
-    'Wizz Air', 'Ryanair', 'EasyJet', 'Pegasus Airlines',
-    # Other
-    'Ethiopian Airlines', 'EgyptAir', 'Air New Zealand',
+    # Low-cost carriers
+    'Wizz Air', 'Ryanair', 'EasyJet', 'Pegasus Airlines', 'IndiGo',
+    'AirAsia', 'Jetstar', 'Norwegian', 'Vueling', 'Transavia',
+    # Regional carriers
+    'Air Astana', 'Azerbaijan Airlines', 'Georgian Airways', 'Belavia',
+    'Ukraine International', 'Aegean Airlines', 'Croatia Airlines',
+    # Other major carriers
+    'Ethiopian Airlines', 'EgyptAir', 'Egypt Air', 'Air New Zealand',
+    'South African Airways', 'Kenya Airways', 'Royal Air Maroc',
 ]
+
+# Airline group mappings — if headline says "Lufthansa Group", resolve to primary airline
+AIRLINE_GROUPS = {
+    'Lufthansa Group': 'Lufthansa',
+    'IAG': 'British Airways',
+    'Air France-KLM': 'Air France',
+}
 
 # All Middle East destinations to monitor
 MONITORED_DESTINATIONS = [
@@ -405,6 +419,12 @@ def _extract_airline_from_title(title):
     """Extract airline name from news headline"""
     title_lower = title.lower()
 
+    # Check airline groups first (e.g. "Lufthansa Group" → "Lufthansa")
+    for group_name, primary_airline in AIRLINE_GROUPS.items():
+        if group_name.lower() in title_lower:
+            return primary_airline
+
+    # Check individual airlines
     for airline in MONITORED_AIRLINES:
         if airline.lower() in title_lower:
             return airline
@@ -418,6 +438,15 @@ def _extract_airline_from_title(title):
         potential = pattern.group(1)
         if len(potential) > 3 and potential not in ['United States', 'Middle East', 'European Union']:
             return potential
+
+    # Pattern 2: Capitalized word before action verb
+    words = title.split()
+    for i, word in enumerate(words):
+        if len(word) > 3 and word[0].isupper() and i < len(words) - 1:
+            next_word = words[i + 1].lower()
+            if next_word in ['suspend', 'suspends', 'cancel', 'cancels', 'halt',
+                             'halts', 'resume', 'resumes', 'pause', 'pauses']:
+                return word
 
     return "Unknown Airline"
 
@@ -543,6 +572,8 @@ def _run_flight_disruption_scan():
                         'Munich', 'Vienna', 'Warsaw', 'Amsterdam', 'Madrid', 'Rome',
                         'Zurich', 'Geneva', 'Delhi', 'Mumbai', 'Singapore', 'Hong Kong',
                         'Athens', 'Toronto', 'Chicago', 'Los Angeles', 'Berlin',
+                        'Stockholm', 'Copenhagen', 'Helsinki', 'Lisbon', 'Brussels',
+                        'Milan', 'Doha', 'Abu Dhabi', 'Seoul', 'Tokyo', 'Bangkok',
                     ]
                     for city in origin_cities:
                         if city.lower() in title_lower:
