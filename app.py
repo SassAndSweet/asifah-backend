@@ -7042,10 +7042,31 @@ def _run_travel_advisory_scan():
                     }
                     break  # Found advisory for this target, move to next target
 
+        # HARDCODE FALLBACK: Israel
+        # State Dept uses "Israel, the West Bank and Gaza" — may not match API category codes
+        if 'israel' not in results:
+            results['israel'] = {
+                'country_code': 'IL',
+                'title': 'Israel, the West Bank and Gaza Travel Advisory',
+                'level': 3,
+                'level_label': 'Reconsider Travel',
+                'level_short': 'Reconsider Travel',
+                'level_color': '#f97316',
+                'short_summary': 'to Israel due to terrorism and civil unrest. On Feb 27, 2026, the State Dept authorized departure of non-emergency U.S. government personnel from Mission Israel due to safety risks. Persons may wish to consider leaving Israel while commercial flights are available.',
+                'link': 'https://travel.state.gov/content/travel/en/traveladvisories/traveladvisories/israel-west-bank-and-gaza-travel-advisory.html',
+                'published': '2026-02-27T00:00:00',
+                'updated': '2026-02-27T00:00:00',
+                'recently_changed': True,
+                'change_description': 'Updated today — authorized departure of non-emergency personnel'
+            }
+            print("[Travel Advisory] Israel not found in API — using hardcoded Level 3 fallback")
+
         return {'success': True, 'advisories': results}
 
     except Exception as e:
         print(f"[Travel Advisory] Error: {e}")
+        import traceback
+        traceback.print_exc()
         return {'success': False, 'advisories': {}}
 
 
