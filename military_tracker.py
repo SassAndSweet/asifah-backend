@@ -1,6 +1,6 @@
 """
-Asifah Analytics — Military Asset & Deployment Tracker v2.5.0
-February 25, 2026
+Asifah Analytics — Military Asset & Deployment Tracker v2.6.0
+February 28, 2026
 
 Tracks military asset movements across multiple actors and regions.
 Feeds deployment scores into existing threat probability calculations.
@@ -167,7 +167,7 @@ REGIONAL_THEATRES = {
         'label': 'Middle East & North Africa',
         'icon': '🕌',
         'order': 3,
-        'actors': ['us', 'israel', 'iran', 'iraq', 'egypt', 'jordan', 'kuwait', 'qatar', 'saudi_arabia', 'uae'],
+        'actors': ['us', 'israel', 'iran', 'iraq', 'bahrain', 'egypt', 'jordan', 'kuwait', 'qatar', 'saudi_arabia', 'uae'],
         'description': 'CENTCOM area — Persian Gulf, Red Sea, Eastern Med, Levant, Iraq theatre'
     }
 }
@@ -208,7 +208,16 @@ MILITARY_ACTORS = {
             'military sealift command', 'us logistics middle east',
             'us military buildup', 'us force posture', 'us surge middle east',
             'massive fleet', 'armada', 'combat power',
-            'us military assets middle east', 'military assets flock'
+            'us military assets middle east', 'military assets flock',
+            # Active war posture (v2.6.0)
+            'us strikes iran', 'us attack iran', 'us retaliates iran',
+            'pentagon iran strike', 'centcom strike iran',
+            'us military action iran', 'us iran war',
+            'us forces high alert', 'defcon', 'force protection elevated',
+            'us embassy evacuation middle east', 'us citizens leave',
+            'shelter in place embassy', 'us warships iran',
+            'us carrier iran', 'us bomber iran',
+            'b-2 iran', 'b-52 iran', 'tomahawk iran',
         ],
         'rss_feeds': [
             'https://news.google.com/rss/search?q=site:centcom.mil&hl=en&gl=US&ceid=US:en',
@@ -241,7 +250,41 @@ MILITARY_ACTORS = {
             'צה"ל', 'כיפת ברזל', 'חיל האוויר',
             'פיקוד צפון', 'מילואים', 'חזבאללה',
             'חיל הים', 'תרגיל', 'גיוס',
-            'כוננות', 'פריסה', 'סיור'
+            'כוננות', 'פריסה', 'סיור',
+            # Home Front Command / Pikud HaOref (v2.6.0)
+            'home front command', 'pikud haoref', 'pikud ha-oref',
+            'rocket alert', 'rocket siren', 'incoming rocket',
+            'red alert israel', 'red alert app', 'tzeva adom',
+            'missile alert israel', 'air raid siren israel',
+            'rocket barrage israel', 'missile barrage israel',
+            'rockets fired at israel', 'missiles fired at israel',
+            'iron dome intercept', 'iron dome activated',
+            'david sling intercept', 'arrow intercept',
+            'ballistic missile israel', 'ballistic missile intercept',
+            'shelter instructions', 'bomb shelter israel',
+            'home front command instructions',
+            'multiple alerts', 'nationwide alert israel',
+            'tel aviv siren', 'tel aviv rocket', 'tel aviv alert',
+            'jerusalem siren', 'jerusalem alert',
+            'haifa siren', 'haifa alert', 'haifa rocket',
+            'ben gurion airport closed', 'ben gurion divert',
+            'פיקוד העורף', 'צבע אדום', 'אזעקה',
+            'התרעה', 'מרחב מוגן', 'מקלט',
+            'יירוט', 'טיל בליסטי', 'רקטות',
+            'שיגור', 'מטח רקטות', 'מטח טילים',
+            # Active Iran-Israel war (v2.6.0)
+            'iran strikes israel', 'iran attack israel',
+            'iran missile strike israel', 'iran retaliatory strike',
+            'iran launches missiles', 'iran fires missiles',
+            'iranian missile attack', 'iranian strike',
+            'iran drone attack israel', 'shahed drone israel',
+            'iran ballistic missile israel', 'iran cruise missile israel',
+            'israel retaliates iran', 'israel strikes iran',
+            'israel attack iran', 'idf strikes iran',
+            'israel iran war', 'iran israel war',
+            'iran israel conflict', 'iran israel escalation',
+            'full scale war iran israel', 'regional war middle east',
+            'multi front war israel',
         ],
         'rss_feeds': []
     },
@@ -281,7 +324,23 @@ MILITARY_ACTORS = {
             'تنگه هرمز', 'سپاه قدس',
             # Arabic keywords (match Arabic-language Iran coverage)
             'الحرس الثوري', 'صواريخ باليستية إيران',
-            'القوات البحرية الإيرانية', 'مضيق هرمز'
+            'القوات البحرية الإيرانية', 'مضيق هرمز',
+            # Active war / strike keywords (v2.6.0)
+            'iran strikes israel', 'iran attacks israel',
+            'iran missile launch israel', 'iran retaliatory strike israel',
+            'iran fires missiles at israel', 'iranian attack on israel',
+            'irgc launches', 'irgc fires', 'irgc strike',
+            'iran ballistic missile launch', 'iran massive strike',
+            'iran second strike', 'iran retaliates',
+            'iran nuclear sites', 'iran nuclear facilities strike',
+            'natanz', 'fordow', 'isfahan nuclear',
+            'iran air defense activated', 'iran intercept',
+            'iran war footing', 'iran full mobilization',
+            'iran declares war', 'iran state of war',
+            'strait of hormuz closed', 'hormuz blockade',
+            'iran oil embargo', 'iran shipping attack',
+            'حمله به اسرائیل', 'شلیک موشک', 'جنگ ایران اسرائیل',
+            'حمله موشکی', 'عملیات نظامی',
         ],
         'rss_feeds': []
     },
@@ -538,6 +597,41 @@ MILITARY_ACTORS = {
             'us forces kuwait', 'kuwait defense',
             'ali al salem air base', 'kuwait evacuation',
             'kuwait military exercise'
+        ],
+        'rss_feeds': []
+    },
+
+    'bahrain': {
+        'name': 'Bahrain',
+        'flag': '🇧🇭',
+        'tier': 3,
+        'theatre': 'middle_east',
+        'weight': 0.6,
+        'feeds_into': ['strike_probability', 'regional_tension'],
+        'keywords': [
+            # US 5th Fleet / Naval Forces Central Command
+            'us 5th fleet', 'fifth fleet', 'navcent', 'naval forces central command',
+            'nsa bahrain', 'naval support activity bahrain',
+            'us naval base bahrain', 'bahrain naval base',
+            'juffair', 'mina salman',
+            # Bahrain military
+            'bahrain military', 'bahrain defense force', 'bdf',
+            'bahrain air force', 'bahrain navy',
+            'bahrain military exercise', 'bahrain defense',
+            'bahrain base', 'bahrain deployment',
+            'sheikh isa air base', 'bahrain airbase',
+            # Regional role
+            'bahrain iran tensions', 'bahrain security',
+            'combined maritime forces bahrain', 'cmf bahrain',
+            'international maritime security construct',
+            'combined task force 150', 'ctf 150',
+            'combined task force 152', 'ctf 152',
+            'combined task force 153', 'ctf 153',
+            'bahrain evacuation', 'bahrain departure',
+            'bahrain threat', 'bahrain alert',
+            # Arabic keywords
+            'قوة دفاع البحرين', 'الأسطول الخامس',
+            'القاعدة البحرية البحرين',
         ],
         'rss_feeds': []
     },
@@ -1073,6 +1167,14 @@ LOCATION_MULTIPLIERS = {
     'basra': 1.5,
     'sulaymaniyah': 1.5,
     'diyala': 2.0,
+    # Bahrain (v2.6.0)
+    'bahrain naval base': 2.5,
+    'juffair': 2.5,
+    'nsa bahrain': 2.5,
+    'fifth fleet': 2.5,
+    '5th fleet': 2.5,
+    'sheikh isa air base': 2.0,
+    'mina salman': 2.0,
 }
 
 
@@ -1094,8 +1196,18 @@ ASSET_TARGET_MAPPING = {
         },
         'Bahrain Naval Base': {
             'location': 'Bahrain',
-            'targets': ['iran'],
+            'targets': ['bahrain', 'iran'],
             'description': 'US 5th Fleet HQ. Naval ops center.'
+        },
+        'NSA Bahrain (5th Fleet HQ)': {
+            'location': 'Bahrain',
+            'targets': ['bahrain', 'iran'],
+            'description': 'US 5th Fleet / NAVCENT HQ. Primary naval command for Persian Gulf ops.'
+        },
+        'Sheikh Isa Air Base': {
+            'location': 'Bahrain',
+            'targets': ['bahrain', 'iran'],
+            'description': 'Bahrain Air Force base. Coalition air ops.'
         },
         'Diego Garcia': {
             'location': 'British Indian Ocean Territory',
@@ -1358,6 +1470,8 @@ DEFENSE_RSS_FEEDS = {
     'Iraq News (Google)': 'https://news.google.com/rss/search?q=iraq+military+OR+militia+OR+ISIS&hl=en&gl=US&ceid=US:en',
     'Rudaw English': 'https://news.google.com/rss/search?q=site:rudaw.net+military&hl=en&gl=US&ceid=US:en',
     'Kurdistan24': 'https://news.google.com/rss/search?q=site:kurdistan24.net+military&hl=en&gl=US&ceid=US:en',
+    # v2.6.0 — Bahrain
+    'Bahrain News (Google)': 'https://news.google.com/rss/search?q=bahrain+military+OR+fifth+fleet+OR+naval&hl=en&gl=US&ceid=US:en',
 }
 
 REDDIT_MILITARY_SUBREDDITS = [
@@ -1747,6 +1861,21 @@ def fetch_all_gdelt_military(days=7):
         'Iraq sectarian violence',
         'Maliki Iraq government',
         'Peshmerga Kurdistan military',
+        # v2.6.0 — Active Iran-Israel conflict + Bahrain
+        'Iran missile strike Israel',
+        'Iran attack Israel missiles',
+        'Israel retaliates Iran',
+        'Iran Israel war',
+        'ballistic missile Israel intercept',
+        'iron dome intercept barrage',
+        'home front command rocket alert',
+        'US military response Iran',
+        'CENTCOM Iran strike',
+        'Bahrain 5th Fleet alert',
+        'Strait of Hormuz military',
+        'regional war Middle East escalation',
+        'Iran nuclear facilities strike',
+        'airlines cancel Middle East war',
     ]
 
     hebrew_queries = [
@@ -1758,6 +1887,12 @@ def fetch_all_gdelt_military(days=7):
         'חזבאללה צפון',
         'פיקוד צפון כוננות',
         'חיל הים סיור',
+        # v2.6.0 — Home Front Command / active war
+        'פיקוד העורף התרעה',
+        'צבע אדום טיל',
+        'יירוט טיל בליסטי',
+        'מטח רקטות איראן',
+        'מלחמה איראן ישראל',
     ]
 
     russian_queries = [
@@ -1805,6 +1940,11 @@ def fetch_all_gdelt_military(days=7):
         'الانسحاب الأمريكي العراق',
         'قاعدة عين الأسد هجوم',
         'القوات المسلحة العراقية',
+        # v2.6.0 — Active conflict + Bahrain
+        'حرب إيران إسرائيل',
+        'هجوم صاروخي إيران إسرائيل',
+        'الأسطول الخامس البحرين تأهب',
+        'القوات الأمريكية تأهب قصوى',
     ]
 
     farsi_queries = [
@@ -1814,6 +1954,10 @@ def fetch_all_gdelt_military(days=7):
         'پهپاد نظامی',
         'نیروی هوافضا سپاه',
         'تنگه هرمز رزمایش',
+        # v2.6.0 — Active conflict
+        'حمله به اسرائیل موشک',
+        'جنگ ایران اسرائیل',
+        'عملیات نظامی سپاه',
     ]
 
     turkish_queries = [
@@ -1970,6 +2114,9 @@ def fetch_all_newsapi_military(days=7):
         # v2.5.0 — Iraq
         'Iraq militia attack coalition base',
         'Iraq ISIS military operation',
+        # v2.6.0 — War footing
+        'Bahrain 5th Fleet military alert',
+        'Iran Israel war missile strike',
     ]
 
     all_articles = []
@@ -2584,8 +2731,8 @@ def register_military_endpoints(app):
                 time.sleep(60)
                 while _background_scan_running:
                     time.sleep(30)
-                print("[Military Tracker] Periodic scan complete. Sleeping 12 hours.")
-                time.sleep(43200)
+                print("[Military Tracker] Periodic scan complete. Sleeping 4 hours (war footing).")
+                time.sleep(14400)
             except Exception as e:
                 print(f"[Military Tracker] Periodic scan error: {e}")
                 time.sleep(3600)
