@@ -735,7 +735,7 @@ def _flight_periodic_scan_thread():
     Background thread — scans every 12 hours.
     First scan after 20s delay (let app boot first).
     """
-    SCAN_INTERVAL = 12 * 60 * 60  # 12 hours
+    SCAN_INTERVAL = 6 * 60 * 60  # 6 hours — war footing
     INITIAL_DELAY = 20  # seconds
 
     print(f"[Flight Scan] Periodic thread started — {SCAN_INTERVAL // 3600}h interval, {INITIAL_DELAY}s initial delay")
