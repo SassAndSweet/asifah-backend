@@ -735,10 +735,8 @@ def _check_cache_or_placeholder(label, cache_key, target=None, extended=False):
 # ========================================
 # FLASK APP INITIALIZATION
 # ========================================
-
 app = Flask(__name__)
 CORS(app)
-
 # Rhetoric Tracker — runs scan thread + serves endpoints
 try:
     from rhetoric_tracker import register_rhetoric_endpoints
@@ -747,14 +745,12 @@ try:
 except ImportError:
     print("[App] ⚠️ Rhetoric tracker not found")
 register_military_endpoints(app)
-
 # Flight Disruptions — background scan thread (12h cycle)
 try:
     register_flight_scan_thread()
     print("[App] ✅ Flight disruption scan thread started")
 except Exception as e:
     print(f"[App] ⚠️ Flight scan thread failed: {e}")
-
 # Iran Stability Module (consolidated from iran_protests.py)
 from iran_protests import register_iran_routes
 register_iran_routes(app)
@@ -7512,6 +7508,21 @@ def health():
         'timestamp': datetime.now(timezone.utc).isoformat()
     })
 
+@app.route('/flight-cancellations', methods=['GET'])
+def flight_cancellations():
+    """Flight disruption data — cached, background refresh"""
+    try:
+        data = get_flight_cache_for_endpoint()
+        return jsonify(data)
+    except Exception as e:
+        print(f"[Flights] Error: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'cancellations': [],
+            'count': 0
+        }), 500
+        
 # NOTAM endpoint
 @app.route('/api/notams')
 def get_notams():
