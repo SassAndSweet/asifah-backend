@@ -1,6 +1,6 @@
 """
-Asifah Analytics — Military Asset & Deployment Tracker v2.6.0
-February 28, 2026
+Asifah Analytics — Military Asset & Deployment Tracker v2.7.0
+March 4, 2026
 
 Tracks military asset movements across multiple actors and regions.
 Feeds deployment scores into existing threat probability calculations.
@@ -160,14 +160,13 @@ REGIONAL_THEATRES = {
         'label': 'European Theatre',
         'icon': '🌍',
         'order': 2,
-        'actors': ['nato', 'russia', 'turkey', 'ukraine', 'greenland', 'poland'],
-        'description': 'EUCOM area — NATO, Russia, Arctic, Black Sea, Ukraine, Poland eastern flank'
+        'actors': ['nato', 'russia', 'turkey', 'ukraine', 'greenland', 'poland'],'EUCOM area — NATO, Russia, Arctic, Black Sea, Ukraine, Poland eastern flank'
     },
     'middle_east': {
         'label': 'Middle East & North Africa',
         'icon': '🕌',
         'order': 3,
-        'actors': ['us', 'israel', 'iran', 'iraq', 'bahrain', 'egypt', 'jordan', 'kuwait', 'qatar', 'saudi_arabia', 'uae'],
+        'actors': ['us', 'israel', 'iran', 'iraq', 'bahrain', 'egypt', 'jordan', 'kuwait', 'oman', 'qatar', 'saudi_arabia', 'uae'],
         'description': 'CENTCOM area — Persian Gulf, Red Sea, Eastern Med, Levant, Iraq theatre'
     }
 }
@@ -510,7 +509,7 @@ MILITARY_ACTORS = {
         'flag': '🇸🇦',
         'tier': 3,
         'theatre': 'middle_east',
-        'weight': 0.5,
+        'weight': 0.6,
         'feeds_into': ['regional_tension'],
         'keywords': [
             'saudi military', 'saudi air force', 'royal saudi navy',
@@ -520,10 +519,27 @@ MILITARY_ACTORS = {
             'saudi defense spending', 'saudi arms deal',
             'saudi intercept', 'saudi houthi',
             'us cargo planes saudi', 'saudi base',
+            'prince sultan air base', 'king abdulaziz air base',
+            'king fahd air base', 'eskan village',
+            # War keywords (v2.7.0)
+            'iran strike saudi', 'iranian missile saudi',
+            'iranian attack saudi arabia', 'iran drone saudi',
+            'saudi intercept missile', 'saudi air defense activated',
+            'riyadh attack', 'riyadh missile', 'riyadh drone',
+            'eastern province attack', 'dhahran attack',
+            'aramco attack', 'saudi oil attack',
+            'saudi embassy closed', 'saudi shelter in place',
+            'us embassy saudi closed', 'saudi arabia war',
+            'houthi attack saudi', 'houthi missile riyadh',
             # Arabic keywords
-            'القوات المسلحة السعودية', 'تدريب عسكري السعودية'
+            'القوات المسلحة السعودية', 'تدريب عسكري السعودية',
+            'هجوم على السعودية', 'صاروخ إيراني السعودية',
+            'الدفاع الجوي السعودي', 'قاعدة الأمير سلطان',
+            'أرامكو هجوم', 'الرياض هجوم',
         ],
-        'rss_feeds': []
+        'rss_feeds': [
+            'https://news.google.com/rss/search?q=saudi+arabia+military+OR+missile+OR+attack+OR+defense&hl=en&gl=US&ceid=US:en',
+        ]
     },
 
     'uae': {
@@ -531,7 +547,7 @@ MILITARY_ACTORS = {
         'flag': '🇦🇪',
         'tier': 3,
         'theatre': 'middle_east',
-        'weight': 0.5,
+        'weight': 0.6,
         'feeds_into': ['regional_tension'],
         'keywords': [
             'uae forces', 'uae military', 'uae air force',
@@ -540,10 +556,26 @@ MILITARY_ACTORS = {
             'uae arms deal', 'uae military buildup',
             'uae evacuation', 'uae departure',
             'emirates military', 'uae drone',
+            # War keywords (v2.7.0)
+            'iran strike uae', 'iranian missile uae',
+            'iranian attack uae', 'iran drone uae',
+            'dubai attack', 'dubai missile', 'dubai drone',
+            'abu dhabi attack', 'abu dhabi missile',
+            'us embassy dubai', 'us embassy dubai hit',
+            'us embassy abu dhabi', 'uae intercept missile',
+            'uae air defense activated', 'uae shelter',
+            'al dhafra attack', 'al dhafra missile',
+            'jebel ali port attack', 'uae war',
+            'houthi attack uae', 'houthi missile uae',
             # Arabic keywords
-            'القوات المسلحة الإماراتية'
+            'القوات المسلحة الإماراتية',
+            'هجوم على الإمارات', 'صاروخ إيراني الإمارات',
+            'دبي هجوم', 'أبوظبي هجوم',
+            'قاعدة الظفرة', 'السفارة الأمريكية دبي',
         ],
-        'rss_feeds': []
+        'rss_feeds': [
+            'https://news.google.com/rss/search?q=UAE+OR+dubai+OR+abu+dhabi+military+OR+missile+OR+attack&hl=en&gl=US&ceid=US:en',
+        ]
     },
 
     'jordan': {
@@ -551,7 +583,7 @@ MILITARY_ACTORS = {
         'flag': '🇯🇴',
         'tier': 3,
         'theatre': 'middle_east',
-        'weight': 0.5,
+        'weight': 0.6,
         'feeds_into': ['regional_tension'],
         'keywords': [
             'jordan military', 'jordanian armed forces',
@@ -562,27 +594,53 @@ MILITARY_ACTORS = {
             'jordan intercept', 'jordan air defense',
             'eager lion exercise', 'jordan base',
             'us cargo planes jordan', 'strike eagles jordan',
+            # War keywords (v2.7.0)
+            'jordan intercept drone', 'jordan intercept missile',
+            'jordan intercept ballistic', 'jordan shoots down',
+            'jordanian airspace violation', 'jordan airspace',
+            'jordan air defense activated', 'jordan scramble jets',
+            'debris jordan', 'fragments jordan', 'shrapnel jordan',
+            'iran missile jordan', 'iranian drone jordan',
+            'jordan shelter', 'amman attack', 'amman missile',
+            'us embassy jordan closed', 'jordan war',
+            'jordan intercepted drones', 'jordan intercepted missiles',
             # Arabic keywords
-            'القوات الأردنية', 'الجيش الأردني'
+            'القوات الأردنية', 'الجيش الأردني',
+            'الأردن اعتراض صاروخ', 'الأردن دفاع جوي',
+            'المجال الجوي الأردني', 'عمان هجوم',
         ],
-        'rss_feeds': []
+        'rss_feeds': [
+            'https://news.google.com/rss/search?q=jordan+military+OR+intercept+OR+missile+OR+airspace&hl=en&gl=US&ceid=US:en',
+        ]
     },
 
-    'qatar': {
+'qatar': {
         'name': 'Qatar',
         'flag': '🇶🇦',
         'tier': 3,
         'theatre': 'middle_east',
-        'weight': 0.5,
-        'feeds_into': ['regional_tension'],
+        'weight': 0.6,
+        'feeds_into': ['strike_probability', 'regional_tension'],
         'keywords': [
             'al udeid air base', 'al udeid', 'qatar base',
             'centcom forward headquarters', 'centcom hq qatar',
             'qatar military', 'qatar defense',
             'qatar air base evacuation', 'al udeid evacuation',
-            'qatar military exercise', 'us forces qatar'
+            'qatar military exercise', 'us forces qatar',
+            # War keywords (v2.7.0)
+            'al udeid hit', 'al udeid attack', 'al udeid missile',
+            'al udeid struck', 'iran missile qatar',
+            'iranian attack qatar', 'iranian strike qatar',
+            'qatar intercept missile', 'qatar air defense',
+            'qatar airspace closed', 'qatar flights suspended',
+            'qatar airways grounded', 'qatar flights grounded',
+            'doha attack', 'doha missile', 'doha shelter',
+            'qatar civil aviation suspended', 'qatar war',
+            'قطر هجوم', 'قاعدة العديد', 'الدوحة صاروخ',
         ],
-        'rss_feeds': []
+        'rss_feeds': [
+            'https://news.google.com/rss/search?q=qatar+OR+al+udeid+military+OR+missile+OR+attack+OR+flights&hl=en&gl=US&ceid=US:en',
+        ]
     },
 
     'kuwait': {
@@ -590,15 +648,32 @@ MILITARY_ACTORS = {
         'flag': '🇰🇼',
         'tier': 3,
         'theatre': 'middle_east',
-        'weight': 0.4,
-        'feeds_into': ['regional_tension'],
+        'weight': 0.6,
+        'feeds_into': ['strike_probability', 'regional_tension'],
         'keywords': [
             'camp arifjan', 'kuwait military', 'kuwait base',
             'us forces kuwait', 'kuwait defense',
             'ali al salem air base', 'kuwait evacuation',
-            'kuwait military exercise'
+            'kuwait military exercise',
+            # War keywords (v2.7.0)
+            'iran strike kuwait', 'iranian missile kuwait',
+            'iranian attack kuwait', 'iran drone kuwait',
+            'kuwait port attack', 'kuwait drone strike',
+            'us soldiers killed kuwait', 'us troops killed kuwait',
+            'kuwait intercept missile', 'kuwait air defense',
+            'kuwait city attack', 'kuwait shrapnel',
+            'kuwait embassy closed', 'us embassy kuwait closed',
+            'kuwait warplanes crashed', 'kuwait war',
+            'camp arifjan attack', 'ali al salem attack',
+            'kuwait casualties', 'kuwait killed',
+            # Arabic keywords
+            'الكويت هجوم', 'صاروخ إيراني الكويت',
+            'معسكر عريفجان', 'قاعدة علي السالم',
+            'السفارة الأمريكية الكويت',
         ],
-        'rss_feeds': []
+        'rss_feeds': [
+            'https://news.google.com/rss/search?q=kuwait+military+OR+missile+OR+attack+OR+troops&hl=en&gl=US&ceid=US:en',
+        ]
     },
 
     'bahrain': {
@@ -641,7 +716,7 @@ MILITARY_ACTORS = {
         'flag': '🇪🇬',
         'tier': 3,
         'theatre': 'middle_east',
-        'weight': 0.4,
+        'weight': 0.5,
         'feeds_into': ['regional_tension'],
         'keywords': [
             'egyptian military', 'egypt military exercise',
@@ -650,10 +725,54 @@ MILITARY_ACTORS = {
             'egypt rafale', 'egypt military buildup',
             'egypt libya border', 'egypt gaza border',
             'egypt israel border troops', 'bright star exercise',
+            # War keywords (v2.7.0)
+            'suez canal closed', 'suez canal military',
+            'suez canal disruption', 'egypt rafah crossing',
+            'egypt gaza humanitarian', 'egypt border tensions',
+            'egypt air defense', 'egypt intercept',
+            'egypt airspace', 'cairo military alert',
+            'egypt sinai buildup', 'egypt red sea military',
+            'sharm el sheikh military', 'egypt war footing',
             # Arabic keywords
-            'الجيش المصري', 'القوات المسلحة المصرية'
+            'الجيش المصري', 'القوات المسلحة المصرية',
+            'قناة السويس عسكري', 'مصر دفاع جوي',
+            'سيناء عملية', 'معبر رفح',
         ],
-        'rss_feeds': []
+        'rss_feeds': [
+            'https://news.google.com/rss/search?q=egypt+military+OR+suez+OR+sinai+OR+defense&hl=en&gl=US&ceid=US:en',
+        ]
+    },
+
+    'oman': {
+        'name': 'Oman',
+        'flag': '🇴🇲',
+        'tier': 3,
+        'theatre': 'middle_east',
+        'weight': 0.5,
+        'feeds_into': ['regional_tension'],
+        'keywords': [
+            'oman military', 'royal oman armed forces',
+            'oman air force', 'oman navy', 'oman defense',
+            'oman strait of hormuz', 'oman gulf',
+            'muscat military', 'oman base',
+            'oman us military', 'oman access agreement',
+            'masirah island', 'thumrait air base',
+            'duqm port', 'duqm naval base', 'port of duqm',
+            'oman air defense', 'oman intercept',
+            # War keywords (v2.7.0)
+            'iran attack oman', 'iranian missile oman',
+            'oman airspace', 'oman airspace violation',
+            'oman strait closure', 'oman war',
+            'oman intercept missile', 'oman shelter',
+            'muscat attack', 'duqm attack',
+            'oman evacuation', 'oman embassy',
+            # Arabic keywords
+            'القوات المسلحة العمانية', 'سلطنة عمان عسكري',
+            'ميناء الدقم', 'مسقط هجوم',
+        ],
+        'rss_feeds': [
+            'https://news.google.com/rss/search?q=oman+military+OR+muscat+OR+duqm+OR+strait+hormuz&hl=en&gl=US&ceid=US:en',
+        ]
     },
 
     'turkey': {
@@ -661,7 +780,7 @@ MILITARY_ACTORS = {
         'flag': '🇹🇷',
         'tier': 3,
         'theatre': 'europe',
-        'weight': 0.5,
+        'weight': 0.6,
         'feeds_into': ['regional_tension'],
         'keywords': [
             'turkish military syria', 'turkish forces syria',
@@ -672,11 +791,23 @@ MILITARY_ACTORS = {
             'turkey northern iraq', 'turkey pkk operation',
             'turkish ground operation syria',
             'turkey nato', 'turkish military nato',
+            # War keywords (v2.7.0)
+            'incirlik attack', 'incirlik strike', 'incirlik base alert',
+            'turkey iran tensions', 'iran attack turkey',
+            'iranian missile turkey', 'turkish airspace violation',
+            'turkey air defense', 'turkey intercept',
+            'turkey bosphorus military', 'turkish straits closure',
+            'turkey border alert', 'erdogan military',
+            'turkey war', 'turkey nato article 5',
             # Turkish keywords
             'türk silahlı kuvvetleri', 'türk donanması',
-            'hava kuvvetleri', 'askeri operasyon'
+            'hava kuvvetleri', 'askeri operasyon',
+            'İncirlik üssü saldırı', 'hava savunma',
+            'füze saldırısı', 'savaş', 'NATO madde 5',
         ],
-        'rss_feeds': []
+        'rss_feeds': [
+            'https://news.google.com/rss/search?q=turkey+military+OR+incirlik+OR+erdogan+defense+OR+attack&hl=en&gl=US&ceid=US:en',
+        ]
     },
 
     # ------------------------------------------------
@@ -821,6 +952,41 @@ MILITARY_ACTORS = {
             'bezzałogowiec', 'dron zwiadowczy',
         ],
         'rss_feeds': []
+    },
+
+    'cyprus': {
+        'name': 'Cyprus',
+        'flag': '🇨🇾',
+        'tier': 3,
+        'theatre': 'europe',
+        'weight': 0.5,
+        'feeds_into': ['regional_tension'],
+        'keywords': [
+            'cyprus military', 'cyprus defense', 'cyprus defence',
+            'cyprus base', 'cyprus british base',
+            'akrotiri base', 'raf akrotiri', 'akrotiri attack',
+            'akrotiri drone', 'akrotiri strike',
+            'dhekelia base', 'sovereign base areas',
+            'cyprus air base', 'cyprus nato',
+            # War keywords (v2.7.0)
+            'iran attack cyprus', 'iranian drone cyprus',
+            'iranian strike cyprus', 'iran missile cyprus',
+            'cyprus airspace closed', 'cyprus flights cancelled',
+            'cyprus evacuation', 'us evacuate cyprus',
+            'cyprus shelter', 'nicosia attack',
+            'limassol military', 'larnaca military',
+            'paphos air base', 'andreas papandreou air base',
+            'cyprus intercept', 'cyprus air defense',
+            'european forces cyprus', 'france cyprus',
+            'uk forces cyprus', 'british forces cyprus',
+            'greece deploy cyprus', 'cyprus war',
+            'cyprus reinforcement', 'destroyer cyprus',
+            # Greek keywords
+            'κύπρος στρατιωτικό', 'ακρωτήρι βάση',
+        ],
+        'rss_feeds': [
+            'https://news.google.com/rss/search?q=cyprus+military+OR+akrotiri+OR+attack+OR+evacuation&hl=en&gl=US&ceid=US:en',
+        ]
     },
 
     # ------------------------------------------------
@@ -1175,6 +1341,47 @@ LOCATION_MULTIPLIERS = {
     '5th fleet': 2.5,
     'sheikh isa air base': 2.0,
     'mina salman': 2.0,
+    # Kuwait (v2.7.0)
+    'camp arifjan': 2.5,
+    'ali al salem': 2.0,
+    'kuwait port': 2.0,
+    'kuwait city': 1.5,
+    # Saudi Arabia (v2.7.0)
+    'prince sultan air base': 2.5,
+    'king abdulaziz air base': 2.0,
+    'king fahd air base': 2.0,
+    'riyadh': 2.0,
+    'dhahran': 2.0,
+    'eastern province': 2.0,
+    'aramco': 2.5,
+    # UAE (v2.7.0)
+    'al dhafra': 2.5,
+    'dubai': 1.5,
+    'abu dhabi': 2.0,
+    'jebel ali': 2.0,
+    # Jordan (v2.7.0)
+    'muwaffaq salti': 2.5,
+    'tower 22': 2.5,
+    'amman': 1.5,
+    # Qatar (v2.7.0)
+    'al udeid': 2.5,
+    'doha': 1.5,
+    # Oman (v2.7.0)
+    'duqm': 2.0,
+    'masirah': 2.0,
+    'thumrait': 2.0,
+    'muscat': 1.5,
+    # Cyprus (v2.7.0)
+    'akrotiri': 2.5,
+    'dhekelia': 2.0,
+    'larnaca': 1.5,
+    'paphos air base': 2.0,
+    'nicosia': 1.5,
+    'limassol': 1.5,
+    # Egypt (v2.7.0)
+    'suez canal': 3.0,
+    'sharm el sheikh': 1.5,
+    'cairo': 1.5,
 }
 
 
@@ -1320,6 +1527,26 @@ ASSET_TARGET_MAPPING = {
             'targets': ['iran', 'saudi_arabia'],
             'description': 'US Air Force presence in Saudi Arabia.'
         },
+        'King Abdulaziz Air Base': {
+            'location': 'Saudi Arabia (Dhahran)',
+            'targets': ['saudi_arabia', 'iran'],
+            'description': 'Saudi/coalition air ops. Eastern Province.'
+        },
+        'Duqm Naval Base': {
+            'location': 'Oman',
+            'targets': ['oman', 'iran'],
+            'description': 'UK/US naval logistics. Indian Ocean access.'
+        },
+        'Thumrait Air Base': {
+            'location': 'Oman',
+            'targets': ['oman', 'iran'],
+            'description': 'Omani Air Force. Coalition staging.'
+        },
+        'Masirah Island': {
+            'location': 'Oman',
+            'targets': ['oman'],
+            'description': 'Remote air base. Indian Ocean patrol.'
+        },
     },
     'eucom': {
         'Pituffik Space Base (Thule)': {
@@ -1391,6 +1618,21 @@ ASSET_TARGET_MAPPING = {
             'location': 'Poland/Lithuania border',
             'targets': ['poland', 'nato_eastern_flank'],
             'description': 'Critical NATO corridor between Kaliningrad and Belarus.'
+        },
+        'RAF Akrotiri': {
+            'location': 'Cyprus (UK SBA)',
+            'targets': ['cyprus', 'syria', 'lebanon'],
+            'description': 'UK sovereign base. Strike and ISR. Iran drone target.'
+        },
+        'Dhekelia': {
+            'location': 'Cyprus (UK SBA)',
+            'targets': ['cyprus'],
+            'description': 'UK sovereign base area. Eastern Cyprus.'
+        },
+        'Andreas Papandreou Air Base': {
+            'location': 'Cyprus (Paphos)',
+            'targets': ['cyprus'],
+            'description': 'Cypriot/Greek Air Force. Eastern Med.'
         },
     }
 }
@@ -1472,6 +1714,16 @@ DEFENSE_RSS_FEEDS = {
     'Kurdistan24': 'https://news.google.com/rss/search?q=site:kurdistan24.net+military&hl=en&gl=US&ceid=US:en',
     # v2.6.0 — Bahrain
     'Bahrain News (Google)': 'https://news.google.com/rss/search?q=bahrain+military+OR+fifth+fleet+OR+naval&hl=en&gl=US&ceid=US:en',
+    # v2.7.0 — War footing: all Gulf + regional actors
+    'Kuwait Military (Google)': 'https://news.google.com/rss/search?q=kuwait+military+OR+missile+OR+attack+OR+troops&hl=en&gl=US&ceid=US:en',
+    'Saudi Military (Google)': 'https://news.google.com/rss/search?q=saudi+arabia+military+OR+missile+OR+attack+OR+defense&hl=en&gl=US&ceid=US:en',
+    'UAE Military (Google)': 'https://news.google.com/rss/search?q=UAE+OR+dubai+OR+abu+dhabi+military+OR+missile+OR+attack&hl=en&gl=US&ceid=US:en',
+    'Jordan Military (Google)': 'https://news.google.com/rss/search?q=jordan+military+OR+intercept+OR+missile+OR+airspace&hl=en&gl=US&ceid=US:en',
+    'Qatar Military (Google)': 'https://news.google.com/rss/search?q=qatar+OR+al+udeid+military+OR+missile+OR+attack+OR+flights&hl=en&gl=US&ceid=US:en',
+    'Oman Military (Google)': 'https://news.google.com/rss/search?q=oman+military+OR+muscat+OR+duqm+OR+strait+hormuz&hl=en&gl=US&ceid=US:en',
+    'Egypt Military (Google)': 'https://news.google.com/rss/search?q=egypt+military+OR+suez+OR+sinai+OR+defense&hl=en&gl=US&ceid=US:en',
+    'Turkey Military (Google)': 'https://news.google.com/rss/search?q=turkey+military+OR+incirlik+OR+erdogan+defense+OR+attack&hl=en&gl=US&ceid=US:en',
+    'Cyprus Military (Google)': 'https://news.google.com/rss/search?q=cyprus+military+OR+akrotiri+OR+attack+OR+evacuation&hl=en&gl=US&ceid=US:en',
 }
 
 REDDIT_MILITARY_SUBREDDITS = [
@@ -1627,7 +1879,7 @@ def _build_empty_skeleton():
         'cached': False,
         'scan_in_progress': True,
         'message': 'Initial scan in progress. Data will appear shortly.',
-        'version': '2.5.0'
+        'version': '2.7.0'
     }
 
 
@@ -1876,6 +2128,31 @@ def fetch_all_gdelt_military(days=7):
         'regional war Middle East escalation',
         'Iran nuclear facilities strike',
         'airlines cancel Middle East war',
+        # v2.7.0 — Gulf state + regional actor war queries
+        'Kuwait Iranian missile attack',
+        'Kuwait US soldiers killed',
+        'Kuwait port drone strike',
+        'Saudi Arabia Iranian missile Riyadh',
+        'Saudi Aramco attack Iran',
+        'Saudi air defense intercept',
+        'UAE Dubai embassy attack',
+        'UAE Abu Dhabi missile',
+        'Al Dhafra air base attack',
+        'Jordan intercept Iranian drone missile',
+        'Jordan airspace ballistic missile',
+        'Qatar Al Udeid missile hit',
+        'Qatar flights suspended war',
+        'Qatar airspace closed',
+        'Oman Strait Hormuz military',
+        'Oman Duqm naval base',
+        'Egypt Suez Canal war disruption',
+        'Egypt Sinai military buildup',
+        'Turkey Incirlik base attack',
+        'Turkey Iran border tensions',
+        'Cyprus Akrotiri drone attack',
+        'Cyprus evacuation Iran',
+        'Cyprus flights cancelled war',
+        'UK forces Cyprus reinforcement',
     ]
 
     hebrew_queries = [
@@ -1945,6 +2222,15 @@ def fetch_all_gdelt_military(days=7):
         'هجوم صاروخي إيران إسرائيل',
         'الأسطول الخامس البحرين تأهب',
         'القوات الأمريكية تأهب قصوى',
+        # v2.7.0 — Gulf state Arabic queries
+        'الكويت هجوم صاروخي إيراني',
+        'السعودية دفاع جوي اعتراض',
+        'الإمارات دبي هجوم',
+        'الأردن اعتراض صواريخ طائرات',
+        'قطر العديد صاروخ',
+        'عمان مضيق هرمز عسكري',
+        'مصر قناة السويس حرب',
+        'قبرص أكروتيري هجوم',
     ]
 
     farsi_queries = [
@@ -1966,6 +2252,11 @@ def fetch_all_gdelt_military(days=7):
         'suriye askeri operasyon',
         'bayraktar insansız hava',
         'incirlik üssü',
+        # v2.7.0 — War queries
+        'İncirlik üssü saldırı',
+        'Türkiye hava savunma',
+        'İran saldırı Türkiye',
+        'füze saldırısı Türkiye',
     ]
 
     ukrainian_queries = [
@@ -2117,6 +2408,14 @@ def fetch_all_newsapi_military(days=7):
         # v2.6.0 — War footing
         'Bahrain 5th Fleet military alert',
         'Iran Israel war missile strike',
+        # v2.7.0 — Gulf + regional
+        'Kuwait Iran attack US soldiers',
+        'Saudi Arabia Iranian missile defense',
+        'UAE Dubai embassy attack missile',
+        'Jordan intercept Iranian missiles drones',
+        'Qatar Al Udeid base missile attack',
+        'Cyprus Akrotiri Iran drone attack',
+        'Oman military Strait Hormuz',
     ]
 
     all_articles = []
@@ -2562,7 +2861,7 @@ def _run_full_scan(days=7):
         },
         'last_updated': datetime.now(timezone.utc).isoformat(),
         'cached': False,
-        'version': '2.5.0'
+        'version': '2.7.0'
     }
 
     save_military_cache(result)
