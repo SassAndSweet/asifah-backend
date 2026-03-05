@@ -1363,7 +1363,6 @@ ASSET_CATEGORIES = {
             'shelter in place', 'seek shelter',
         ]
     },
-    },
     'military_posturing': {
         'label': 'Military Posturing / Threats',
         'icon': '⚠️',
