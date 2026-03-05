@@ -464,8 +464,43 @@ def _refresh_target(target):
         except Exception:
             israel_rss = []
 
+        # Google News RSS fallback for active war coverage
+        google_war_articles = []
+        war_queries = [
+            'Israel+Iran+war+missile+attack',
+            'Israel+ballistic+missile+intercept+iron+dome',
+            'Israel+home+front+command+siren+alert',
+            'Israel+airspace+closed+flights+cancelled',
+        ]
+        for wq in war_queries:
+            try:
+                feed_url = f"https://news.google.com/rss/search?q={wq}&hl=en&gl=US&ceid=US:en"
+                headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+                resp = requests.get(feed_url, timeout=10, headers=headers)
+                if resp.status_code == 200:
+                    root = ET.fromstring(resp.content)
+                    for item in root.findall('.//item')[:10]:
+                        title_elem = item.find('title')
+                        link_elem = item.find('link')
+                        pubDate_elem = item.find('pubDate')
+                        if title_elem is not None and link_elem is not None:
+                            google_war_articles.append({
+                                'title': title_elem.text or '',
+                                'description': title_elem.text or '',
+                                'url': link_elem.text or '',
+                                'publishedAt': pubDate_elem.text if pubDate_elem is not None else datetime.now(timezone.utc).isoformat(),
+                                'source': {'name': 'Google News'},
+                                'content': title_elem.text or '',
+                                'language': 'en'
+                            })
+            except Exception as e:
+                print(f"[Israel] Google News RSS error: {e}")
+
+        print(f"[Israel] Google News war RSS: {len(google_war_articles)} articles")
+
         all_articles = (articles_en + articles_gdelt_en + articles_gdelt_ar +
-                       articles_gdelt_he + articles_gdelt_fa + articles_reddit + israel_rss)
+                       articles_gdelt_he + articles_gdelt_fa + articles_reddit + 
+                       israel_rss + google_war_articles)
 
         scoring_result = calculate_threat_probability(all_articles, days, 'israel')
         probability = scoring_result['probability']
@@ -841,6 +876,26 @@ SOURCE_WEIGHTS = {
 # KEYWORD SEVERITY
 # ========================================
 KEYWORD_SEVERITY = {
+    'active_war': {
+        'keywords': [
+            'ballistic missile', 'cruise missile', 'missile barrage',
+            'missile salvo', 'missile intercept', 'iron dome intercept',
+            'arrow intercept', 'davids sling intercept',
+            'home front command', 'pikud haoref', 'tzeva adom',
+            'red alert', 'sirens', 'bomb shelter', 'safe room',
+            'air defense activated', 'base attacked', 'base hit',
+            'embassy hit', 'embassy attacked', 'port struck',
+            'airspace closed', 'flights cancelled war',
+            'operation epic fury', 'combat operations',
+            'shoots down drone', 'shoots down missile',
+            'intercepts ballistic', 'intercepts missile',
+            'scrambles jets', 'jets scrambled',
+            'casualties confirmed', 'killed in attack',
+            'wounded in attack', 'shrapnel', 'debris fell',
+            'impact confirmed', 'direct hit',
+        ],
+        'multiplier': 3.0
+    },
     'diplomatic_crisis': {
         'keywords': [
             'ordered departure', 'authorized departure',
@@ -1254,7 +1309,7 @@ def detect_keyword_severity(text):
     
     text_lower = text.lower()
     
-    for severity_level in ['diplomatic_crisis', 'critical', 'high', 'elevated', 'moderate']:
+    for severity_level in ['active_war', 'diplomatic_crisis', 'critical', 'high', 'elevated', 'moderate']:
         for keyword in KEYWORD_SEVERITY[severity_level]['keywords']:
             if keyword in text_lower:
                 return KEYWORD_SEVERITY[severity_level]['multiplier']
@@ -6300,10 +6355,41 @@ def api_israel_threat():
         
         # Israeli news RSS feeds
         israel_rss = fetch_israel_news_rss()
-        
+
+        # Google News RSS fallback for active war coverage
+        google_war_articles = []
+        war_queries = [
+            'Israel+Iran+war+missile+attack',
+            'Israel+ballistic+missile+intercept+iron+dome',
+            'Israel+home+front+command+siren+alert',
+        ]
+        for wq in war_queries:
+            try:
+                feed_url = f"https://news.google.com/rss/search?q={wq}&hl=en&gl=US&ceid=US:en"
+                headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+                resp = requests.get(feed_url, timeout=10, headers=headers)
+                if resp.status_code == 200:
+                    root = ET.fromstring(resp.content)
+                    for item in root.findall('.//item')[:10]:
+                        title_elem = item.find('title')
+                        link_elem = item.find('link')
+                        pubDate_elem = item.find('pubDate')
+                        if title_elem is not None and link_elem is not None:
+                            google_war_articles.append({
+                                'title': title_elem.text or '',
+                                'description': title_elem.text or '',
+                                'url': link_elem.text or '',
+                                'publishedAt': pubDate_elem.text if pubDate_elem is not None else datetime.now(timezone.utc).isoformat(),
+                                'source': {'name': 'Google News'},
+                                'content': title_elem.text or '',
+                                'language': 'en'
+                            })
+            except Exception as e:
+                print(f"[Israel] Google News RSS error: {e}")
+
         all_articles = (articles_en + articles_gdelt_en + articles_gdelt_ar +
                        articles_gdelt_he + articles_gdelt_fa + articles_reddit +
-                       israel_rss)
+                       israel_rss + google_war_articles)
         
         print(f"[Israel] Total articles: {len(all_articles)}")
         
