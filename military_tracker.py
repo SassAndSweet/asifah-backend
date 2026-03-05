@@ -497,9 +497,18 @@ MILITARY_ACTORS = {
             'военно-морской флот', 'подводная лодка',
             'бомбардировщик', 'истребитель',
             'дрон', 'беспилотник', 'БПЛА',
-            'фронт', 'контрнаступление', 'оборона'
+            'фронт', 'контрнаступление', 'оборона',
+            # Active war keywords (v2.7.1)
+            'russia launches missiles', 'russia fires missiles',
+            'russian missile strike', 'russian drone strike',
+            'russia attacks ukraine', 'russian offensive',
+            'russia shahed', 'russian shahed drone',
+            'russia escalation', 'russia nuclear warning',
+            'putin warns', 'putin threatens',
         ],
-        'rss_feeds': []
+        'rss_feeds': [
+            'https://news.google.com/rss/search?q=russia+military+OR+missile+OR+offensive+OR+ukraine+attack&hl=en&gl=US&ceid=US:en',
+        ]
     },
 
     # ------------------------------------------------
@@ -532,6 +541,13 @@ MILITARY_ACTORS = {
             'saudi embassy closed', 'saudi shelter in place',
             'us embassy saudi closed', 'saudi arabia war',
             'houthi attack saudi', 'houthi missile riyadh',
+            'us embassy riyadh hit', 'us embassy riyadh drone',
+            'us embassy riyadh attack', 'riyadh embassy strike',
+            'iran strikes saudi arabia', 'ballistic missile riyadh',
+            'riyadh struck', 'riyadh hit', 'jeddah attack',
+            'saudi oil facility attack', 'ras tanura attack',
+            'saudi port attack', 'jubail attack',
+            'iran drone riyadh', 'iranian drone saudi',
             # Arabic keywords
             'القوات المسلحة السعودية', 'تدريب عسكري السعودية',
             'هجوم على السعودية', 'صاروخ إيراني السعودية',
@@ -568,6 +584,13 @@ MILITARY_ACTORS = {
             'al dhafra attack', 'al dhafra missile',
             'jebel ali port attack', 'uae war',
             'houthi attack uae', 'houthi missile uae',
+            'fujairah attack', 'fujairah port', 'fujairah struck',
+            'fujairah missile', 'fujairah drone',
+            'us embassy dubai hit', 'us embassy abu dhabi hit',
+            'uae embassy attack', 'uae embassy struck',
+            'iran strikes uae', 'ballistic missile dubai',
+            'ballistic missile abu dhabi', 'iran drone dubai',
+            'uae port struck', 'uae port attack',
             # Arabic keywords
             'القوات المسلحة الإماراتية',
             'هجوم على الإمارات', 'صاروخ إيراني الإمارات',
@@ -667,6 +690,12 @@ MILITARY_ACTORS = {
             'kuwait warplanes crashed', 'kuwait war',
             'camp arifjan attack', 'ali al salem attack',
             'kuwait casualties', 'kuwait killed',
+            'us embassy kuwait hit', 'us embassy kuwait drone',
+            'us embassy kuwait attack', 'kuwait embassy strike',
+            'kuwait troops dead', 'american soldiers kuwait',
+            'soldiers died kuwait', 'troops died kuwait',
+            'kuwait base struck', 'kuwait base hit',
+            'iran strikes kuwait', 'ballistic missile kuwait',
             # Arabic keywords
             'الكويت هجوم', 'صاروخ إيراني الكويت',
             'معسكر عريفجان', 'قاعدة علي السالم',
@@ -734,6 +763,14 @@ MILITARY_ACTORS = {
             'egypt airspace', 'cairo military alert',
             'egypt sinai buildup', 'egypt red sea military',
             'sharm el sheikh military', 'egypt war footing',
+            'egypt intercept missile', 'egypt intercept drone',
+            'egypt scramble jets', 'egyptian jets scramble',
+            'egypt closes airspace', 'egypt airspace closed',
+            'cairo alert', 'egypt military alert',
+            'egypt mobilization', 'egypt deploys troops sinai',
+            'suez canal attack', 'suez canal struck',
+            'suez canal closed war', 'suez shipping disruption',
+            'egypt red sea patrol', 'egypt naval deployment',
             # Arabic keywords
             'الجيش المصري', 'القوات المسلحة المصرية',
             'قناة السويس عسكري', 'مصر دفاع جوي',
@@ -805,6 +842,19 @@ MILITARY_ACTORS = {
             'hava kuvvetleri', 'askeri operasyon',
             'İncirlik üssü saldırı', 'hava savunma',
             'füze saldırısı', 'savaş', 'NATO madde 5',
+            # Active war — intercepts & strikes (v2.7.1)
+            'turkey intercepts missile', 'turkey intercepts ballistic',
+            'turkey shoots down drone', 'turkey shoots down missile',
+            'turkish intercept', 'turkey missile intercept',
+            'incirlik high alert', 'incirlik closed',
+            'iran strikes turkey', 'iran attacks turkey',
+            'iranian missile hits turkey', 'iranian drone turkey',
+            'turkey scrambles jets', 'turkish jets scramble',
+            'ankara shelter', 'istanbul shelter',
+            'turkey activates air defense', 'turkey nato article 5',
+            'turkey invokes article 5', 'article 5 turkey',
+            'debris falls turkey', 'shrapnel turkey',
+            'missile intercepted over turkey',
         ],
         'rss_feeds': [
             'https://news.google.com/rss/search?q=turkey+military+OR+incirlik+OR+erdogan+defense+OR+attack&hl=en&gl=US&ceid=US:en',
@@ -851,7 +901,9 @@ MILITARY_ACTORS = {
             'украина оружие', 'украина мобилизация',
             'ВСУ', 'вооруженные силы украины'
         ],
-        'rss_feeds': []
+        'rss_feeds': [
+            'https://news.google.com/rss/search?q=ukraine+military+OR+missile+OR+offensive+OR+drone+attack&hl=en&gl=US&ceid=US:en',
+        ]
     },
 
     'greenland': {
@@ -1383,6 +1435,16 @@ LOCATION_MULTIPLIERS = {
     'suez canal': 3.0,
     'sharm el sheikh': 1.5,
     'cairo': 1.5,
+    # UAE ports (v2.7.1)
+    'fujairah': 2.5,
+    'ras tanura': 2.5,
+    # Saudi ports (v2.7.1)
+    'jubail': 2.0,
+    'jeddah': 1.5,
+    # Turkey (v2.7.1)
+    'incirlik': 2.5,
+    'ankara': 1.5,
+    'istanbul': 1.5,
 }
 
 
