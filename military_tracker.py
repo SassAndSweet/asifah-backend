@@ -160,7 +160,8 @@ REGIONAL_THEATRES = {
         'label': 'European Theatre',
         'icon': '🌍',
         'order': 2,
-        'actors': ['nato', 'russia', 'turkey', 'ukraine', 'greenland', 'poland'],'EUCOM area — NATO, Russia, Arctic, Black Sea, Ukraine, Poland eastern flank'
+        'actors': ['nato', 'russia', 'turkey', 'ukraine', 'greenland', 'poland', 'cyprus'],
+        'description': 'EUCOM area — NATO, Russia, Arctic, Black Sea, Ukraine, Poland eastern flank, Cyprus'
     },
     'middle_east': {
         'label': 'Middle East & North Africa',
