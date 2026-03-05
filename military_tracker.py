@@ -790,6 +790,14 @@ MILITARY_ACTORS = {
             'combined task force 153', 'ctf 153',
             'bahrain evacuation', 'bahrain departure',
             'bahrain threat', 'bahrain alert',
+            # Bahrain defense / intercept (v2.7.2)
+            'bahrain intercept missile', 'bahrain intercept drone',
+            'bahrain air defense', 'bahrain air defense activated',
+            'bahrain shoots down', 'bahrain shelter',
+            'manama attack', 'manama missile', 'manama struck',
+            'bahrain struck', 'bahrain hit', 'bahrain shrapnel',
+            'iran attack bahrain', 'iranian missile bahrain',
+            'iranian strike bahrain', 'iran drone bahrain',
             # Arabic keywords
             'قوة دفاع البحرين', 'الأسطول الخامس',
             'القاعدة البحرية البحرين',
@@ -1213,7 +1221,32 @@ ASSET_CATEGORIES = {
             'iron dome deployed', 'arrow battery', 'david sling deployed',
             'air defense deployment', 'sam battery', 'air defense activation',
             'patriot missile defense', 'air defense coordination',
-            'mead-cdoc', 'air defense cell'
+            'mead-cdoc', 'air defense cell',
+            # Israel active air defense (v2.7.2)
+            'iron dome intercept', 'iron dome activated', 'iron dome overwhelmed',
+            'arrow intercept', 'arrow 3 intercept', 'david sling intercept',
+            'air defense activated', 'air defense fires',
+            'missile intercepted', 'intercepted over israel',
+            'multi-layer defense', 'ballistic missile intercept',
+            'iran missile intercept', 'intercepts ballistic',
+            'shoots down drone', 'shoots down missile',
+            # Regional air defense / intercept (v2.7.2)
+            'patriot intercept', 'patriot missile intercept',
+            'thaad intercept', 'thaad engagement',
+            'air defense intercept', 'air defense engagement',
+            'intercepted missile', 'intercepted drone',
+            'intercepted ballistic', 'intercepted cruise missile',
+            'shot down drone', 'shot down missile',
+            'air defense system activated', 'air defense response',
+            'saudi air defense intercept', 'saudi intercept',
+            'uae air defense intercept', 'uae intercept',
+            'jordan intercept', 'jordan air defense',
+            'qatar air defense', 'kuwait air defense',
+            'bahrain air defense', 'oman air defense',
+            'egypt air defense', 'turkey air defense',
+            'intercepted over saudi', 'intercepted over uae',
+            'intercepted over jordan', 'intercepted over qatar',
+            'intercepted over bahrain', 'intercepted over kuwait',
         ]
     },
     'isr_assets': {
@@ -1239,7 +1272,14 @@ ASSET_CATEGORIES = {
             'battalion deployed', 'special forces deployed',
             'airborne deployed', 'infantry deployed',
             'reservists called up', 'mobilization order',
-            'ground forces buildup'
+            'ground forces buildup',
+            # Active war ground signals (v2.7.2)
+            'soldiers killed', 'troops killed', 'service members killed',
+            'casualties confirmed', 'killed in action',
+            'wounded in action', 'soldiers wounded',
+            'idf troops deployed', 'idf ground operation',
+            'reservists mobilized', 'reserves called up',
+            'home front command', 'shelter instructions',
         ]
     },
     'logistics': {
@@ -1261,12 +1301,21 @@ ASSET_CATEGORIES = {
         'label': 'Missile Test / Launch',
         'icon': '🚀',
         'weight': 4.0,
-        'description': 'Ballistic/cruise missile tests signal capability and intent.',
+        'description': 'Ballistic/cruise missile tests and live-fire launches.',
         'keywords': [
             'missile test', 'ballistic missile launch', 'cruise missile test',
             'missile exercise', 'rocket launch', 'weapons test',
             'hypersonic test', 'anti-ship missile test',
-            'tomahawk launch', 'missile salvo'
+            'tomahawk launch', 'missile salvo',
+            # Active missile fire (v2.7.2)
+            'ballistic missile', 'cruise missile', 'missile barrage',
+            'missile salvo', 'fires missiles', 'launches missiles',
+            'rocket barrage', 'missile strike', 'missile attack',
+            'iran fires missiles', 'iran launches missiles',
+            'iran ballistic missile', 'iran cruise missile',
+            'iranian missile attack', 'iranian ballistic missile',
+            'houthi missile', 'hezbollah rockets',
+            'missile hits', 'missile impact', 'missile struck',
         ]
     },
     'naval_exercise': {
@@ -1302,8 +1351,18 @@ ASSET_CATEGORIES = {
             'military families evacuate', 'military families depart',
             'families prepare departure', 'families leaving',
             'embassy closure', 'consulate evacuation',
-            'potential departures', 'prepare for evacuation'
+            'potential departures', 'prepare for evacuation',
+            # Active war evacuation signals (v2.7.2)
+            'us citizens leave israel', 'leave israel immediately',
+            'evacuate israel', 'evacuate cyprus',
+            'us citizens leave', 'citizens urged to leave',
+            'authorized departure israel', 'authorized departure',
+            'commercial flights cancelled', 'airport closed',
+            'ben gurion closed', 'ben gurion airport closed',
+            'airspace closed', 'flights grounded',
+            'shelter in place', 'seek shelter',
         ]
+    },
     },
     'military_posturing': {
         'label': 'Military Posturing / Threats',
@@ -1318,7 +1377,19 @@ ASSET_CATEGORIES = {
             'regime change', 'regime overthrow',
             'hit very hard', 'overwhelming force',
             'bases within range', 'within our range',
-            'will defend with full force', 'painful response'
+            'will defend with full force', 'painful response',
+            # Target under fire / victim-of-attack signals (v2.7.2)
+            'struck by missile', 'hit by missile', 'hit by drone',
+            'attacked by iran', 'iranian attack on', 'iranian strike on',
+            'iranian missiles strike', 'iran attacks',
+            'under attack', 'came under fire', 'shelling reported',
+            'explosion reported', 'blast reported',
+            'embassy hit', 'embassy struck', 'embassy attacked',
+            'port struck', 'port attacked', 'oil facility attacked',
+            'base hit', 'base struck', 'base attacked',
+            'casualties reported', 'killed in attack',
+            'wounded in attack', 'shrapnel', 'debris fell',
+            'infrastructure hit', 'civilian casualties',
         ]
     },
     'drone_incursion': {
@@ -1338,7 +1409,12 @@ ASSET_CATEGORIES = {
             'missile crossed border', 'projectile entered airspace',
             'border airspace incident',
             'drone from belarus', 'drone from russia',
-            'uav crossed border', 'uav incursion'
+            'uav crossed border', 'uav incursion',
+            # Active war drone/airspace (v2.7.2)
+            'shahed drone', 'iranian drone', 'iran drone attack',
+            'drone swarm', 'drone strike', 'kamikaze drone',
+            'one-way attack drone', 'uav attack',
+            'airspace closed', 'airspace violation',
         ]
     }
 }
