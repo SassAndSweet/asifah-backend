@@ -185,41 +185,88 @@ def _build_empty_skeleton():
 # GOVERNMENT STATUS (static, update as needed)
 # ============================================
 def get_government_status():
-    """Current Iranian government leadership"""
+    """Current Iranian government leadership — updated for active war (Mar 2026)"""
     return {
         "supreme_leader": {
             "name": "Ayatollah Ali Khamenei",
             "title": "Supreme Leader",
             "since": "1989-06-04",
             "age": 86,
-            "note": "Ultimate authority over military, judiciary, state media"
+            "note": "Compound destroyed in opening US-Israel strike on Feb 28, 2026",
+            "status": "KILLED",
+            "status_color": "red",
+            "status_date": "2026-02-28",
+            "status_detail": "Leadership House compound destroyed; death confirmed by multiple sources",
+            "successor": "Mujtaba Khamenei (likely) — Assembly of Experts struck during succession session"
         },
         "president": {
             "name": "Masoud Pezeshkian",
             "title": "President",
             "since": "2024-07-28",
             "faction": "Reformist",
-            "note": "9th President; physician; reform-oriented but constrained by Supreme Leader"
+            "note": "9th President; government authority severely degraded by strikes on command infrastructure",
+            "status": "ALIVE (Unconfirmed)",
+            "status_color": "yellow",
+            "status_date": "2026-03-05",
+            "status_detail": "No confirmed public appearance since strikes began; believed alive but governing capacity unclear"
         },
         "speaker_of_parliament": {
             "name": "Mohammad Bagher Ghalibaf",
             "title": "Speaker of the Islamic Consultative Assembly",
             "since": "2024-05-28",
-            "note": "Former Tehran mayor; conservative faction"
+            "note": "Former Tehran mayor; conservative faction",
+            "status": "STATUS UNKNOWN",
+            "status_color": "orange",
+            "status_date": "2026-03-05",
+            "status_detail": "Parliament building reported targeted by airstrikes; status unconfirmed"
         },
         "irgc_commander": {
             "name": "Major General Hossein Salami",
             "title": "Commander-in-Chief, IRGC",
             "since": "2019-04-21",
-            "note": "190,000 active personnel; parallel military force"
+            "note": "IRGC command and control infrastructure heavily degraded by US-Israel strikes",
+            "status": "STATUS UNKNOWN",
+            "status_color": "orange",
+            "status_date": "2026-03-05",
+            "status_detail": "IRGC C2 nodes targeted; 17 naval vessels destroyed per CENTCOM; air defense suppressed"
         },
         "quds_force_commander": {
             "name": "Brigadier General Esmail Qaani",
             "title": "Commander, IRGC Quds Force",
             "since": "2020-01-03",
-            "note": "Succeeded Qasem Soleimani; reported killed Jun 2025 but resurfaced alive"
+            "note": "Succeeded Qasem Soleimani; previously reported killed Jun 2025 but resurfaced",
+            "status": "STATUS UNKNOWN",
+            "status_color": "orange",
+            "status_date": "2026-03-05",
+            "status_detail": "Status uncertain; Quds Force operations ongoing but chain of command disrupted"
         },
-        "days_pezeshkian_in_office": (datetime.now() - datetime(2024, 7, 28)).days
+        "ali_shamkhani": {
+            "name": "Ali Shamkhani",
+            "title": "Former Secretary, Supreme National Security Council",
+            "since": "N/A",
+            "note": "Senior security official; key figure in Iran's strategic decision-making",
+            "status": "KILLED",
+            "status_color": "red",
+            "status_date": "2026-02-28",
+            "status_detail": "Killed in US-Israel strikes on Feb 28, 2026"
+        },
+        "assembly_of_experts": {
+            "name": "Assembly of Experts",
+            "title": "Supreme Leader Selection Body",
+            "since": "N/A",
+            "note": "88-member body responsible for selecting next Supreme Leader",
+            "status": "STRUCK DURING SESSION",
+            "status_color": "red",
+            "status_date": "2026-03-02",
+            "status_detail": "Israel bombed Assembly session convened to elect Khamenei successor; casualties unknown"
+        },
+        "days_pezeshkian_in_office": (datetime.now() - datetime(2024, 7, 28)).days,
+        "regime_status_summary": {
+            "overall": "SEVERE DEGRADATION",
+            "color": "red",
+            "summary": "Supreme Leader killed. Succession body struck. IRGC C2 degraded. Navy destroyed. Air defense suppressed. Government continuity uncertain.",
+            "last_updated": "2026-03-05"
+        }
     }
 
 
