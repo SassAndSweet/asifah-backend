@@ -754,6 +754,8 @@ except Exception as e:
 # Iran Stability Module (consolidated from iran_protests.py)
 from iran_protests import register_iran_routes
 register_iran_routes(app)
+from notam_monitor import register_notam_endpoints
+register_notam_endpoints(app)
 
 # ========================================
 # CONFIGURATION
