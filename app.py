@@ -998,8 +998,8 @@ TARGET_BASELINES = {
         'description': 'PMF militia activity, US base/consulate threats, ISIS remnants'
     },
     'israel': {
-        'base_adjustment': +12,
-        'description': 'Active multi-front conflict, elevated baseline due to ongoing operations'
+        'base_adjustment': +22,
+        'description': 'Active war with Iran — daily missile barrages, multi-front conflict, authorized departure'
     },
     'houthis': {
         'base_adjustment': 0,
@@ -1094,10 +1094,44 @@ TARGET_KEYWORDS = {
             'ben gurion', 'negev', 'dimona', 'israel reserves',
             'israel mobilization', 'gaza operation', 'rafah',
             'hamas tunnel', 'hostage', 'hostages gaza',
+            # Active Iran-Israel war keywords (v3.2.0)
+            'iran strikes israel', 'iran missile israel', 'iran attack israel',
+            'iranian ballistic missile israel', 'iranian cruise missile israel',
+            'iranian drone israel', 'iran retaliates israel',
+            'ballistic missile tel aviv', 'ballistic missile israel',
+            'missile barrage israel', 'missile salvo israel',
+            'iron dome intercept', 'iron dome overwhelmed',
+            'arrow intercept', 'arrow missile defense', 'davids sling',
+            'home front command', 'pikud haoref', 'tzeva adom', 'red alert',
+            'sirens israel', 'sirens tel aviv', 'sirens haifa',
+            'shelter israel', 'bomb shelter', 'safe room',
+            'israel under attack', 'israel war', 'israel iran war',
+            'operation epic fury', 'us israel strike iran',
+            'ben gurion closed', 'ben gurion airport closed',
+            'israel airspace closed', 'israel flights cancelled',
+            'casualties israel', 'killed israel', 'wounded israel',
+            'debris israel', 'shrapnel israel', 'impact israel',
+            'missile hits israel', 'missile impact tel aviv',
+            'israel emergency', 'israel state of emergency',
+            'israel wartime', 'israel war cabinet',
+            'idf northern command', 'idf southern command', 'idf central command',
+            'israel multi front', 'israel seven front war',
+            'hezbollah rockets israel', 'houthi missile israel',
+            'gaza rockets israel', 'syria rockets golan',
+            'authorized departure israel', 'evacuate israel',
+            'us embassy israel alert', 'us citizens leave israel',
             'צה״ל', 'כיפת ברזל', 'תקיפה', 'חיזבאללה', 'חמאס',
             'טילים', 'רקטות', 'כוננות', 'מילואים', 'פיגוע',
             'עזה', 'לבנון', 'איראן', 'תימן', 'חות׳ים',
-            'יהודה ושומרון', 'ג׳נין', 'שכם', 'גדר הביטחון'
+            'יהודה ושומרון', 'ג׳נין', 'שכם', 'גדר הביטחון',
+            # Hebrew active war
+            'פיקוד העורף', 'צבע אדום', 'מקלט', 'חדר ביטחון',
+            'טיל בליסטי', 'יירוט', 'חץ', 'שלט דוד',
+            'מלחמה', 'מצב חירום', 'פינוי', 'נפגעים',
+            # Arabic active war
+            'صواريخ على إسرائيل', 'هجوم إيراني على إسرائيل',
+            'القبة الحديدية', 'صافرات الإنذار', 'قصف تل أبيب',
+            'حرب إسرائيل إيران', 'عملية إيبك فيوري'
         ],
         'reddit_keywords': [
             'Israel', 'IDF', 'Netanyahu', 'Iron Dome', 'Gaza',
