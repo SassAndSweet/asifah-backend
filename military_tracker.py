@@ -233,60 +233,116 @@ MILITARY_ACTORS = {
         'weight': 0.9,
         'feeds_into': ['strike_probability', 'regional_tension'],
         'keywords': [
+            # IDF mobilization & operations
             'idf mobilization', 'idf mobilisation', 'israel reservists called',
             'israel reserves mobilized', 'idf northern command',
-            'idf southern command', 'idf ground operation',
-            'idf troops deployed', 'israel military buildup',
+            'idf southern command', 'idf central command',
+            'idf ground operation', 'idf troops deployed',
+            'israel military buildup', 'idf offensive',
+            # Air Force
             'israeli air force exercise', 'iaf exercise', 'iaf drill',
             'f-35 israel', 'f-15 israel', 'israeli airstrike',
             'israel aerial refueling', 'israeli drone strike',
+            'iaf strike iran', 'iaf long range strike',
+            # Navy
             'israeli navy', 'israel submarine', 'israeli corvette',
             'israel naval blockade', 'israel red sea',
+            # Air defense systems
             'iron dome deployment', 'david sling', 'arrow battery',
             'israel air defense activation', 'iron dome intercept',
+            'iron dome activated', 'iron dome overwhelmed', 'iron dome fails',
+            'iron dome saturated', 'iron dome capacity',
+            'david sling intercept', 'arrow intercept', 'arrow 3 intercept',
+            'arrow missile defense', 'multi-layer defense',
+            # Intelligence
             'mossad operation', 'shin bet alert', 'aman intelligence',
             'israel intelligence assessment',
-            # Hebrew keywords (match GDELT Hebrew articles)
-            'צה"ל', 'כיפת ברזל', 'חיל האוויר',
-            'פיקוד צפון', 'מילואים', 'חזבאללה',
-            'חיל הים', 'תרגיל', 'גיוס',
-            'כוננות', 'פריסה', 'סיור',
-            # Home Front Command / Pikud HaOref (v2.6.0)
+            # Home Front Command / Pikud HaOref
             'home front command', 'pikud haoref', 'pikud ha-oref',
             'rocket alert', 'rocket siren', 'incoming rocket',
             'red alert israel', 'red alert app', 'tzeva adom',
             'missile alert israel', 'air raid siren israel',
             'rocket barrage israel', 'missile barrage israel',
             'rockets fired at israel', 'missiles fired at israel',
-            'iron dome intercept', 'iron dome activated',
-            'david sling intercept', 'arrow intercept',
-            'ballistic missile israel', 'ballistic missile intercept',
             'shelter instructions', 'bomb shelter israel',
             'home front command instructions',
             'multiple alerts', 'nationwide alert israel',
+            # City-specific alerts (high location multiplier)
             'tel aviv siren', 'tel aviv rocket', 'tel aviv alert',
-            'jerusalem siren', 'jerusalem alert',
-            'haifa siren', 'haifa alert', 'haifa rocket',
+            'tel aviv missile', 'tel aviv hit', 'tel aviv impact',
+            'jerusalem siren', 'jerusalem alert', 'jerusalem missile',
+            'haifa siren', 'haifa alert', 'haifa rocket', 'haifa hit',
+            'eilat siren', 'eilat missile', 'eilat alert',
+            'beer sheva siren', 'beersheba alert', 'negev alert',
+            'golan rockets', 'golan attack', 'golan shelling',
+            # Airport / airspace
             'ben gurion airport closed', 'ben gurion divert',
-            'פיקוד העורף', 'צבע אדום', 'אזעקה',
-            'התרעה', 'מרחב מוגן', 'מקלט',
-            'יירוט', 'טיל בליסטי', 'רקטות',
-            'שיגור', 'מטח רקטות', 'מטח טילים',
-            # Active Iran-Israel war (v2.6.0)
+            'ben gurion cancelled', 'ben gurion suspended',
+            'israel airspace closed', 'israel flights cancelled',
+            'israel flights suspended', 'ovda airport closed',
+            'ramon airport closed',
+            # Active Iran-Israel war (v2.7.2)
             'iran strikes israel', 'iran attack israel',
             'iran missile strike israel', 'iran retaliatory strike',
             'iran launches missiles', 'iran fires missiles',
-            'iranian missile attack', 'iranian strike',
+            'iranian missile attack', 'iranian strike israel',
             'iran drone attack israel', 'shahed drone israel',
             'iran ballistic missile israel', 'iran cruise missile israel',
+            'iranian ballistic missile tel aviv', 'iranian missile hits israel',
+            'iran retaliates israel', 'iran retaliatory strike israel',
             'israel retaliates iran', 'israel strikes iran',
             'israel attack iran', 'idf strikes iran',
             'israel iran war', 'iran israel war',
             'iran israel conflict', 'iran israel escalation',
             'full scale war iran israel', 'regional war middle east',
-            'multi front war israel',
+            'multi front war israel', 'seven front war',
+            # War damage & casualties
+            'casualties israel', 'killed in israel', 'wounded israel',
+            'dead in israel', 'injuries israel', 'israel death toll',
+            'missile hits israel', 'missile impact israel',
+            'debris falls israel', 'shrapnel israel', 'fragments israel',
+            'direct hit israel', 'impact confirmed israel',
+            'building hit israel', 'residential area hit israel',
+            # US-Israel coordination
+            'operation epic fury', 'us israel joint strike',
+            'us israel coordinated', 'us defends israel',
+            'patriot battery israel', 'thaad israel', 'thaad deployed israel',
+            'us troops israel', 'centcom israel',
+            # Evacuation & diplomatic
+            'authorized departure israel', 'evacuate israel',
+            'us citizens leave israel', 'us embassy israel alert',
+            'leave israel immediately', 'commercial flights israel',
+            'israel state of emergency', 'israel wartime government',
+            'israel war cabinet',
+            # Hebrew keywords
+            'צה"ל', 'כיפת ברזל', 'חיל האוויר',
+            'פיקוד צפון', 'פיקוד דרום', 'פיקוד מרכז',
+            'מילואים', 'חזבאללה', 'חמאס',
+            'חיל הים', 'תרגיל', 'גיוס',
+            'כוננות', 'פריסה', 'סיור',
+            'פיקוד העורף', 'צבע אדום', 'אזעקה',
+            'התרעה', 'מרחב מוגן', 'מקלט',
+            'יירוט', 'טיל בליסטי', 'רקטות',
+            'שיגור', 'מטח רקטות', 'מטח טילים',
+            'חץ', 'שלט דוד', 'כיפת ברזל נפלה',
+            'מלחמה', 'מצב חירום', 'פינוי',
+            'נפגעים', 'הרוגים', 'פצועים',
+            'פגיעה ישירה', 'נפילה', 'רסיסים',
+            'תל אביב אזעקה', 'חיפה אזעקה', 'ירושלים אזעקה',
+            'נתב"ג סגור', 'שדה תעופה סגור',
+            # Arabic keywords
+            'صواريخ على إسرائيل', 'هجوم إيراني على إسرائيل',
+            'القبة الحديدية', 'صافرات الإنذار إسرائيل',
+            'قصف تل أبيب', 'قصف حيفا', 'قصف القدس',
+            'حرب إسرائيل إيران', 'عملية إيبك فيوري',
+            'إسرائيل تحت القصف', 'صاروخ باليستي إسرائيل',
+            'الجبهة الداخلية', 'ملجأ', 'إنذار أحمر',
         ],
-        'rss_feeds': []
+        'rss_feeds': [
+            'https://news.google.com/rss/search?q=Israel+Iran+missile+attack+war&hl=en&gl=US&ceid=US:en',
+            'https://news.google.com/rss/search?q=Israel+iron+dome+intercept+siren+alert&hl=en&gl=US&ceid=US:en',
+            'https://news.google.com/rss/search?q=Israel+ballistic+missile+casualties+tel+aviv&hl=en&gl=US&ceid=US:en',
+        ]
     },
 
     # ------------------------------------------------
@@ -1445,6 +1501,22 @@ LOCATION_MULTIPLIERS = {
     'incirlik': 2.5,
     'ankara': 1.5,
     'istanbul': 1.5,
+    # Israel (v2.7.2)
+    'tel aviv': 2.5,
+    'haifa': 2.5,
+    'jerusalem': 2.0,
+    'ben gurion': 3.0,
+    'dimona': 3.0,
+    'nevatim': 3.0,
+    'ramon air base': 2.5,
+    'hatzerim': 2.5,
+    'ramat david': 2.5,
+    'palmachim': 2.5,
+    'eilat': 2.0,
+    'negev': 1.5,
+    'golan': 2.0,
+    'iron dome': 2.0,
+    'arrow': 2.0,
 }
 
 
@@ -2191,6 +2263,17 @@ def fetch_all_gdelt_military(days=7):
         'regional war Middle East escalation',
         'Iran nuclear facilities strike',
         'airlines cancel Middle East war',
+        # v2.7.2 — Israel active war GDELT queries
+        'Israel Iran ballistic missile attack',
+        'Israel iron dome intercept overwhelmed',
+        'Israel home front command siren alert',
+        'Israel Tel Aviv missile impact casualties',
+        'Israel airspace closed war Iran',
+        'Israel Ben Gurion airport closed missile',
+        'Israel multi front war missile barrage',
+        'Israel casualties missile strike dead wounded',
+        'Israel bomb shelter siren red alert',
+        'Israel war cabinet emergency session',
         # v2.7.0 — Gulf state + regional actor war queries
         'Kuwait Iranian missile attack',
         'Kuwait US soldiers killed',
@@ -2233,7 +2316,13 @@ def fetch_all_gdelt_military(days=7):
         'יירוט טיל בליסטי',
         'מטח רקטות איראן',
         'מלחמה איראן ישראל',
-    ]
+        # v2.7.2 — Israel active war Hebrew
+        'פגיעה ישירה תל אביב',
+        'נפגעים הרוגים פצועים טיל',
+        'כיפת ברזל רווי נפילות',
+        'נתב"ג סגור טיסות מבוטלות',
+        'פינוי אזרחים מקלט',
+    ]]
 
     russian_queries = [
         'военная операция украина',
@@ -2294,6 +2383,10 @@ def fetch_all_gdelt_military(days=7):
         'عمان مضيق هرمز عسكري',
         'مصر قناة السويس حرب',
         'قبرص أكروتيري هجوم',
+        # v2.7.2 — Israel war Arabic
+        'إسرائيل صاروخ باليستي إيراني هجوم',
+        'القبة الحديدية تل أبيب صاروخ',
+        'إسرائيل حرب إيران قصف ضحايا',
     ]
 
     farsi_queries = [
@@ -2479,6 +2572,11 @@ def fetch_all_newsapi_military(days=7):
         'Qatar Al Udeid base missile attack',
         'Cyprus Akrotiri Iran drone attack',
         'Oman military Strait Hormuz',
+        # v2.7.2 — Israel war
+        'Israel Iran missile attack ballistic',
+        'Israel iron dome intercept war siren',
+        'Israel home front command alert casualties',
+        'Israel Tel Aviv Haifa missile impact',
     ]
 
     all_articles = []
