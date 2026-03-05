@@ -169,7 +169,29 @@ def _build_empty_skeleton():
         'casualties_enhanced': None,
         'cities': [],
         'num_cities_affected': 0,
-        'oil_data': {},
+        'oil_data': {
+            'hormuz_status': {
+                'success': True,
+                'status': 'unknown',
+                'emoji': '⚪',
+                'status_text': 'SCANNING...',
+                'status_detail': 'Scan in progress',
+                'traffic_level_pct': 0,
+                'insurance_status': 'Unknown',
+                'closure_signals': 0,
+                'restriction_signals': 0,
+                'suspended_carriers': [],
+                'key_facts': {
+                    'global_oil_share': '20% of world daily oil supply',
+                    'normal_daily_tankers': '~60-80 tankers/day',
+                    'current_estimate': 'Scanning...',
+                    'lng_impact': 'Scanning...',
+                },
+                'source_article': None,
+                'live_tracker_url': 'https://www.marinetraffic.com/en/ais/home/centerx:56.3/centery:26.5/zoom:9',
+                'last_updated': None
+            }
+        },
         'government': get_government_status(),
         'articles_en': [], 'articles_fa': [], 'articles_ar': [],
         'articles_he': [], 'articles_reddit': [],
@@ -177,7 +199,7 @@ def _build_empty_skeleton():
         'cached': False,
         'scan_in_progress': True,
         'message': 'Initial scan in progress. Data will appear shortly.',
-        'version': '3.1.0'
+        'version': '3.2.0'
     }
 
 
@@ -406,7 +428,142 @@ def get_iran_oil_reserves():
         }
     }
 
+# ============================================
+# STRAIT OF HORMUZ STATUS (v3.2.0)
+# ============================================
+HORMUZ_CLOSURE_KEYWORDS = [
+    'strait of hormuz closed', 'hormuz closed', 'hormuz blockade',
+    'hormuz shut', 'hormuz standstill', 'hormuz halt',
+    'hormuz near standstill', 'hormuz traffic stopped',
+    'hormuz traffic dropped', 'hormuz 90%', 'hormuz effectively closed',
+    'irgc closed strait', 'irgc hormuz', 'irgc threatens ships',
+    'no tankers hormuz', 'tanker traffic halted hormuz',
+    'shipping halted hormuz', 'shipping suspended hormuz',
+    'oil tanker traffic dropped', 'oil tanker traffic halted',
+    'maersk suspend gulf', 'hapag-lloyd suspend gulf',
+    'cma cgm suspend gulf', 'msc suspend gulf',
+    'insurance pulled hormuz', 'war risk insurance hormuz',
+    'p&i cover withdrawn', 'insurance withdrawn strait',
+    'fire on ships', 'iran fire on ships', 'iran threatens ships',
+    'tanker struck near strait', 'tanker attacked hormuz',
+    'vessel hit hormuz', 'ship attacked strait',
+]
 
+HORMUZ_RESTRICTED_KEYWORDS = [
+    'hormuz tensions', 'hormuz military', 'hormuz patrol',
+    'hormuz escort', 'navy escort hormuz', 'hormuz warning',
+    'hormuz advisory', 'hormuz risk', 'hormuz insurance premium',
+    'irgc exercise hormuz', 'iran drill hormuz',
+    'shipping disruption gulf', 'gulf shipping delays',
+    'tanker reroute', 'tanker divert fujairah',
+]
+
+SUSPENDED_CARRIERS = [
+    'Maersk', 'MSC', 'CMA CGM', 'Hapag-Lloyd', 'COSCO',
+    'Emirates SkyCargo', 'ONE', 'Evergreen'
+]
+
+
+def get_hormuz_status(all_articles=None):
+    """Determine Strait of Hormuz operational status from OSINT articles."""
+    articles = all_articles or []
+
+    closure_hits = 0
+    restricted_hits = 0
+    best_closure_article = None
+    best_restricted_article = None
+    suspended_carriers_found = []
+
+    for article in articles:
+        text = f"{article.get('title', '')} {article.get('description', '')} {article.get('content', '')}".lower()
+
+        # Check closure keywords
+        for kw in HORMUZ_CLOSURE_KEYWORDS:
+            if kw in text:
+                closure_hits += 1
+                if not best_closure_article:
+                    best_closure_article = {
+                        'title': article.get('title', ''),
+                        'url': article.get('url', ''),
+                        'source': article.get('source', {}).get('name', 'Unknown')
+                    }
+                break
+
+        # Check restricted keywords
+        for kw in HORMUZ_RESTRICTED_KEYWORDS:
+            if kw in text:
+                restricted_hits += 1
+                if not best_restricted_article:
+                    best_restricted_article = {
+                        'title': article.get('title', ''),
+                        'url': article.get('url', ''),
+                        'source': article.get('source', {}).get('name', 'Unknown')
+                    }
+                break
+
+        # Check carrier suspensions
+        for carrier in SUSPENDED_CARRIERS:
+            if carrier.lower() in text and any(kw in text for kw in ['suspend', 'halt', 'pause', 'cancel', 'stop']):
+                if carrier not in suspended_carriers_found:
+                    suspended_carriers_found.append(carrier)
+
+    # Determine status
+    if closure_hits >= 3:
+        status = 'closed'
+        status_emoji = '🔴'
+        status_text = 'EFFECTIVELY CLOSED'
+        status_detail = f'~90% traffic reduction. IRGC declared strait closed Mar 2. Insurance withdrawn. {closure_hits} closure signals detected.'
+        traffic_level = 10  # ~10% of normal
+        insurance_status = 'P&I coverage withdrawn for Mar 5+'
+    elif closure_hits >= 1 or restricted_hits >= 5:
+        status = 'severely_restricted'
+        status_emoji = '🔴'
+        status_text = 'SEVERELY RESTRICTED'
+        status_detail = f'Major traffic reduction. {closure_hits} closure + {restricted_hits} restriction signals.'
+        traffic_level = 30
+        insurance_status = 'War risk premiums surging'
+    elif restricted_hits >= 2:
+        status = 'restricted'
+        status_emoji = '🟡'
+        status_text = 'RESTRICTED'
+        status_detail = f'Elevated tensions. {restricted_hits} restriction signals detected.'
+        traffic_level = 60
+        insurance_status = 'Elevated premiums'
+    else:
+        status = 'open'
+        status_emoji = '🟢'
+        status_text = 'OPEN'
+        status_detail = 'Normal shipping operations'
+        traffic_level = 100
+        insurance_status = 'Normal'
+
+    result = {
+        'success': True,
+        'status': status,
+        'emoji': status_emoji,
+        'status_text': status_text,
+        'status_detail': status_detail,
+        'traffic_level_pct': traffic_level,
+        'insurance_status': insurance_status,
+        'closure_signals': closure_hits,
+        'restriction_signals': restricted_hits,
+        'suspended_carriers': suspended_carriers_found if suspended_carriers_found else SUSPENDED_CARRIERS if closure_hits >= 3 else [],
+        'key_facts': {
+            'global_oil_share': '20% of world daily oil supply',
+            'normal_daily_tankers': '~60-80 tankers/day',
+            'current_estimate': f'~{max(1, int(70 * traffic_level / 100))} tankers/day' if traffic_level < 100 else '~60-80 tankers/day',
+            'lng_impact': 'Significant LNG disruption (Qatar exports)',
+        },
+        'source_article': best_closure_article or best_restricted_article,
+        'live_tracker_url': 'https://www.marinetraffic.com/en/ais/home/centerx:56.3/centery:26.5/zoom:9',
+        'last_updated': datetime.now(timezone.utc).isoformat()
+    }
+
+    print(f"[Hormuz] Status: {status_text} | Closure signals: {closure_hits} | "
+          f"Restriction signals: {restricted_hits} | Traffic: ~{traffic_level}%")
+
+    return result
+  
 # ============================================
 # OIL PRODUCTION STATUS
 # ============================================
@@ -1031,6 +1188,17 @@ def calculate_regime_stability(all_articles, casualties, exchange_rate, oil_pric
     if current_oil >= 90: econ_score += 10
     elif current_oil >= 75: econ_score += 5
     elif current_oil < 60: econ_score -= 10
+
+    # Hormuz closure impact on economic score (v3.2.0)
+    # Strait closure = Iran cannot export oil = economic collapse accelerates
+    hormuz_traffic = cache.get('_hormuz_traffic_pct', 100)
+    if hormuz_traffic <= 15:
+        econ_score -= 20  # Effectively closed — exports halted
+    elif hormuz_traffic <= 40:
+        econ_score -= 12  # Severely restricted
+    elif hormuz_traffic <= 70:
+        econ_score -= 5   # Restricted
+
     scores['economic_pressure'] = max(0, min(100, econ_score))
 
     # 3. SECURITY RESPONSE (20%)
@@ -1051,7 +1219,14 @@ def calculate_regime_stability(all_articles, casualties, exchange_rate, oil_pric
         'war with iran', 'strike iran', 'attack iran', 'bomb iran',
         'carrier group', 'uss abraham lincoln', 'centcom',
         'strait of hormuz', 'hormuz drill', 'nuclear strike',
-        'total war', 'military option'
+        'total war', 'military option',
+        # Active war (v3.2.0)
+        'operation epic fury', 'us strikes iran', 'israel strikes iran',
+        'us israel joint strike', 'regime change iran',
+        'khamenei killed', 'iran retaliates', 'iran fires missiles',
+        'iran attacks israel', 'ballistic missile', 'cruise missile',
+        'iran war', 'combat operations iran', 'iran under attack',
+        'iran navy destroyed', 'iran air defense destroyed',
     ]
     geo_keywords_elevated = [
         'sanctions iran', 'iran threat', 'iran tensions',
@@ -1077,7 +1252,15 @@ def calculate_regime_stability(all_articles, casualties, exchange_rate, oil_pric
     fracture_keywords = [
         'irgc vs', 'reformist', 'pezeshkian criticized', 'resign',
         'power struggle', 'factional', 'infighting', 'split',
-        'khamenei successor', 'succession crisis', 'elite divide'
+        'khamenei successor', 'succession crisis', 'elite divide',
+        # Wartime leadership decapitation (v3.2.0)
+        'khamenei killed', 'khamenei dead', 'khamenei assassinated',
+        'supreme leader killed', 'supreme leader dead',
+        'assembly of experts struck', 'assembly of experts bombed',
+        'shamkhani killed', 'regime collapse', 'regime change',
+        'government continuity', 'chain of command disrupted',
+        'leadership vacuum', 'no successor', 'mujtaba khamenei',
+        'irgc command destroyed', 'c2 degraded', 'command and control',
     ]
     fracture_count = sum(1 for a in all_articles
                          if any(kw in f"{a.get('title', '')} {a.get('description', '')}".lower()
@@ -1213,8 +1396,42 @@ def _run_iran_scan(days=7):
     iranwire_articles = fetch_iranwire_rss()
     hrana_articles = fetch_hrana_rss()
 
+    # Google News RSS for active war coverage (v3.2.0)
+    google_war_articles = []
+    war_rss_queries = [
+        'Iran+war+strait+hormuz+closed+shipping',
+        'Iran+regime+change+khamenei+killed',
+        'Iran+oil+exports+halted+sanctions',
+    ]
+    for wq in war_rss_queries:
+        try:
+            feed_url = f"https://news.google.com/rss/search?q={wq}&hl=en&gl=US&ceid=US:en"
+            headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+            resp = requests.get(feed_url, timeout=10, headers=headers)
+            if resp.status_code == 200:
+                root = ET.fromstring(resp.content)
+                for item in root.findall('.//item')[:10]:
+                    title_elem = item.find('title')
+                    link_elem = item.find('link')
+                    pubDate_elem = item.find('pubDate')
+                    if title_elem is not None and link_elem is not None:
+                        google_war_articles.append({
+                            'title': title_elem.text or '',
+                            'description': title_elem.text or '',
+                            'url': link_elem.text or '',
+                            'publishedAt': pubDate_elem.text if pubDate_elem is not None else datetime.now(timezone.utc).isoformat(),
+                            'source': {'name': 'Google News'},
+                            'content': title_elem.text or '',
+                            'language': 'en'
+                        })
+        except Exception as e:
+            print(f"[Iran] Google News RSS error: {e}")
+
+    print(f"[Iran] Google News war RSS: {len(google_war_articles)} articles")
+
     all_articles = (newsapi_articles + gdelt_en + gdelt_ar + gdelt_fa +
-                    gdelt_he + reddit_posts + iranwire_articles + hrana_articles)
+                    gdelt_he + reddit_posts + iranwire_articles + hrana_articles +
+                    google_war_articles)
     print(f"[Iran] Total articles: {len(all_articles)}")
 
     # Extract structured data
@@ -1243,7 +1460,19 @@ def _run_iran_scan(days=7):
     exchange_rate = get_exchange_rate()
     oil_data = get_brent_oil_price()
     reserves = get_iran_oil_reserves()
+    hormuz_status = get_hormuz_status(all_articles)
     production_status = get_iran_oil_production_status(all_articles)
+
+    # If Hormuz is closed, override production status to halted
+    if hormuz_status['status'] in ('closed', 'severely_restricted'):
+        production_status['status'] = 'halted'
+        production_status['emoji'] = '🔴'
+        production_status['status_text'] = 'EXPORTS HALTED — STRAIT CLOSED'
+        production_status['status_detail'] = f"Strait of Hormuz {hormuz_status['status_text'].lower()}. ~{hormuz_status['traffic_level_pct']}% of normal traffic."
+        production_status['news_link'] = hormuz_status.get('source_article', {}).get('url')
+
+    # Store Hormuz traffic level in cache for stability calculation
+    cache['_hormuz_traffic_pct'] = hormuz_status.get('traffic_level_pct', 100)
 
     stability = calculate_regime_stability(
         all_articles, casualties, exchange_rate, oil_data,
@@ -1288,7 +1517,8 @@ def _run_iran_scan(days=7):
                 'data': oil_data.get('sparkline', []),
                 'source': 'alpha_vantage' if oil_data.get('sparkline') else 'unavailable'
             },
-            'production_status': production_status
+            'production_status': production_status,
+            'hormuz_status': hormuz_status
         },
         'government': government,
         'articles_en': [a for a in all_articles if a.get('language') == 'en'
