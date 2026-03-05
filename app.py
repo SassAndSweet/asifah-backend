@@ -788,7 +788,7 @@ TRAVEL_ADVISORY_CODES = {
     'iran': ['IR'],
     'iraq': ['IZ'],        # Iraq (FIPS — not IQ!)
     'houthis': ['YM'],     # Yemen (FIPS)
-    'israel': ['IS', 'GZ', 'WE'],  # Israel/West Bank/Gaza (FIPS — covers combined advisory)
+    'israel': ['IS', 'GZ', 'WE', 'IL'],  # Israel/West Bank/Gaza (FIPS + ISO — covers combined advisory)
     'syria': ['SY'],
     'jordan': ['JO'],
 }
@@ -7040,24 +7040,24 @@ def _run_travel_advisory_scan():
                     }
                     break  # Found advisory for this target, move to next target
 
-        # HARDCODE FALLBACK: Israel
-        # State Dept uses "Israel, the West Bank and Gaza" — may not match API category codes
+        # Israel fallback — State Dept uses combined "Israel, the West Bank and Gaza" advisory
+        # which may not match standard FIPS codes. Updated July 13, 2025.
         if 'israel' not in results:
             results['israel'] = {
-                'country_code': 'IL',
+                'country_code': 'IS',
                 'title': 'Israel, the West Bank and Gaza Travel Advisory',
                 'level': 3,
                 'level_label': 'Reconsider Travel',
-                'level_short': 'Reconsider Travel',
+                'level_short': 'See Individual Summaries',
                 'level_color': '#f97316',
-                'short_summary': 'to Israel due to terrorism and civil unrest. On Feb 27, 2026, the State Dept authorized departure of non-emergency U.S. government personnel from Mission Israel due to safety risks. Persons may wish to consider leaving Israel while commercial flights are available.',
+                'short_summary': 'Reconsider travel to Israel and the West Bank due to terrorism and civil unrest. Do Not Travel to Gaza due to terrorism and armed conflict. Updated to reflect termination of authorized departure status for family members of U.S. government personnel.',
                 'link': 'https://travel.state.gov/content/travel/en/traveladvisories/traveladvisories/israel-west-bank-and-gaza-travel-advisory.html',
-                'published': '2026-02-27T00:00:00',
-                'updated': '2026-02-27T00:00:00',
-                'recently_changed': True,
-                'change_description': 'Updated today — authorized departure of non-emergency personnel'
+                'published': '2025-07-13T00:00:00',
+                'updated': '2025-07-13T00:00:00',
+                'recently_changed': False,
+                'change_description': 'Termination of authorized departure; reconsider travel to Israel/West Bank; do not travel to Gaza'
             }
-            print("[Travel Advisory] Israel not found in API — using hardcoded Level 3 fallback")
+            print("[Travel Advisory] Israel not found in API — using updated fallback (July 2025)")
 
         return {'success': True, 'advisories': results}
 
