@@ -979,7 +979,197 @@ def extract_hrana_structured_data(articles):
 
     return structured_data
 
+# ============================================
+# WAR CASUALTY EXTRACTION (v3.2.0)
+# Separate from protest casualties — tracks US-Israel strike deaths
+# ============================================
+WAR_CASUALTY_CAPS = {'deaths': 10000, 'injuries': 50000}
 
+WAR_CASUALTY_KEYWORDS = {
+    'deaths': [
+        'killed in strikes', 'killed in airstrikes', 'killed in bombing',
+        'dead in iran', 'dead in strikes', 'death toll iran strikes',
+        'iran casualties', 'iran death toll', 'iranians killed',
+        'civilians killed iran', 'soldiers killed iran',
+        'irgc killed', 'military killed iran',
+        'killed in us strikes', 'killed in israeli strikes',
+        'preliminary figures', 'confirmed dead iran',
+        'کشته در حمله', 'تلفات حمله',
+    ],
+    'injuries': [
+        'wounded in strikes', 'injured in airstrikes', 'injured in bombing',
+        'iran wounded', 'iranians injured', 'casualties iran strikes',
+        'hospitalized iran strikes', 'civilian injuries iran',
+        'مجروحان حمله', 'زخمی در حمله',
+    ]
+}
+
+KNOWN_STRIKE_LOCATIONS = {
+    'Tehran': {
+        'coords': [35.6892, 51.3890],
+        'targets': [
+            {'name': 'Leadership House (Supreme Leader compound)', 'status': 'DESTROYED', 'date': '2026-02-28'},
+            {'name': 'IRIB State Broadcasting HQ', 'status': 'DESTROYED', 'date': '2026-03-03'},
+            {'name': 'Parliament Building (Majles)', 'status': 'STRUCK', 'date': '2026-03-02'},
+            {'name': 'Assembly of Experts session venue', 'status': 'STRUCK', 'date': '2026-03-02'},
+            {'name': 'IRGC Malek-Ashtar Building', 'status': 'DESTROYED', 'date': '2026-03-02'},
+        ]
+    },
+    'Isfahan': {
+        'coords': [32.6546, 51.6680],
+        'targets': [
+            {'name': 'Nuclear facilities (nearby)', 'status': 'STRUCK — IAEA reports no confirmed nuclear site damage', 'date': '2026-02-28'},
+            {'name': 'Military installations', 'status': 'STRUCK', 'date': '2026-02-28'},
+        ]
+    },
+    'Natanz': {
+        'coords': [33.7225, 51.7266],
+        'targets': [
+            {'name': 'Natanz Nuclear Enrichment Facility', 'status': 'STATUS UNCLEAR — IAEA investigating', 'date': '2026-02-28'},
+        ]
+    },
+    'Fordow': {
+        'coords': [34.8800, 51.9900],
+        'targets': [
+            {'name': 'Fordow Underground Enrichment Facility', 'status': 'STATUS UNCLEAR — deeply buried', 'date': '2026-02-28'},
+        ]
+    },
+    'Qom': {
+        'coords': [34.6401, 50.8764],
+        'targets': [
+            {'name': 'Government/religious sites', 'status': 'STRUCK', 'date': '2026-02-28'},
+        ]
+    },
+    'Karaj': {
+        'coords': [35.8400, 50.9391],
+        'targets': [
+            {'name': 'Military/industrial sites', 'status': 'STRUCK', 'date': '2026-02-28'},
+        ]
+    },
+    'Kermanshah': {
+        'coords': [34.3142, 47.0650],
+        'targets': [
+            {'name': 'Military targets', 'status': 'STRUCK', 'date': '2026-02-28'},
+        ]
+    },
+    'Bandar Abbas': {
+        'coords': [27.1865, 56.2808],
+        'targets': [
+            {'name': 'IRGC Naval Base — 17 ships destroyed per CENTCOM', 'status': 'DESTROYED', 'date': '2026-02-28'},
+        ]
+    },
+    'Bushehr': {
+        'coords': [28.9234, 50.8203],
+        'targets': [
+            {'name': 'Naval/port facilities', 'status': 'STRUCK', 'date': '2026-02-28'},
+        ]
+    },
+    'Shiraz': {
+        'coords': [29.5918, 52.5837],
+        'targets': [
+            {'name': 'Military airfield', 'status': 'STRUCK', 'date': '2026-02-28'},
+        ]
+    },
+    'Tabriz': {
+        'coords': [38.0800, 46.2919],
+        'targets': [
+            {'name': 'Air defense installations', 'status': 'STRUCK', 'date': '2026-02-28'},
+        ]
+    },
+}
+
+
+def extract_war_casualties(articles):
+    """Extract war casualty numbers from articles — separate from protest casualties."""
+    war_cas = {'deaths': 0, 'injuries': 0, 'sources': set(), 'details': []}
+
+    for article in articles:
+        title = (article.get('title') or '').lower()
+        description = (article.get('description') or '').lower()
+        content = (article.get('content') or '').lower()
+        text = f"{title} {description} {content}"
+        source = article.get('source', {}).get('name', 'Unknown')
+        url = article.get('url', '')
+
+        # Only process war-related articles
+        war_context = any(kw in text for kw in [
+            'strike', 'airstrike', 'bombing', 'operation epic fury',
+            'us attack iran', 'israel attack iran', 'combat operations iran',
+            'iran war', 'iran casualties', 'iran death toll',
+        ])
+        if not war_context:
+            continue
+
+        sentences = re.split(r'[.!?]\s+', text)
+        for sentence in sentences:
+            if is_false_positive(sentence):
+                continue
+
+            for category, keywords in WAR_CASUALTY_KEYWORDS.items():
+                for keyword in keywords:
+                    if keyword not in sentence:
+                        continue
+
+                    # Extract numbers
+                    patterns = [
+                        r'(\d{1,6}(?:,\d{3})*)\s+(?:people\s+)?(?:were\s+|have\s+been\s+)?' + re.escape(keyword),
+                        r'(?:more than|over|at least|nearly|approximately)\s+(\d{1,6}(?:,\d{3})*)\s+' + re.escape(keyword),
+                        re.escape(keyword) + r'\s*(?::|to|rose to|reached)\s*(?:more than\s+)?(\d{1,6}(?:,\d{3})*)',
+                        r'(\d{1,6}(?:,\d{3})*)\s+(?:dead|killed|died)',
+                    ]
+
+                    best_num = 0
+                    for pattern in patterns:
+                        match = re.search(pattern, sentence, re.IGNORECASE)
+                        if match:
+                            try:
+                                num = int(match.group(1).replace(',', ''))
+                                cap = WAR_CASUALTY_CAPS.get(category, 50000)
+                                if num <= cap and num > best_num:
+                                    best_num = num
+                            except (ValueError, IndexError):
+                                pass
+
+                    if best_num > 0 and best_num > war_cas[category]:
+                        war_cas[category] = best_num
+                        war_cas['sources'].add(source)
+                        war_cas['details'].append({
+                            'type': category, 'count': best_num,
+                            'source': source, 'url': url,
+                            'sentence': sentence[:200]
+                        })
+
+    war_cas['sources'] = list(war_cas['sources'])
+
+    # Build strike locations with article-detected cities
+    strike_locations = []
+    for city, data in KNOWN_STRIKE_LOCATIONS.items():
+        city_mentioned = any(
+            city.lower() in f"{a.get('title', '')} {a.get('description', '')}".lower()
+            for a in articles
+        )
+        strike_locations.append({
+            'name': city,
+            'coords': data['coords'],
+            'targets': data['targets'],
+            'confirmed_in_articles': city_mentioned,
+            'target_count': len(data['targets']),
+        })
+
+    war_cas['strike_locations'] = strike_locations
+    war_cas['total_sites_struck'] = sum(
+        len(d['targets']) for d in KNOWN_STRIKE_LOCATIONS.values()
+    )
+    war_cas['provinces_struck'] = '24 of 31 (per IDF statement)'
+    war_cas['total_munitions'] = '2,000+ strikes (per ISW/CENTCOM)'
+    war_cas['operation_name'] = 'Operation Epic Fury (US) / Operation Roaring Lion (Israel)'
+    war_cas['start_date'] = '2026-02-28'
+
+    print(f"[Iran] War casualties: deaths={war_cas['deaths']}, injuries={war_cas['injuries']}, "
+          f"strike locations={len(strike_locations)}")
+
+    return war_cas
+  
 # ============================================
 # CASUALTY EXTRACTION (from article text)
 # ============================================
@@ -1437,6 +1627,7 @@ def _run_iran_scan(days=7):
     # Extract structured data
     hrana_data = extract_hrana_structured_data(hrana_articles)
     casualties_regex = extract_casualty_data(all_articles)
+    war_casualties = extract_war_casualties(all_articles)
 
     if hrana_data['is_hrana_verified']:
         casualties = {
@@ -1508,6 +1699,7 @@ def _run_iran_scan(days=7):
             'hrana_updated': casualties.get('hrana_updated')
         },
         'casualties_enhanced': casualties_enhanced,
+        'war_casualties': war_casualties,
         'cities': cities,
         'num_cities_affected': num_cities,
         'oil_data': {
@@ -1628,6 +1820,13 @@ def scan_iran_protests_handler(app):
             'casualties': {'deaths': 0, 'injuries': 0, 'arrests': 0, 'sources': [],
                            'details': [], 'hrana_verified': False},
             'casualties_enhanced': None,
+            'war_casualties': {
+                'deaths': 0, 'injuries': 0, 'sources': [],
+                'details': [], 'strike_locations': [],
+                'total_sites_struck': 0, 'provinces_struck': 'Scanning...',
+                'total_munitions': 'Scanning...', 'operation_name': 'Operation Epic Fury / Operation Roaring Lion',
+                'start_date': '2026-02-28'
+            },
             'exchange_rate': {}, 'oil_data': {}, 'government': {},
             'cities': [], 'num_cities_affected': 0,
             'articles_en': [], 'articles_fa': [], 'articles_ar': [],
