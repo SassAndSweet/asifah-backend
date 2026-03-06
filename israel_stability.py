@@ -42,7 +42,7 @@ UPSTASH_URL   = os.environ.get('UPSTASH_REDIS_REST_URL')
 UPSTASH_TOKEN = os.environ.get('UPSTASH_REDIS_REST_TOKEN')
 ACLED_API_KEY = os.environ.get('ACLED_API_KEY')       # Optional — falls back to RSS
 ACLED_EMAIL   = os.environ.get('ACLED_EMAIL')          # Required with ACLED key
-
+TASE_API_KEY  = os.environ.get('TASE_API_KEY')         # TASE Data Hub — indices online
 REDIS_CACHE_KEY = 'israel_cache'
 CACHE_TTL_SECONDS = 4 * 60 * 60  # 4 hours
 
@@ -247,15 +247,83 @@ def fetch_nis_usd():
 def fetch_tase_index():
     """
     Fetch Tel Aviv Stock Exchange TA-35 index.
-    Primary: Yahoo Finance (^TA35)
-    Fallback: Yahoo Finance (^TA125)
+    Primary:  TASE Data Hub API (datawise.tase.co.il) — last-rate + intraday
+    Fallback: Yahoo Finance (^TA35 / ^TA125)
     """
     print("[Israel Econ] Fetching TASE TA-35...")
+
+    # ── Primary: TASE official API ──
+    if TASE_API_KEY:
+        try:
+            headers = {
+                "accept": "application/json",
+                "accept-language": "en-US",
+                "apikey": TASE_API_KEY
+            }
+            # Last rate — current index value
+            r = requests.get(
+                "https://datawise.tase.co.il/v1/tase-indices-online-data/last-rate",
+                params={"indexId": 22},
+                headers=headers,
+                timeout=10
+            )
+            if r.status_code == 200:
+                data = r.json()
+                # Response is a list; find indexId=22
+                entries = data if isinstance(data, list) else data.get('result', [data])
+                entry = next((e for e in entries if str(e.get('indexId', '')) == '22'), entries[0] if entries else {})
+                value = entry.get('lastIndexRate') or entry.get('indexRate') or entry.get('rate')
+                change = entry.get('change') or entry.get('changeRate') or 0
+                if value:
+                    value = float(str(value).replace(',', ''))
+                    change_pct = float(str(change).replace(',', '')) if change else 0
+                    print(f"[Israel Econ] ✅ TASE API TA-35: {value:,.2f} ({change_pct:+.2f}%)")
+
+                    # ── Intraday sparkline ──
+                    sparkline = []
+                    try:
+                        open_time = "09:40:00"
+                        r2 = requests.get(
+                            "https://datawise.tase.co.il/v1/tase-indices-online-data/intraday",
+                            params={"indexId": 22, "startTime": open_time},
+                            headers=headers,
+                            timeout=10
+                        )
+                        if r2.status_code == 200:
+                            intraday_data = r2.json()
+                            entries2 = intraday_data if isinstance(intraday_data, list) else intraday_data.get('result', [])
+                            sparkline = [
+                                {
+                                    'time': e.get('lastSaleTime', ''),
+                                    'value': float(str(e.get('lastIndexRate', 0)).replace(',', ''))
+                                }
+                                for e in entries2
+                                if e.get('lastIndexRate')
+                            ]
+                            print(f"[Israel Econ] ✅ Intraday: {len(sparkline)} datapoints")
+                    except Exception as e2:
+                        print(f"[Israel Econ] Intraday error: {str(e2)[:80]}")
+
+                    return {
+                        'index': 'TA35',
+                        'value': round(value, 2),
+                        'change_pct_24h': round(change_pct, 3),
+                        'trend': 'rising' if change_pct > 0.3 else ('falling' if change_pct < -0.3 else 'flat'),
+                        'source': 'TASE Data Hub',
+                        'sparkline': sparkline,
+                        'timestamp': datetime.now(timezone.utc).isoformat()
+                    }
+            print(f"[Israel Econ] TASE API returned {r.status_code} — falling back to Yahoo")
+        except Exception as e:
+            print(f"[Israel Econ] TASE API error: {str(e)[:80]}")
+
+    # ── Fallback: Yahoo Finance ──
+    print("[Israel Econ] Using Yahoo Finance fallback for TASE...")
     for ticker in ['^TA35', '^TA125']:
         try:
             url = f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}?interval=1d&range=5d"
             r = requests.get(url, timeout=10, headers={
-                'User-Agent': 'Mozilla/5.0'
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
             })
             if r.status_code == 200:
                 data = r.json()
@@ -265,17 +333,18 @@ def fetch_tase_index():
                 prev   = meta.get('previousClose') or meta.get('chartPreviousClose')
                 if price and price > 0:
                     change_pct = ((price - prev) / prev * 100) if prev else 0
-                    print(f"[Israel Econ] ✅ {ticker}: {price:,.2f} ({change_pct:+.2f}%)")
+                    print(f"[Israel Econ] ✅ Yahoo {ticker}: {price:,.2f} ({change_pct:+.2f}%)")
                     return {
                         'index': ticker.replace('^', ''),
                         'value': round(price, 2),
                         'change_pct_24h': round(change_pct, 3),
                         'trend': 'rising' if change_pct > 0.3 else ('falling' if change_pct < -0.3 else 'flat'),
                         'source': 'Yahoo Finance',
+                        'sparkline': [],
                         'timestamp': datetime.now(timezone.utc).isoformat()
                     }
         except Exception as e:
-            print(f"[Israel Econ] TASE {ticker} error: {str(e)[:80]}")
+            print(f"[Israel Econ] Yahoo {ticker} error: {str(e)[:80]}")
             continue
 
     return {
@@ -285,6 +354,7 @@ def fetch_tase_index():
         'trend': 'unknown',
         'source': 'Unavailable',
         'estimated': True,
+        'sparkline': [],
         'timestamp': datetime.now(timezone.utc).isoformat()
     }
 
