@@ -37,7 +37,14 @@ from email.utils import parsedate_to_datetime
 # ========================================
 # FLASK APP INITIALIZATION
 # ========================================
-app = Flask(__name__)
+from flask import Blueprint
+israel_bp = Blueprint('israel_stability', __name__)
+app = israel_bp  # allows @app.route decorators to work on the blueprint
+```
+
+Then commit both files and push. The endpoint will be live at:
+```
+https://asifah-backend.onrender.com/scan-israel-stability
 
 CORS(app, resources={
     r"/api/israel*": {
@@ -980,6 +987,9 @@ def api_israel_strikes():
 def robots():
     return "User-agent: *\nDisallow: /\n", 200, {'Content-Type': 'text/plain'}
 
+
+def register_israel_stability_endpoints(flask_app):
+    flask_app.register_blueprint(israel_bp)
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5003))
