@@ -324,7 +324,8 @@ def fetch_tase_index():
         except Exception as e:
             print(f"[Israel Econ] TASE API error: {str(e)[:80]}")
 
-    # ── Fallback: Yahoo Finance ──
+   # ── Yahoo Finance fallback ──
+    TASE_LAST_KNOWN_KEY = 'tase_last_known'
     print("[Israel Econ] Using Yahoo Finance fallback for TASE...")
     for ticker in ['^TA35', '^TA125']:
         try:
@@ -341,6 +342,12 @@ def fetch_tase_index():
                 if price and price > 0:
                     change_pct = ((price - prev) / prev * 100) if prev else 0
                     print(f"[Israel Econ] ✅ Yahoo {ticker}: {price:,.2f} ({change_pct:+.2f}%)")
+                    # Cache this good value for use when market is closed
+                    try:
+                        if _redis_available():
+                            _redis_set(TASE_LAST_KNOWN_KEY, json.dumps({'value': round(price, 2), 'change_pct_24h': round(change_pct, 3)}), ex=7*24*3600)
+                    except Exception:
+                        pass
                     return {
                         'index': ticker.replace('^', ''),
                         'value': round(price, 2),
@@ -354,6 +361,26 @@ def fetch_tase_index():
             print(f"[Israel Econ] Yahoo {ticker} error: {str(e)[:80]}")
             continue
 
+    # Last resort: serve cached last-known value
+    try:
+        if _redis_available():
+            cached_tase = _redis_get(TASE_LAST_KNOWN_KEY)
+            if cached_tase:
+                last = json.loads(cached_tase)
+                print(f"[Israel Econ] Using last-known TASE value: {last['value']}")
+                return {
+                    'index': 'TA35',
+                    'value': last['value'],
+                    'change_pct_24h': last.get('change_pct_24h', 0),
+                    'trend': 'unknown',
+                    'source': 'Yahoo Finance (last known)',
+                    'sparkline': [],
+                    'estimated': True,
+                    'timestamp': datetime.now(timezone.utc).isoformat()
+                }
+    except Exception as e:
+        print(f"[Israel Econ] Last-known cache read failed: {e}")
+
     return {
         'index': 'TA35',
         'value': None,
@@ -364,7 +391,6 @@ def fetch_tase_index():
         'sparkline': [],
         'timestamp': datetime.now(timezone.utc).isoformat()
     }
-
 # ========================================
 # CONFLICT & NEWS SCANNING
 # ========================================
