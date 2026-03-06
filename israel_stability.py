@@ -252,8 +252,15 @@ def fetch_tase_index():
     """
     print("[Israel Econ] Fetching TASE TA-35...")
 
-    # ── Primary: TASE official API ──
-    if TASE_API_KEY:
+    # ── Check if TASE is open (Sun–Thu, Israel time) ──
+    israel_tz = timezone(timedelta(hours=3))  # IST = UTC+3
+    now_israel = datetime.now(israel_tz)
+    tase_closed = now_israel.weekday() in (4, 5)  # 4=Friday, 5=Saturday
+    if tase_closed:
+        print(f"[Israel Econ] TASE closed (weekday={now_israel.weekday()}) — skipping to Yahoo fallback")
+
+    # ── Primary: TASE official API (only when market may be open) ──
+    if TASE_API_KEY and not tase_closed:
         try:
             headers = {
                 "accept": "application/json",
@@ -975,9 +982,14 @@ def scan_israel_stability():
             'from_cache': False
         }
 
-        # Cache the full payload
+        # Cache the full payload — but only if TASE data is valid
+        # If TASE is unavailable, use shorter TTL so it retries sooner
+        tase_ok = payload.get('economic', {}).get('tase', {}).get('value') is not None
+        cache_ttl = CACHE_TTL_SECONDS if tase_ok else 30 * 60  # 30 min retry if TASE failed
         if _redis_available():
-            _redis_set(REDIS_CACHE_KEY, payload, ex=CACHE_TTL_SECONDS)
+            _redis_set(REDIS_CACHE_KEY, payload, ex=cache_ttl)
+        if not tase_ok:
+            print("[Israel] ⚠️ TASE unavailable — cache TTL set to 30min for retry")
 
         return jsonify(payload)
 
