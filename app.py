@@ -791,6 +791,8 @@ from iran_protests import register_iran_routes
 register_iran_routes(app)
 from notam_monitor import register_notam_endpoints
 register_notam_endpoints(app)
+from israel_stability import register_israel_stability_endpoints
+register_israel_stability_endpoints(app)
 
 # ========================================
 # CONFIGURATION
