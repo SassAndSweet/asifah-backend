@@ -1005,15 +1005,90 @@ def get_lebanon_trends(days=30):
 # API ENDPOINTS
 # ========================================
 
+import threading
+
+def _background_lebanon_refresh():
+    """Run a full Lebanon scan in the background and update Redis cache."""
+    try:
+        print("[Lebanon BG] Starting background refresh...")
+        currency_data = fetch_lebanon_currency()
+        bond_data = scrape_lebanon_bonds()
+        hezbollah_data = track_hezbollah_activity(days=30)
+        try:
+            gold_data = calculate_lebanon_gold_reserves()
+        except Exception:
+            gold_data = None
+        stability = calculate_lebanon_stability(currency_data, bond_data, hezbollah_data)
+        update_lebanon_cache(currency_data, bond_data, hezbollah_data, stability.get('score', 0), gold_data)
+
+        cache = load_lebanon_cache()
+        cache_days = len(cache.get('history', {}))
+        cache_storage = 'redis' if _redis_available() else 'tmp_file'
+
+        payload = {
+            'success': True,
+            'stability': stability,
+            'currency': currency_data,
+            'bonds': bond_data,
+            'hezbollah': hezbollah_data,
+            'gold_reserves': gold_data,
+            'government': {
+                'has_president': True,
+                'president': 'Joseph Aoun',
+                'days_with_president': stability.get('days_with_president', 0),
+                'president_elected_date': '2025-01-09',
+                'parliamentary_election_date': '2026-05-10',
+                'days_until_election': stability.get('days_until_election', 0)
+            },
+            'cache_status': {
+                'storage': cache_storage,
+                'days_collected': cache_days,
+                'persistent': cache_storage == 'redis'
+            },
+            'last_updated': datetime.now(timezone.utc).isoformat(),
+            'version': '2.9.0-lebanon'
+        }
+
+        if _redis_available():
+            _redis_set(REDIS_CACHE_KEY, payload)
+        print("[Lebanon BG] ✅ Background refresh complete")
+    except Exception as e:
+        print(f"[Lebanon BG] ❌ Background refresh failed: {str(e)}")
+
+
 @app.route('/scan-lebanon-stability', methods=['GET'])
 def scan_lebanon_stability():
-    """Main stability endpoint"""
+    """Main stability endpoint — stale-while-revalidate pattern."""
     try:
         if not check_rate_limit():
             return jsonify({'error': 'Rate limit exceeded'}), 429
-        
-        print("[Lebanon] Starting scan...")
-        
+
+        force_refresh = request.args.get('refresh', '').lower() == 'true'
+        STALE_TTL = 14400   # 4 hours — serve cache without revalidating
+        REFRESH_TTL = 1800  # 30 min — trigger background refresh but still serve cache
+
+        # ── Stale-while-revalidate cache check ──
+        if not force_refresh and _redis_available():
+            cached = _redis_get(REDIS_CACHE_KEY)
+            if cached and cached.get('last_updated'):
+                try:
+                    age = (datetime.now(timezone.utc) - datetime.fromisoformat(cached['last_updated'])).total_seconds()
+                    if age < STALE_TTL:
+                        cached['from_cache'] = True
+                        cached['cache_age_minutes'] = int(age / 60)
+                        if age > REFRESH_TTL:
+                            # Data is getting stale — serve immediately, refresh in background
+                            print(f"[Lebanon] Cache is {int(age/60)}m old — serving stale, triggering background refresh")
+                            t = threading.Thread(target=_background_lebanon_refresh, daemon=True)
+                            t.start()
+                        else:
+                            print(f"[Lebanon] ✅ Serving fresh cache ({int(age/60)}m old)")
+                        return jsonify(cached)
+                except Exception:
+                    pass  # Age check failed — fall through to live scan
+
+        print("[Lebanon] No fresh cache — running live scan...")
+
         currency_data = fetch_lebanon_currency()
         bond_data = scrape_lebanon_bonds()
         hezbollah_data = track_hezbollah_activity(days=30)
