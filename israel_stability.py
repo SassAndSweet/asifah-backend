@@ -829,7 +829,6 @@ def get_israel_trends(days=30):
 # API ENDPOINTS
 # ========================================
 
-@app.route('/scan-israel-stability', methods=['GET'])
 def scan_israel_stability():
     """Main Israel stability endpoint — runs all modules and returns full payload."""
     try:
@@ -919,7 +918,6 @@ def scan_israel_stability():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
-@app.route('/api/israel-trends', methods=['GET'])
 def api_israel_trends():
     """Sparkline trend data endpoint."""
     try:
@@ -929,7 +927,6 @@ def api_israel_trends():
         return jsonify({'success': False, 'message': str(e), 'days_collected': 0}), 500
 
 
-@app.route('/api/israel-leadership', methods=['GET'])
 def api_israel_leadership():
     """Leadership status badges — lightweight, no full scan."""
     return jsonify({
@@ -940,7 +937,6 @@ def api_israel_leadership():
     })
 
 
-@app.route('/api/israel-strikes', methods=['GET'])
 def api_israel_strikes():
     """Strike/incident data for heatmap."""
     try:
@@ -950,9 +946,17 @@ def api_israel_strikes():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
-@app.route('/robots.txt')
 def robots():
     return "User-agent: *\nDisallow: /\n", 200, {'Content-Type': 'text/plain'}
+
+
+def register_israel_stability_endpoints(flask_app):
+    flask_app.add_url_rule('/scan-israel-stability', view_func=scan_israel_stability, methods=['GET'])
+    flask_app.add_url_rule('/api/israel-trends', view_func=api_israel_trends, methods=['GET'])
+    flask_app.add_url_rule('/api/israel-leadership', view_func=api_israel_leadership, methods=['GET'])
+    flask_app.add_url_rule('/api/israel-strikes', view_func=api_israel_strikes, methods=['GET'])
+    flask_app.add_url_rule('/robots.txt', view_func=robots)
+    print("[Israel Stability] ✅ Routes registered")
 
 
 def register_israel_stability_endpoints(flask_app):
