@@ -35,39 +35,6 @@ from datetime import datetime, timezone, timedelta
 from email.utils import parsedate_to_datetime
 
 # ========================================
-# FLASK APP INITIALIZATION
-# ========================================
-from flask import Blueprint
-israel_bp = Blueprint('israel_stability', __name__)
-app = israel_bp  # allows @app.route decorators to work on the blueprint
-```
-
-Then commit both files and push. The endpoint will be live at:
-```
-https://asifah-backend.onrender.com/scan-israel-stability
-
-CORS(app, resources={
-    r"/api/israel*": {
-        "origins": [
-            "https://asifahanalytics.com",
-            "https://www.asifahanalytics.com",
-            "http://localhost:*"
-        ],
-        "methods": ["GET", "OPTIONS"],
-        "allow_headers": ["Content-Type"]
-    },
-    r"/scan-israel-stability": {
-        "origins": [
-            "https://asifahanalytics.com",
-            "https://www.asifahanalytics.com",
-            "http://localhost:*"
-        ],
-        "methods": ["GET", "POST", "OPTIONS"],
-        "allow_headers": ["Content-Type"]
-    }
-})
-
-# ========================================
 # CONFIGURATION
 # ========================================
 
@@ -989,8 +956,8 @@ def robots():
 
 
 def register_israel_stability_endpoints(flask_app):
-    flask_app.register_blueprint(israel_bp)
-
-if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 5003))
-    app.run(host='0.0.0.0', port=port, debug=False)
+    flask_app.add_url_rule('/scan-israel-stability', view_func=scan_israel_stability, methods=['GET'])
+    flask_app.add_url_rule('/api/israel-trends', view_func=api_israel_trends, methods=['GET'])
+    flask_app.add_url_rule('/api/israel-leadership', view_func=api_israel_leadership, methods=['GET'])
+    flask_app.add_url_rule('/api/israel-strikes', view_func=api_israel_strikes, methods=['GET'])
+    print("[Israel Stability] ✅ Routes registered")
