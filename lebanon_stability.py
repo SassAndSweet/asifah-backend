@@ -4,7 +4,7 @@ Standalone microservice for Lebanon Stability Index
 
 CHANGELOG v2.9.0:
 - FIXED: Cache now uses Upstash Redis (persistent!) instead of /tmp (ephemeral)
-- FIXED: Expanded Hezbollah activity keyword matching
+- FIXED: Expanded Hezbollah activity keyword matchingstability 
 - FIXED: Currency 24h change now compares to yesterday's cached rate
 - FIXED: beautifulsoup4 import moved to top level with graceful fallback
 - ADDED: /api/bey-flights stub endpoint for future Aviation Edge integration
@@ -661,11 +661,483 @@ def track_hezbollah_activity(days=7):
             'activity_score': 0
         }
 
+"""
+Lebanon Security Situation Scanner v3.0.0
+New module for lebanon_stability.py
+
+Adds dynamic scanning for:
+1. Israeli Military Presence (tiered)
+2. Ceasefire Status (dynamic, replaces hardcoded True)
+3. UNIFIL Status
+4. Hezbollah Leadership Status
+
+Paste this ENTIRE block into lebanon_stability.py
+ABOVE the existing calculate_lebanon_stability() function.
+"""
+
+# ========================================
+# SECURITY SITUATION SCANNER (v3.0.0)
+# ========================================
+
+# Israeli military presence tier keywords
+ISRAEL_PRESENCE_TIERS = {
+    'full_invasion': {
+        'keywords': [
+            'full ground invasion lebanon', 'full scale invasion lebanon',
+            'idf invades lebanon', 'israel invades lebanon',
+            'ground invasion southern lebanon', 'israeli invasion of lebanon',
+            'occupation of southern lebanon', 'idf occupies lebanon',
+            'israeli troops advance deep into lebanon',
+            'idf pushes north of litani', 'litani river crossing',
+        ],
+        'level': 4,
+        'label': 'Full Ground Invasion',
+        'color': '#dc2626',
+        'badge_color': '#991b1b',
+        'description': 'Large-scale IDF ground operations across southern Lebanon'
+    },
+    'active_ground_ops': {
+        'keywords': [
+            'idf ground operation lebanon', 'israeli ground troops lebanon',
+            'idf operating inside lebanon', 'ground incursion lebanon',
+            'israeli forces entered lebanon', 'idf troops in lebanon',
+            'idf raids southern lebanon', 'armored vehicles lebanon',
+            'idf buffer zone lebanon', 'israeli troops southern lebanon',
+            'ground operation south lebanon', 'idf soldiers lebanon',
+            'tank lebanon border', 'idf patrol inside lebanon',
+            'idf engineering lebanon', 'tunnel operation lebanon',
+            'limited ground operation lebanon', 'ground maneuver lebanon',
+        ],
+        'level': 3,
+        'label': 'Active Ground Operations',
+        'color': '#ea580c',
+        'badge_color': '#9a3412',
+        'description': 'IDF conducting ground operations in southern Lebanon border zone'
+    },
+    'limited_incursions': {
+        'keywords': [
+            'cross border raid lebanon', 'limited incursion lebanon',
+            'idf brief incursion', 'special forces lebanon',
+            'commando raid lebanon', 'targeted raid lebanon',
+            'idf crossed border lebanon', 'border skirmish lebanon',
+        ],
+        'level': 2,
+        'label': 'Limited Incursions',
+        'color': '#f59e0b',
+        'badge_color': '#92400e',
+        'description': 'Periodic IDF cross-border raids and special operations'
+    },
+    'no_presence': {
+        'keywords': [],
+        'level': 1,
+        'label': 'No Ground Presence',
+        'color': '#10b981',
+        'badge_color': '#065f46',
+        'description': 'No reported IDF ground forces inside Lebanon'
+    }
+}
+
+# Ceasefire status keywords
+CEASEFIRE_KEYWORDS = {
+    'collapsed': [
+        'ceasefire collapsed', 'ceasefire broken', 'ceasefire violated',
+        'ceasefire ended', 'ceasefire over', 'end of ceasefire',
+        'ceasefire falls apart', 'no longer ceasefire',
+        'resumed hostilities lebanon', 'resumed fighting lebanon',
+        'war resumes lebanon', 'full scale war lebanon israel',
+        'israel breaks ceasefire lebanon', 'ceasefire dead',
+        'ceasefire in tatters', 'ceasefire crumbled',
+    ],
+    'deteriorating': [
+        'ceasefire violations', 'ceasefire under strain',
+        'ceasefire shaky', 'ceasefire fragile', 'ceasefire tested',
+        'ceasefire at risk', 'threatens ceasefire',
+        'ceasefire breaches', 'repeated violations',
+        'ceasefire hanging by thread', 'despite ceasefire',
+        'ceasefire increasingly fragile',
+    ],
+    'holding': [
+        'ceasefire holds', 'ceasefire holding', 'ceasefire intact',
+        'ceasefire maintained', 'respecting ceasefire',
+        'ceasefire in place', 'calm along border',
+        'ceasefire stable', 'ceasefire observed',
+    ]
+}
+
+# UNIFIL status keywords
+UNIFIL_KEYWORDS = {
+    'withdrawn': [
+        'unifil withdrawn', 'unifil leaves', 'unifil departed',
+        'unifil pullout complete', 'unifil withdrawal complete',
+        'peacekeepers left lebanon', 'unifil mission ended',
+    ],
+    'withdrawing': [
+        'unifil withdrawing', 'unifil drawdown', 'unifil pullout',
+        'unifil withdrawal', 'unifil leaving', 'unifil departure',
+        'unifil reduces', 'unifil scaling down',
+        'peacekeepers withdrawing', 'unifil mandate expires',
+        'unifil end of mission', 'unifil scheduled departure',
+    ],
+    'under_attack': [
+        'unifil attacked', 'unifil hit', 'unifil struck',
+        'unifil bunker hit', 'unifil base attacked',
+        'unifil shelled', 'unifil personnel injured',
+        'unifil peacekeepers killed', 'unifil casualties',
+        'unifil convoy attacked', 'fired on unifil',
+        'unifil position struck', 'attack on peacekeepers',
+        'unifil targeted', 'unifil under fire',
+    ],
+    'operational': [
+        'unifil patrol', 'unifil operational', 'unifil monitoring',
+        'unifil presence', 'unifil mandate renewed',
+        'unifil deployed', 'unifil blue line',
+    ]
+}
+
+# Hezbollah leadership database
+HEZBOLLAH_LEADERSHIP = {
+    'naim_qassem': {
+        'name': 'Naim Qassem',
+        'title': 'Secretary-General',
+        'title_ar': 'الأمين العام',
+        'since': '2024-10-29',
+        'note': 'Replaced Hassan Nasrallah after assassination Sep 27, 2024',
+        'keywords_alive': ['naim qassem speech', 'qassem statement', 'qassem addresses',
+                           'qassem says', 'qassem warns', 'qassem vows',
+                           'hezbollah leader says', 'hezbollah chief'],
+        'keywords_killed': ['naim qassem killed', 'qassem assassinated', 'qassem dead',
+                            'qassem eliminated', 'hezbollah leader killed',
+                            'hezbollah secretary general killed'],
+        'keywords_unknown': ['qassem whereabouts', 'qassem missing', 'qassem unconfirmed'],
+    },
+    'hashem_safieddine': {
+        'name': 'Hashem Safieddine',
+        'title': 'Head of Executive Council',
+        'title_ar': 'رئيس المجلس التنفيذي',
+        'since': '2000-01-01',
+        'note': 'Reported killed Oct 2024; status disputed',
+        'keywords_alive': ['safieddine alive', 'safieddine speech', 'safieddine statement',
+                           'safieddine appears', 'safieddine resurfaces'],
+        'keywords_killed': ['safieddine killed', 'safieddine dead', 'safieddine eliminated',
+                            'safieddine assassinated', 'safieddine struck'],
+        'keywords_unknown': ['safieddine fate', 'safieddine status unknown', 'safieddine missing',
+                             'safieddine unconfirmed'],
+    },
+    'ibrahim_aqil_successor': {
+        'name': 'Radwan Force Commander',
+        'title': 'Radwan Force (Elite Unit)',
+        'title_ar': 'قائد قوة الرضوان',
+        'since': None,
+        'note': 'Ibrahim Aqil killed Sep 2024. Successor identity unclear.',
+        'keywords_alive': ['radwan force commander', 'new radwan commander',
+                           'radwan force operations', 'radwan force active'],
+        'keywords_killed': ['radwan commander killed', 'radwan force decimated',
+                            'radwan force destroyed', 'radwan leadership eliminated'],
+        'keywords_unknown': ['radwan force status', 'radwan commander unknown',
+                             'radwan force reorganizing'],
+    },
+    'fuad_shukr_successor': {
+        'name': 'Senior Military Commander',
+        'title': 'Military Operations Chief',
+        'title_ar': 'رئيس العمليات العسكرية',
+        'since': None,
+        'note': 'Fuad Shukr killed Jul 2024. Replacement status unclear.',
+        'keywords_alive': ['hezbollah military chief', 'hezbollah military commander',
+                           'hezbollah military operations'],
+        'keywords_killed': ['hezbollah commander killed', 'senior hezbollah military killed',
+                            'hezbollah military chief eliminated'],
+        'keywords_unknown': ['hezbollah military command uncertain', 'hezbollah command structure',
+                             'hezbollah reorganizing military'],
+    }
+}
+
+
+def scan_security_situation(days=7):
+    """
+    Scan news for Lebanon security situation indicators.
+    Returns structured data for:
+    - Israeli military presence tier
+    - Ceasefire status
+    - UNIFIL status
+    - Hezbollah leadership status
+
+    Uses Google News RSS (same pattern as existing Hezbollah activity tracker).
+    """
+    import xml.etree.ElementTree as ET
+
+    print("[Security Situation] Starting scan...")
+
+    # ── 1. Gather articles ──
+    search_queries = [
+        'Israel ground troops Lebanon',
+        'IDF operation southern Lebanon',
+        'ceasefire Lebanon Israel',
+        'UNIFIL Lebanon',
+        'UNIFIL attacked',
+        'Hezbollah leadership',
+        'Naim Qassem',
+        'Lebanon border Israel military',
+        'IDF buffer zone Lebanon',
+        'Lebanon ceasefire violated OR collapsed OR broken',
+    ]
+
+    all_articles = []
+    for query in search_queries:
+        try:
+            q = query.replace(' ', '+')
+            url = f"https://news.google.com/rss/search?q={q}&hl=en&gl=US&ceid=US:en"
+            response = requests.get(url, timeout=10, headers={'User-Agent': 'Mozilla/5.0'})
+
+            if response.status_code == 200:
+                root = ET.fromstring(response.content)
+                items = root.findall('.//item')
+
+                for item in items[:8]:
+                    title_elem = item.find('title')
+                    link_elem = item.find('link')
+                    pub_elem = item.find('pubDate')
+
+                    if title_elem is not None:
+                        include = True
+                        pub_str = pub_elem.text if pub_elem is not None else ''
+                        if pub_str:
+                            try:
+                                from email.utils import parsedate_to_datetime
+                                pub_date = parsedate_to_datetime(pub_str)
+                                cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+                                if pub_date < cutoff:
+                                    include = False
+                            except:
+                                pass
+
+                        if include:
+                            all_articles.append({
+                                'title': title_elem.text or '',
+                                'url': link_elem.text if link_elem is not None else '',
+                                'published': pub_str,
+                                'query': query
+                            })
+        except Exception as e:
+            print(f"[Security Situation] RSS error for '{query}': {str(e)[:80]}")
+            continue
+
+    print(f"[Security Situation] Gathered {len(all_articles)} articles")
+
+    # Build combined text corpus for matching
+    all_titles_lower = ' '.join(a['title'].lower() for a in all_articles)
+
+    # ── 2. Israeli Military Presence ──
+    israel_presence = ISRAEL_PRESENCE_TIERS['no_presence'].copy()
+    israel_presence['indicators'] = []
+
+    for tier_key in ['full_invasion', 'active_ground_ops', 'limited_incursions']:
+        tier = ISRAEL_PRESENCE_TIERS[tier_key]
+        matched = []
+        for kw in tier['keywords']:
+            if kw in all_titles_lower:
+                matched.append(kw)
+                # Find the matching article
+                for a in all_articles:
+                    if kw in a['title'].lower():
+                        israel_presence['indicators'].append({
+                            'phrase': kw,
+                            'title': a['title'][:120],
+                            'url': a['url'],
+                            'published': a['published']
+                        })
+                        break
+        if matched:
+            israel_presence = {
+                'level': tier['level'],
+                'label': tier['label'],
+                'color': tier['color'],
+                'badge_color': tier['badge_color'],
+                'description': tier['description'],
+                'matched_keywords': matched[:5],
+                'indicators': israel_presence.get('indicators', [])[:5]
+            }
+            break  # Take the highest tier that matched
+
+    print(f"[Security Situation] Israeli presence: {israel_presence['label']} (level {israel_presence['level']})")
+
+    # ── 3. Ceasefire Status ──
+    ceasefire_scores = {'collapsed': 0, 'deteriorating': 0, 'holding': 0}
+    ceasefire_indicators = []
+
+    for status, keywords in CEASEFIRE_KEYWORDS.items():
+        for kw in keywords:
+            if kw in all_titles_lower:
+                ceasefire_scores[status] += 1
+                for a in all_articles:
+                    if kw in a['title'].lower():
+                        ceasefire_indicators.append({
+                            'status': status,
+                            'phrase': kw,
+                            'title': a['title'][:120],
+                            'url': a['url']
+                        })
+                        break
+
+    # Determine ceasefire status (highest score wins, with priority weighting)
+    if ceasefire_scores['collapsed'] >= 2 or (ceasefire_scores['collapsed'] >= 1 and ceasefire_scores['holding'] == 0):
+        ceasefire_status = 'collapsed'
+        ceasefire_label = 'Collapsed'
+        ceasefire_color = '#dc2626'
+        ceasefire_icon = '💥'
+        ceasefire_active = False
+    elif ceasefire_scores['deteriorating'] >= 2 or (ceasefire_scores['deteriorating'] >= 1 and ceasefire_scores['holding'] == 0):
+        ceasefire_status = 'deteriorating'
+        ceasefire_label = 'Deteriorating'
+        ceasefire_color = '#ea580c'
+        ceasefire_icon = '⚠️'
+        ceasefire_active = False  # No bonus if deteriorating
+    elif ceasefire_scores['holding'] >= 1:
+        ceasefire_status = 'holding'
+        ceasefire_label = 'Holding'
+        ceasefire_color = '#10b981'
+        ceasefire_icon = '✅'
+        ceasefire_active = True
+    else:
+        # Default: if active ground ops or invasion detected, ceasefire is collapsed
+        if israel_presence['level'] >= 3:
+            ceasefire_status = 'collapsed'
+            ceasefire_label = 'Collapsed'
+            ceasefire_color = '#dc2626'
+            ceasefire_icon = '💥'
+            ceasefire_active = False
+        else:
+            ceasefire_status = 'unknown'
+            ceasefire_label = 'Unknown'
+            ceasefire_color = '#6b7280'
+            ceasefire_icon = '❓'
+            ceasefire_active = False  # Conservative: no bonus if unknown
+
+    print(f"[Security Situation] Ceasefire: {ceasefire_label} (scores: {ceasefire_scores})")
+
+    # ── 4. UNIFIL Status ──
+    unifil_scores = {'withdrawn': 0, 'withdrawing': 0, 'under_attack': 0, 'operational': 0}
+    unifil_indicators = []
+
+    for status, keywords in UNIFIL_KEYWORDS.items():
+        for kw in keywords:
+            if kw in all_titles_lower:
+                unifil_scores[status] += 1
+                for a in all_articles:
+                    if kw in a['title'].lower():
+                        unifil_indicators.append({
+                            'status': status,
+                            'phrase': kw,
+                            'title': a['title'][:120],
+                            'url': a['url']
+                        })
+                        break
+
+    if unifil_scores['withdrawn'] >= 1:
+        unifil_status = 'withdrawn'
+        unifil_label = 'Withdrawn'
+        unifil_color = '#6b7280'
+        unifil_icon = '🚫'
+    elif unifil_scores['under_attack'] >= 1:
+        unifil_status = 'under_attack'
+        unifil_label = 'Under Attack'
+        unifil_color = '#dc2626'
+        unifil_icon = '🔴'
+    elif unifil_scores['withdrawing'] >= 1:
+        unifil_status = 'withdrawing'
+        unifil_label = 'Withdrawing'
+        unifil_color = '#f59e0b'
+        unifil_icon = '⏳'
+    else:
+        unifil_status = 'operational'
+        unifil_label = 'Operational'
+        unifil_color = '#10b981'
+        unifil_icon = '🟢'
+
+    print(f"[Security Situation] UNIFIL: {unifil_label} (scores: {unifil_scores})")
+
+    # ── 5. Hezbollah Leadership ──
+    leadership_results = {}
+
+    for key, leader in HEZBOLLAH_LEADERSHIP.items():
+        status = 'unknown'
+        status_label = 'STATUS UNKNOWN'
+        status_color = '#6b7280'
+        matched_indicator = None
+
+        # Check killed first (highest priority)
+        for kw in leader['keywords_killed']:
+            if kw in all_titles_lower:
+                status = 'killed'
+                status_label = 'KILLED'
+                status_color = '#dc2626'
+                for a in all_articles:
+                    if kw in a['title'].lower():
+                        matched_indicator = {'phrase': kw, 'title': a['title'][:120], 'url': a['url']}
+                        break
+                break
+
+        # Then check alive
+        if status == 'unknown':
+            for kw in leader['keywords_alive']:
+                if kw in all_titles_lower:
+                    status = 'alive'
+                    status_label = 'ACTIVE'
+                    status_color = '#10b981'
+                    for a in all_articles:
+                        if kw in a['title'].lower():
+                            matched_indicator = {'phrase': kw, 'title': a['title'][:120], 'url': a['url']}
+                            break
+                    break
+
+        leadership_results[key] = {
+            'name': leader['name'],
+            'title': leader['title'],
+            'title_ar': leader['title_ar'],
+            'since': leader['since'],
+            'note': leader['note'],
+            'status': status,
+            'status_label': status_label,
+            'status_color': status_color,
+            'indicator': matched_indicator
+        }
+
+        print(f"[Security Situation] {leader['name']}: {status_label}")
+
+    # ── 6. Build response ──
+    result = {
+        'israeli_presence': israel_presence,
+        'ceasefire': {
+            'status': ceasefire_status,
+            'label': ceasefire_label,
+            'color': ceasefire_color,
+            'icon': ceasefire_icon,
+            'active': ceasefire_active,
+            'scores': ceasefire_scores,
+            'indicators': ceasefire_indicators[:5],
+            'original_ceasefire_date': '2024-11-27',
+        },
+        'unifil': {
+            'status': unifil_status,
+            'label': unifil_label,
+            'color': unifil_color,
+            'icon': unifil_icon,
+            'scores': unifil_scores,
+            'indicators': unifil_indicators[:5],
+            'mandate_note': 'UNIFIL mandate renewal pending; scheduled drawdown by end of 2027',
+        },
+        'hezbollah_leadership': leadership_results,
+        'total_articles_scanned': len(all_articles),
+        'scan_timestamp': datetime.now(timezone.utc).isoformat()
+    }
+
+    print(f"[Security Situation] ✅ Scan complete")
+    return result
+    
 # ========================================
 # STABILITY CALCULATION
 # ========================================
 
-def calculate_lebanon_stability(currency_data, bond_data, hezbollah_data):
+def calculate_lebanon_stability(currency_data, bond_data, hezbollah_data, security_data=None):
     """
     Calculate Lebanon stability score (0-100)
     
@@ -734,20 +1206,54 @@ def calculate_lebanon_stability(currency_data, bond_data, hezbollah_data):
     if 0 <= days_until_election <= 90:
         election_bonus = 5
     
-    # ── NEW: Ceasefire bonus ──
-    # Nov 2024 ceasefire with Israel — major stabilizing factor
-    ceasefire_active = True  # TODO: make dynamic via news scanning
-    ceasefire_bonus = 8 if ceasefire_active else 0
+    # ── Ceasefire bonus (v3.0.0 — dynamic!) ──
+    if security_data and 'ceasefire' in security_data:
+        ceasefire_active = security_data['ceasefire'].get('active', False)
+        ceasefire_status = security_data['ceasefire'].get('status', 'unknown')
+    else:
+        ceasefire_active = False
+        ceasefire_status = 'unknown'
+    
+    if ceasefire_active:
+        ceasefire_bonus = 8
+    elif ceasefire_status == 'deteriorating':
+        ceasefire_bonus = 3  # Partial credit — still somewhat restraining
+    else:
+        ceasefire_bonus = 0  # Collapsed or unknown — no bonus
+    
+    # ── Israeli ground presence penalty (v3.0.0) ──
+    ground_ops_penalty = 0
+    if security_data and 'israeli_presence' in security_data:
+        presence_level = security_data['israeli_presence'].get('level', 1)
+        if presence_level >= 4:
+            ground_ops_penalty = 15  # Full invasion
+        elif presence_level >= 3:
+            ground_ops_penalty = 10  # Active ground ops
+        elif presence_level >= 2:
+            ground_ops_penalty = 5   # Limited incursions
+    
+    # ── UNIFIL penalty (v3.0.0) ──
+    unifil_penalty = 0
+    if security_data and 'unifil' in security_data:
+        unifil_status_val = security_data['unifil'].get('status', 'operational')
+        if unifil_status_val == 'withdrawn':
+            unifil_penalty = 8
+        elif unifil_status_val == 'under_attack':
+            unifil_penalty = 6
+        elif unifil_status_val == 'withdrawing':
+            unifil_penalty = 4
     
     # ── NEW: Humanitarian floor ──
     # Chronic crisis drag: power, water, healthcare, brain drain
     humanitarian_drag = -5
     
-    # ── Final score ──
+    # ── Final score (v3.0.0 — includes security situation) ──
     stability_score = (base_score 
                       - currency_impact 
                       - bond_impact 
                       - hezbollah_impact 
+                      - ground_ops_penalty
+                      - unifil_penalty
                       + presidential_bonus 
                       + election_bonus
                       + ceasefire_bonus
@@ -770,17 +1276,22 @@ def calculate_lebanon_stability(currency_data, bond_data, hezbollah_data):
         risk_level = "Critical"
         risk_color = "red"
     
-    # Trend — smarter logic
+    # Trend — smarter logic (v3.0.0)
     trend = "stable"
-    if hezbollah_data and hezbollah_data.get('activity_score', 0) > 50:
+    if security_data and security_data.get('israeli_presence', {}).get('level', 1) >= 3:
+        trend = "worsening"
+    elif security_data and security_data.get('ceasefire', {}).get('status') == 'collapsed':
+        trend = "worsening"
+    elif hezbollah_data and hezbollah_data.get('activity_score', 0) > 50:
         trend = "worsening"
     elif currency_data and currency_data.get('change_24h', 0) > 2:
         trend = "worsening"
     elif days_until_election <= 90 and days_with_president > 180:
+        trend = "improving"<= 90 and days_with_president > 180:
         trend = "improving"
     
     print(f"[Lebanon Stability] ✅ Score: {stability_score}/100 ({risk_level})")
-    print(f"[Lebanon Stability] Components: base={base_score}, currency=-{currency_impact}, bonds=-{bond_impact}, hez=-{hezbollah_impact:.0f}, president=+{presidential_bonus}, election=+{election_bonus}, ceasefire=+{ceasefire_bonus}, humanitarian={humanitarian_drag}")
+    print(f"[Lebanon Stability] Components: base={base_score}, currency=-{currency_impact}, bonds=-{bond_impact}, hez=-{hezbollah_impact:.0f}, ground_ops=-{ground_ops_penalty}, unifil=-{unifil_penalty}, president=+{presidential_bonus}, election=+{election_bonus}, ceasefire=+{ceasefire_bonus}, humanitarian={humanitarian_drag}")
 
     return {
         'score': stability_score,
@@ -792,6 +1303,8 @@ def calculate_lebanon_stability(currency_data, bond_data, hezbollah_data):
             'currency_impact': -currency_impact,
             'bond_impact': -bond_impact,
             'hezbollah_impact': round(-hezbollah_impact, 1),
+            'ground_ops_penalty': -ground_ops_penalty,
+            'unifil_penalty': -unifil_penalty,
             'presidential_bonus': presidential_bonus,
             'election_bonus': election_bonus,
             'ceasefire_bonus': ceasefire_bonus,
@@ -1018,7 +1531,14 @@ def _background_lebanon_refresh():
             gold_data = calculate_lebanon_gold_reserves()
         except Exception:
             gold_data = None
-        stability = calculate_lebanon_stability(currency_data, bond_data, hezbollah_data)
+        # v3.0.0: Security situation scan
+        try:
+            security_data = scan_security_situation(days=7)
+            print(f"[Lebanon BG] ✅ Security: Israeli presence={security_data['israeli_presence']['label']}, Ceasefire={security_data['ceasefire']['label']}")
+        except Exception as e:
+            print(f"[Lebanon BG] ❌ Security scan failed: {str(e)}")
+            security_data = None
+        stability = calculate_lebanon_stability(currency_data, bond_data, hezbollah_data, security_data)
         update_lebanon_cache(currency_data, bond_data, hezbollah_data, stability.get('score', 0), gold_data)
 
         cache = load_lebanon_cache()
@@ -1032,6 +1552,7 @@ def _background_lebanon_refresh():
             'bonds': bond_data,
             'hezbollah': hezbollah_data,
             'gold_reserves': gold_data,
+            'security_situation': security_data,
             'government': {
                 'has_president': True,
                 'president': 'Joseph Aoun',
@@ -1046,7 +1567,7 @@ def _background_lebanon_refresh():
                 'persistent': cache_storage == 'redis'
             },
             'last_updated': datetime.now(timezone.utc).isoformat(),
-            'version': '2.9.0-lebanon'
+            'version': '3.0.0-lebanon'
         }
 
         if _redis_available():
